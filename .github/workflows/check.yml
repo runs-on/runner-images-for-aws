@@ -1,0 +1,21 @@
+name: Check
+concurrency: ${{ github.ref }}
+on:
+  schedule:
+    - cron: '0 */5 * * *'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      PUSH: true
+      SUBNET_ID: ${{ secrets.SUBNET_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials from Test account
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - run: bin/check

@@ -6,8 +6,6 @@ set -o pipefail
 # Fetch the latest release from the upstream repository
 RELEASES="$(curl -s https://api.github.com/repos/actions/runner-images/releases | jq -r '.[].tag_name' | grep ubuntu22)"
 
-
-
 for release in $RELEASES ; do
   RELEASE_DATE="${release##*/}"
   RELEASE_DIST="${release%/*}"
@@ -25,10 +23,20 @@ for release in $RELEASES ; do
   else
     ./bin/pull "$release"
     ./bin/patch "$release"
+    ./bin/build "$release"
 
     if [ "$PUSH" = "true" ]; then
+      if [ "$CI" = "true" ]; then
+        git config --global user.name "Cyril Rohr"
+        git config --global user.email "ops@runs-on.com"
+      fi
+
       git add releases/"$release"
-      git commit -m "Pull and patch $RELEASE"
+      git commit -m "Pull and patch $release"
+    fi
+
+    if [ -n "$GITHUB_OUTPUT" ]; then
+      echo "release=$release" >> "$GITHUB_OUTPUT"
     fi
   fi
 done
