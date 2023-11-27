@@ -1,0 +1,48 @@
+#!/bin/bash
+# Deregisters old AMIs and deletes associated snapshots, in all regions
+
+set -e
+set -o pipefail
+
+APPLICATION="RunsOn"
+REGIONS="$(aws ec2 describe-regions --query "Regions[].RegionName" --output text)"
+# Number of days to keep AMIs
+DAYS_TO_KEEP=${DAYS_TO_KEEP:=60}
+# Define the age threshold in seconds (60 days)
+AGE_THRESHOLD=$((DAYS_TO_KEEP*24*3600))
+# Get the current timestamp in seconds since epoch
+CURRENT_TIMESTAMP=$(date +%s)
+
+for region in ${REGIONS[@]}; do
+    echo "---- Region: ${region} ---"
+    # List all your AMIs and extract relevant information using the AWS CLI
+    image_count=$(aws ec2 describe-images --owner self --filters "Name=tag:application, Values=${APPLICATION}" --query 'length(Images)' --region "$region" --output text)
+    echo "     Total AMIs in this region: ${image_count}"
+  
+    if [ "$image_count" -lt 2 ]; then
+      echo "     Less than 2 AMIs found, skipping"
+      continue
+    fi
+
+    aws ec2 describe-images --owner self --region "${region}" --filters "Name=tag:application, Values=${APPLICATION}" --query 'Images[*].[Name,ImageId,CreationDate]' --output text | \
+      while read -r name image_id creation_date; do
+        # Parse the creation date into seconds since epoch
+        image_timestamp=$(date -d "$creation_date" +%s)
+  
+        # Calculate the age of the AMI in seconds
+        age=$((CURRENT_TIMESTAMP - image_timestamp))
+  
+        # Check if the AMI is older than the threshold
+        if [ $age -gt $AGE_THRESHOLD ]; then    
+          echo "     ! Deregistering AMI: ${image_id} (${name}) created on $creation_date"
+          snapshot_id=$(aws ec2 describe-images --image-ids "$image_id" --query "Images[].BlockDeviceMappings[].Ebs.SnapshotId" --region "${region}" --output text)
+          if [ "$DRY_RUN" = "true" ]; then
+            echo "     DRY_RUN is set to true, skipping deregistering AMI ${image_id} and deleting snapshot ${snapshot_id}"
+            continue
+          fi
+          aws ec2 deregister-image --image-id "$image_id" --region "${region}"
+          echo "     ! Deleting snapshot ${snapshot_id} for AMI ${image_id}"
+          aws ec2 delete-snapshot --snapshot-id "${snapshot_id}" --region "${region}"
+        fi
+      done
+done
