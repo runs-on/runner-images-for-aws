@@ -1,0 +1,34 @@
+#!/bin/bash
+
+set -e
+set -o pipefail
+
+# Fetch the latest release from the upstream repository
+RELEASES="$(curl -s https://api.github.com/repos/actions/runner-images/releases | jq -r '.[].tag_name' | grep ubuntu22)"
+
+
+
+for release in $RELEASES ; do
+  RELEASE_DATE="${release##*/}"
+  RELEASE_DIST="${release%/*}"
+
+  printf "\n## RELEASE_DIST=%s RELEASE_DATE=%s\n" "$RELEASE_DIST" "$RELEASE_DATE"
+
+  if [[ "$RELEASE_DATE" < "202311" ]]; then
+    echo "$RELEASE_DATE is a too old release. Not supported."
+    exit 0
+  fi
+
+  if [ -d "releases/$release" ]; then
+    echo "Skipping $release, already exists"
+    continue
+  else
+    ./bin/pull "$release"
+    ./bin/patch "$release"
+
+    if [ "$PUSH" = "true" ]; then
+      git add releases/"$release"
+      git commit -m "Pull and patch $RELEASE"
+    fi
+  fi
+done

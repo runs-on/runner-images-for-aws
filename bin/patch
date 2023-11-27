@@ -1,0 +1,62 @@
+#!/usr/bin/env ruby
+require "pathname"
+require "fileutils"
+require "tempfile"
+
+RELEASE_DIR = Pathname.new("releases/#{ARGV[0]}")
+
+puts "Patching #{RELEASE_DIR}..."
+
+unless RELEASE_DIR.exist?
+  puts "#{RELEASE_DIR.to_s} does not exist"
+  exit 1
+end
+
+RELEASE_DIR.join("images/ubuntu/custom").mkpath
+FileUtils.cp("patches/ubuntu/waagent.conf", RELEASE_DIR.join("images/ubuntu/custom/waagent.conf"), verbose: true)
+
+content = RELEASE_DIR.join("images/ubuntu/scripts/helpers/install.sh").read
+RELEASE_DIR.join("images/ubuntu/scripts/helpers/install.sh").open("a") do |f|
+  f.puts File.read("patches/ubuntu/install.sh") unless content.include?("retry_command")
+end
+
+# Those commands fail sometimes, so we need to retry them
+content = RELEASE_DIR.join("images/ubuntu/scripts/build/install-java-tools.sh").read
+RELEASE_DIR.join("images/ubuntu/scripts/build/install-java-tools.sh").open("w+") do |f|
+  f.puts content.gsub("apt-get -y install temurin", "retry_command 5 apt-get -y install temurin")
+end unless content.include?("retry_command")
+
+# Extract build { } block from Azure template
+build = %x(awk '/^build {$/,/^}$/' '#{RELEASE_DIR.join("images/ubuntu/templates/ubuntu-22.04.pkr.hcl")}')
+build.gsub!(%{sources = ["source.azure-arm.build_image"]}, %Q{
+  sources = ["source.amazon-ebs.build_ebs"]
+
+  # Dummy file added to please Azure script compatibility
+  provisioner "file" {
+    destination = "/tmp/waagent.conf"
+    source      = "${path.root}/../custom/waagent.conf"
+  }
+
+  provisioner "shell" {
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    inline          = ["mv /tmp/waagent.conf /etc"]
+  }
+}) or fail("Failed to patch provisioner")
+
+build.gsub!(%Q{"DEBIAN_FRONTEND=noninteractive"]}, %Q{"DEBIAN_FRONTEND=noninteractive"]
+    max_retries = 5
+}) or fail("Failed to patch provisioner")
+
+build.gsub!(%Q{
+  provisioner "shell" {
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    inline          = ["sleep 30", "/usr/sbin/waagent -force -deprovision+user && export HISTSIZE=0 && sync"]
+  }
+}, "") or fail("Failed to patch provisioner")
+
+# Generate final HCL template for AWS
+tmpfile = Tempfile.new(["ubuntu-22.04-aws", ".pkr.hcl"])
+tmpfile.puts File.read("patches/ubuntu/template-start.hcl")
+tmpfile.puts build
+tmpfile.close
+FileUtils.cp(tmpfile.path, RELEASE_DIR.join("images/ubuntu/templates/ubuntu-22.04-aws.pkr.hcl"), verbose: true)
