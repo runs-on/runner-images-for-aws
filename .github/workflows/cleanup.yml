@@ -9,7 +9,7 @@ on:
     - cron: '0 2 * * *'
 
 jobs:
-  check:
+  cleanup:
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
