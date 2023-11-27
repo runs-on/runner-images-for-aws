@@ -30,4 +30,4 @@ case "$RELEASE_DIST" in
 esac
 
 packer init "releases/$RELEASE/$PACKER_TEMPLATE"
-time packer build "releases/$RELEASE/$PACKER_TEMPLATE"
+time packer build -timestamp-ui "releases/$RELEASE/$PACKER_TEMPLATE"

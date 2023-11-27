@@ -1,0 +1,13 @@
+#!/bin/bash
+set -e
+set -o pipefail
+
+INSTANCE_IDS=$(aws ec2 describe-instances \
+  --filters "Name=tag:application,Values=RunsOn" "Name=instance-state-name,Values=running" \
+  --query 'Reservations[].Instances[].InstanceId' \
+  --output text)
+
+for instance_id in $INSTANCE_IDS; do
+  echo "Terminating instance $instance_id"
+  aws ec2 terminate-instances --instance-ids "$instance_id"
+done

@@ -96,7 +96,7 @@ source "amazon-ebs" "build_ebs" {
   # make AMIs publicly accessible
   ami_groups                                = ["all"]
   ebs_optimized                             = true
-  spot_instance_types                       = ["c7a.xlarge", "c6a.xlarge", "m5zn.xlarge"]
+  spot_instance_types                       = ["c7a.xlarge", "m5zn.xlarge"]
   spot_price                                = "1.00"
   region                                    = "${var.region}"
   ssh_username                              = "ubuntu"
@@ -118,6 +118,12 @@ source "amazon-ebs" "build_ebs" {
     volume_type = "${var.volume_type}"
     volume_size = "${var.volume_size}"
     delete_on_termination = "true"
+  }
+
+  run_tags = {
+    creator     = "Packer"
+    contact     = "ops@runs-on.com"
+    application = "RunsOn"
   }
 
   tags = {
