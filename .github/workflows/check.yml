@@ -10,7 +10,6 @@ on:
 
 jobs:
   check:
-    timeout-minutes: 300
     runs-on: ubuntu-latest
     env:
       PUSH: true
@@ -24,6 +23,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
       - run: bin/check
+        timeout-minutes: 300
       - if: always()
         # make sure we terminate instances even if workflow is cancelled
         run: bin/cleanup-instances

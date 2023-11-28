@@ -39,5 +39,8 @@ for release in $RELEASES ; do
     if [ -n "$GITHUB_OUTPUT" ]; then
       echo "release=$release" >> "$GITHUB_OUTPUT"
     fi
+
+    # only perform one release per run
+    exit 0
   fi
 done

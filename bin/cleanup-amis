@@ -24,17 +24,19 @@ for region in ${REGIONS[@]}; do
       continue
     fi
 
-    aws ec2 describe-images --owner self --region "${region}" --filters "Name=tag:application, Values=${APPLICATION}" --query 'Images[*].[Name,ImageId,CreationDate]' --output text | \
+    aws ec2 describe-images --owner self --region "${region}" --filters "Name=tag:application, Values=${APPLICATION}" --query 'Images[*] | sort_by(@, &CreationDate)[].[Name,ImageId,CreationDate]' --output text | \
       while read -r name image_id creation_date; do
         # Parse the creation date into seconds since epoch
         image_timestamp=$(date -d "$creation_date" +%s)
   
         # Calculate the age of the AMI in seconds
         age=$((CURRENT_TIMESTAMP - image_timestamp))
+
+        echo "     AMI: ${image_id} (${name}) created on $creation_date ($age seconds ago)"
   
         # Check if the AMI is older than the threshold
         if [ $age -gt $AGE_THRESHOLD ]; then    
-          echo "     ! Deregistering AMI: ${image_id} (${name}) created on $creation_date"
+          echo "     ! Deregistering AMI..."
           snapshot_id=$(aws ec2 describe-images --image-ids "$image_id" --query "Images[].BlockDeviceMappings[].Ebs.SnapshotId" --region "${region}" --output text)
           if [ "$DRY_RUN" = "true" ]; then
             echo "     DRY_RUN is set to true, skipping deregistering AMI ${image_id} and deleting snapshot ${snapshot_id}"
