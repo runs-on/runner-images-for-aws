@@ -33,6 +33,7 @@ for release in $RELEASES ; do
 
       git add releases/"$release"
       git commit -m "Pull and patch $release"
+      git push origin main
     fi
 
     if [ -n "$GITHUB_OUTPUT" ]; then
