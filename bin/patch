@@ -43,9 +43,9 @@ build.gsub!(%{sources = ["source.azure-arm.build_image"]}, %Q{
   }
 }) or fail("Failed to patch provisioner")
 
-build.gsub!(%Q{"DEBIAN_FRONTEND=noninteractive"]}, %Q{"DEBIAN_FRONTEND=noninteractive"]
-    max_retries = 5
-}) or fail("Failed to patch provisioner")
+# build.gsub!(%Q{"DEBIAN_FRONTEND=noninteractive"]}, %Q{"DEBIAN_FRONTEND=noninteractive"]
+#     max_retries = 5
+# }) or fail("Failed to patch provisioner")
 
 build.gsub!(%Q{
   provisioner "shell" {
