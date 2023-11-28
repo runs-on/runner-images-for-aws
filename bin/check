@@ -25,17 +25,6 @@ for release in $RELEASES ; do
     ./bin/patch "$release"
     ./bin/build "$release"
 
-    if [ "$PUSH" = "true" ]; then
-      if [ "$CI" = "true" ]; then
-        git config --global user.name "Cyril Rohr"
-        git config --global user.email "ops@runs-on.com"
-      fi
-
-      git add releases/"$release"
-      git commit -m "Pull and patch $release"
-      git push origin main
-    fi
-
     if [ -n "$GITHUB_OUTPUT" ]; then
       echo "release=$release" >> "$GITHUB_OUTPUT"
     fi

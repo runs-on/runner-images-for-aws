@@ -11,6 +11,8 @@ on:
 jobs:
   check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     env:
       PUSH: true
       SUBNET_ID: ${{ secrets.SUBNET_ID }}
@@ -23,7 +25,11 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
       - run: bin/check
+        id: check
         timeout-minutes: 300
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Add ${{ steps.check.outputs.release }} release"
       - if: always()
         # make sure we terminate instances even if workflow is cancelled
         run: bin/cleanup-instances
