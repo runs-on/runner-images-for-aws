@@ -3,10 +3,10 @@ retry_command() {
     shift
     echo "Retrying command for $retries times..."
     local count=0
-    until "$@" || [[ $count -eq $retries ]]; do
+    until ( "$@" 2>&1 | grep -v 'E:' ) || [[ $count -eq $retries ]]; do
         echo "Unable to execute command. Retrying later..." >&2
         count=$((count+1))
-        sleep 10
+        sleep 30
     done
     return $?
 }

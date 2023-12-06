@@ -23,7 +23,7 @@ end
 # Those commands fail sometimes, so we need to retry them
 content = RELEASE_DIR.join("images/ubuntu/scripts/build/install-java-tools.sh").read
 RELEASE_DIR.join("images/ubuntu/scripts/build/install-java-tools.sh").open("w+") do |f|
-  f.puts content.gsub("apt-get -y install temurin", "retry_command 5 apt-get -y install temurin")
+  f.puts content.gsub("installOpenJDK ", "retry_command 5 installOpenJDK ")
 end unless content.include?("retry_command")
 
 # Extract build { } block from Azure template
