@@ -105,9 +105,9 @@ source "amazon-ebs" "build_ebs" {
 
   ami_regions = [
     "us-east-1",
-    "us-west-1",
-    "eu-west-1",
-    "eu-central-1",
+    "eu-west-1"
+    // "us-west-1",
+    // "eu-central-1",
     // "sa-east-1",
     // "ap-northeast-1",
     // "ap-southeast-1"
