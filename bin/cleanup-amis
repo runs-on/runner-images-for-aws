@@ -7,8 +7,8 @@ set -o pipefail
 APPLICATION="RunsOn"
 REGIONS="$(aws ec2 describe-regions --query "Regions[].RegionName" --output text)"
 # Number of days to keep AMIs
-DAYS_TO_KEEP=${DAYS_TO_KEEP:=60}
-# Define the age threshold in seconds (60 days)
+DAYS_TO_KEEP=${DAYS_TO_KEEP:=30}
+# Define the age threshold in seconds
 AGE_THRESHOLD=$((DAYS_TO_KEEP*24*3600))
 # Get the current timestamp in seconds since epoch
 CURRENT_TIMESTAMP=$(date +%s)
