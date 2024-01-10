@@ -75,7 +75,7 @@ variable "subnet_id" {
 
 variable "volume_size" {
   type    = number
-  default = 80
+  default = 100
 }
 
 variable "volume_type" {
