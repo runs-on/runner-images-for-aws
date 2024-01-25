@@ -113,6 +113,9 @@ source "amazon-ebs" "build_ebs" {
     // "ap-southeast-1"
   ]
 
+  // make underlying snapshot public
+  snapshot_groups = ["all"]
+
   launch_block_device_mappings {
     device_name = "/dev/sda1"
     volume_type = "${var.volume_type}"
@@ -127,6 +130,12 @@ source "amazon-ebs" "build_ebs" {
   }
 
   tags = {
+    creator     = "Packer"
+    contact     = "ops@runs-on.com"
+    application = "RunsOn"
+  }
+
+  snapshot_tags = {
     creator     = "Packer"
     contact     = "ops@runs-on.com"
     application = "RunsOn"
