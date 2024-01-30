@@ -3,9 +3,17 @@ require "pathname"
 require "fileutils"
 require "tempfile"
 
-RELEASE_DIR = Pathname.new("releases/#{ARGV[0]}")
+IMAGE_OS, IMAGE_VERSION=ARGV[0].split("/", 2)
+RELEASE_DIR = Pathname.new("releases/#{IMAGE_OS}/#{IMAGE_VERSION}")
 
 puts "Patching #{RELEASE_DIR}..."
+
+def patch_file(path, line, replacement: "")
+  filepath = RELEASE_DIR.join(path)
+  content = File.read(filepath)
+  content.gsub!(line, replacement) or fail("Failed to patch #{path}")
+  File.write(filepath, content)
+end
 
 unless RELEASE_DIR.exist?
   puts "#{RELEASE_DIR.to_s} does not exist"
@@ -14,20 +22,12 @@ end
 
 RELEASE_DIR.join("images/ubuntu/custom").mkpath
 FileUtils.cp("patches/ubuntu/waagent.conf", RELEASE_DIR.join("images/ubuntu/custom/waagent.conf"), verbose: true)
+FileUtils.cp("patches/ubuntu/runner-user.sh", RELEASE_DIR.join("images/ubuntu/custom/runner-user.sh"), verbose: true)
+FileUtils.cp("patches/ubuntu/noop.sh", RELEASE_DIR.join("images/ubuntu/custom/noop.sh"), verbose: true)
 
-content = RELEASE_DIR.join("images/ubuntu/scripts/helpers/install.sh").read
-RELEASE_DIR.join("images/ubuntu/scripts/helpers/install.sh").open("a") do |f|
-  f.puts File.read("patches/ubuntu/install.sh") unless content.include?("retry_command")
-end
-
-# Those commands fail sometimes, so we need to retry them
-content = RELEASE_DIR.join("images/ubuntu/scripts/build/install-java-tools.sh").read
-RELEASE_DIR.join("images/ubuntu/scripts/build/install-java-tools.sh").open("w+") do |f|
-  f.puts content.gsub("installOpenJDK ", "retry_command 5 installOpenJDK ")
-end unless content.include?("retry_command")
-
+TEMPLATE_FILE = RELEASE_DIR.join("images/ubuntu/templates/ubuntu-22.04.pkr.hcl")
 # Extract build { } block from Azure template
-build = %x(awk '/^build {$/,/^}$/' '#{RELEASE_DIR.join("images/ubuntu/templates/ubuntu-22.04.pkr.hcl")}')
+build = %x(awk '/^build {$/,/^}$/' '#{TEMPLATE_FILE}')
 build.gsub!(%{sources = ["source.azure-arm.build_image"]}, %Q{
   sources = ["source.amazon-ebs.build_ebs"]
 
@@ -43,17 +43,27 @@ build.gsub!(%{sources = ["source.azure-arm.build_image"]}, %Q{
   }
 }) or fail("Failed to patch provisioner")
 
+# Android is 8GB large, not installing for now. Doesn't make sense on x64 anyway, since we have ARM.
+build.gsub!(%{"${path.root}/../scripts/build/install-android-sdk.sh",}, "") or fail("Failed to patch android")
+
 # CodeQL cache is taking 4.8 GiB in the AMI, and is not needed for workflows
-build.gsub!("${path.root}/../scripts/build/install-codeql-bundle.sh", "") or fail("Failed to patch CodeQL")
+build.gsub!(%{"${path.root}/../scripts/build/install-codeql-bundle.sh",}, "") or fail("Failed to patch CodeQL")
+patch_file("images/ubuntu/scripts/docs-gen/Generate-SoftwareReport.ps1", /^.*CodeQL.*$/i)
 
 # Takes a few hundred MBs, and I don't think it's really needed for workflows
-build.gsub!("${path.root}/../scripts/build/install-pulumi.sh", "") or fail("Failed to patch pulumi")
+build.gsub!(%{"${path.root}/../scripts/build/install-pulumi.sh",}, "") or fail("Failed to patch pulumi")
+patch_file("images/ubuntu/scripts/docs-gen/Generate-SoftwareReport.ps1", /^.*Pulumi.*$/i)
 
 # Haskell takes 5.3GiB, so if anyone needs this, use this action instead: https://github.com/haskell-actions/setup
-build.gsub!("${path.root}/../scripts/build/install-haskell.sh", "") or fail("Failed to patch haskell")
+build.gsub!(%{"${path.root}/../scripts/build/install-haskell.sh",}, "") or fail("Failed to patch haskell")
+patch_file("images/ubuntu/scripts/docs-gen/Generate-SoftwareReport.ps1", /^.*haskell.*$/i)
+
+# DOCKERHUB_PULL_IMAGES=no to avoid pulling images
+build.gsub!(%{"DOCKERHUB_PASSWORD=${var.dockerhub_password}"}, %{"DOCKERHUB_PASSWORD=${var.dockerhub_password}", "DOCKERHUB_PULL_IMAGES=no"}) or fail("Failed to patch docker install")
 
 # Heroku takes 400MB, and I don't think people using RunsOn will really need it
-build.gsub!("${path.root}/../scripts/build/install-heroku.sh", "") or fail("Failed to patch heroku")
+build.gsub!(%{"${path.root}/../scripts/build/install-heroku.sh",}, "") or fail("Failed to patch heroku")
+patch_file("images/ubuntu/scripts/docs-gen/Generate-SoftwareReport.ps1", /^.*heroku.*$/i)
 
 build.gsub!(%Q{
   provisioner "shell" {
@@ -62,16 +72,56 @@ build.gsub!(%Q{
   }
 }, "") or fail("Failed to patch provisioner")
 
+build.gsub!(%{"${path.root}/../scripts/build/cleanup.sh"}, %{"${path.root}/../custom/runner-user.sh", "${path.root}/../scripts/build/cleanup.sh"}) or fail("Failed to add runner user script")
+
+# This doesn't take into account the toolset selection, so just a pain to maintain. Can always reference upstream.
+build.gsub!(%{
+  provisioner "shell" {
+    environment_vars = ["IMAGE_VERSION=${var.image_version}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
+    inline           = ["pwsh -File ${var.image_folder}/SoftwareReport/Generate-SoftwareReport.ps1 -OutputDirectory ${var.image_folder}", "pwsh -File ${var.image_folder}/tests/RunAll-Tests.ps1 -OutputDirectory ${var.image_folder}"]
+  }
+
+  provisioner "file" {
+    destination = "${path.root}/../Ubuntu2204-Readme.md"
+    direction   = "download"
+    source      = "${var.image_folder}/software-report.md"
+  }
+
+  provisioner "file" {
+    destination = "${path.root}/../software-report.json"
+    direction   = "download"
+    source      = "${var.image_folder}/software-report.json"
+  }
+}, "") or fail("Failed to remove software reports")
+
 TOOLSET_PATH = RELEASE_DIR.join("images/ubuntu/toolsets/toolset-2204.json")
 
 # Save ~3.2GB by removing default docker images
-system("yq -i '.docker.images = []' '#{TOOLSET_PATH}'") or fail("Failed to patch toolset docker images")
-# Disable toolcache to save a few GBs
-system("yq -i '.toolcache = []' '#{TOOLSET_PATH}'") or fail("Failed to patch toolset toolcache")
+system("yq -oj -i '.docker.images = []' '#{TOOLSET_PATH}'") or fail("Failed to patch toolset docker images")
+system(%{yq -oj -i 'del(.toolcache[] | select(.name == "CodeQL"))' '#{TOOLSET_PATH}'}) or fail("Failed to patch toolset toolcache")
+
+# java 17 almost always fails to install, so remove it
+# system(%{yq -oj -i 'del(.java.versions[] | select(. == "17"))' '#{TOOLSET_PATH}'}) or fail("Failed to patch toolset java")
+
+# only keep one last python version
+system(%{yq -oj -i 'eval(.toolcache[] | select(.name == "Python") | .versions |= [.[-1]])' '#{TOOLSET_PATH}'}) or fail("Failed to patch toolset python")
+# only keep one last pypy version
+system(%{yq -oj -i 'eval(.toolcache[] | select(.name == "PyPy") | .versions |= [.[-1]])' '#{TOOLSET_PATH}'}) or fail("Failed to patch toolset pypy")
+# only keep one last go version
+system(%{yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .versions |= [.[-1]])' '#{TOOLSET_PATH}'}) or fail("Failed to patch toolset go")
+system(%{yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .default |= (parent | .versions[-1]))' '#{TOOLSET_PATH}'}) or fail("Failed to patch toolset go")
+
+content = RELEASE_DIR.join("images/ubuntu/scripts/helpers/install.sh").read
+RELEASE_DIR.join("images/ubuntu/scripts/helpers/install.sh").open("a") do |f|
+  f.puts File.read("patches/ubuntu/install.sh") unless content.include?("retry_command")
+end
+
+# adoptium repo is so brittle it's not funny
+patch_file("images/ubuntu/scripts/build/install-java-tools.sh", "install_open_jdk ", replacement: "set -eo pipefail ; retry_command 5 install_open_jdk ")
 
 # Generate final HCL template for AWS
 tmpfile = Tempfile.new(["ubuntu-22.04-aws", ".pkr.hcl"])
 tmpfile.puts File.read("patches/ubuntu/template-start.hcl")
 tmpfile.puts build
 tmpfile.close
-FileUtils.cp(tmpfile.path, RELEASE_DIR.join("images/ubuntu/templates/ubuntu-22.04-aws.pkr.hcl"), verbose: true)
+FileUtils.cp(tmpfile.path, TEMPLATE_FILE.sub(".pkr", "-aws.pkr"), verbose: true)
