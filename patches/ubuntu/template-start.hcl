@@ -44,12 +44,13 @@ variable "image_folder" {
 
 variable "image_os" {
   type    = string
-  default = "ubuntu22"
+  // ex: ubuntu22
+  default = "${env("IMAGE_OS")}"
 }
 
 variable "image_version" {
   type    = string
-  default = "dev"
+  default = "${env("IMAGE_VERSION")}"
 }
 
 variable "installer_script_folder" {
@@ -62,11 +63,6 @@ variable "region" {
   default = "${env("AWS_DEFAULT_REGION")}"
 }
 
-variable "run_validation_diskspace" {
-  type    = bool
-  default = false
-}
-
 // make sure the subnet auto-assigns public IPs
 variable "subnet_id" {
   type    = string
@@ -75,7 +71,7 @@ variable "subnet_id" {
 
 variable "volume_size" {
   type    = number
-  default = 100
+  default = 40
 }
 
 variable "volume_type" {
@@ -96,12 +92,14 @@ source "amazon-ebs" "build_ebs" {
   # make AMIs publicly accessible
   ami_groups                                = ["all"]
   ebs_optimized                             = true
-  spot_instance_types                       = ["c7a.xlarge", "m5zn.xlarge"]
+  spot_instance_types                       = ["c7a.xlarge", "m7a.xlarge", "c6a.xlarge", "m6a.xlarge"]
   spot_price                                = "1.00"
   region                                    = "${var.region}"
   ssh_username                              = "ubuntu"
   subnet_id                                 = "${var.subnet_id}"
   associate_public_ip_address               = "true"
+  force_deregister                          = "true"
+  force_delete_snapshot                     = "true"
 
   ami_regions = [
     "us-east-1",
@@ -121,24 +119,24 @@ source "amazon-ebs" "build_ebs" {
     volume_type = "${var.volume_type}"
     volume_size = "${var.volume_size}"
     delete_on_termination = "true"
+    iops = 4000
+    throughput = 1000
+    encrypted = "false"
   }
 
   run_tags = {
-    creator     = "Packer"
+    creator     = "RunsOn"
     contact     = "ops@runs-on.com"
-    application = "RunsOn"
   }
 
   tags = {
-    creator     = "Packer"
+    creator     = "RunsOn"
     contact     = "ops@runs-on.com"
-    application = "RunsOn"
   }
 
   snapshot_tags = {
-    creator     = "Packer"
+    creator     = "RunsOn"
     contact     = "ops@runs-on.com"
-    application = "RunsOn"
   }
 
   source_ami_filter {
