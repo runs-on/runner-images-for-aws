@@ -225,12 +225,12 @@
       {
         "plugin": "buildx",
         "version": "latest",
-        "asset": "linux-amd64"
+        "asset": "linux-arm64"
       },
       {
         "plugin": "compose",
         "version": "2.23.3",
-        "asset": "linux-x86_64"
+        "asset": "linux-aarch64"
       }
     ]
   },

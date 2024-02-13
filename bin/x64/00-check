@@ -1,7 +1,7 @@
 #!/bin/bash
+set -eo pipefail
 
-set -e
-set -o pipefail
+RELEASE_ARCH=x64
 
 # Fetch the latest release from the upstream repository
 RELEASES="$(curl -s https://api.github.com/repos/actions/runner-images/releases | jq -r '.[].tag_name' | grep ubuntu22)"
@@ -17,19 +17,19 @@ for release in $RELEASES ; do
     exit 0
   fi
 
-  if [ -d "releases/$release" ]; then
-    echo "Skipping $release, already exists"
+  release_full="$release-$RELEASE_ARCH"
+  if [ -d "releases/$release_full" ]; then
+    echo "Skipping $release_full, already exists"
     continue
   else
-    ./bin/pull "$release"
-    ./bin/patch "$release"
-    ./bin/build "$release"
+    ./bin/$RELEASE_ARCH/01-pull "$RELEASE_DIST" "$RELEASE_DATE"
+    ./bin/$RELEASE_ARCH/02-patch "$RELEASE_DIST" "$RELEASE_DATE"
+    ./bin/$RELEASE_ARCH/03-build "$RELEASE_DIST" "$RELEASE_DATE"
 
     if [ -n "$GITHUB_OUTPUT" ]; then
-      echo "release=$release" >> "$GITHUB_OUTPUT"
+      echo "release=$RELEASE_DIST-$RELEASE_DATE-$RELEASE_ARCH" >> "$GITHUB_OUTPUT"
     fi
-
-    # only perform one release per run
+    # only perform one release per run, so that commits are clearer
     exit 0
   fi
 done

@@ -14,7 +14,7 @@ REPO_PATH="/etc/apt/sources.list.d/docker.list"
 os_codename=$(lsb_release -cs)
 
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o $GPG_KEY
-echo "deb [arch=amd64 signed-by=$GPG_KEY] $REPO_URL ${os_codename} stable" > $REPO_PATH
+echo "deb [arch=amd64,arm64 signed-by=$GPG_KEY] $REPO_URL ${os_codename} stable" > $REPO_PATH
 apt-get update
 
 # Install docker components which available via apt-get
@@ -80,7 +80,7 @@ fi
 
 # Download amazon-ecr-credential-helper
 aws_latest_release_url="https://api.github.com/repos/awslabs/amazon-ecr-credential-helper/releases/latest"
-aws_helper_url=$(curl -fsSL "${aws_latest_release_url}" | jq -r '.body' | awk -F'[()]' '/linux-amd64/ {print $2}')
+aws_helper_url=$(curl -fsSL "${aws_latest_release_url}" | jq -r '.body' | awk -F'[()]' '/linux-arm64/ {print $2}')
 aws_helper_binary_path=$(download_with_retry "$aws_helper_url")
 
 # Supply chain security - amazon-ecr-credential-helper

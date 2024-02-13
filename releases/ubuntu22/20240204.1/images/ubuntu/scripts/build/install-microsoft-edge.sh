@@ -14,7 +14,7 @@ REPO_PATH="/etc/apt/sources.list.d/microsoft-edge.list"
 
 wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > $GPG_KEY
 # Specify an arch as Microsoft repository supports armhf and arm64 as well
-echo "deb [arch=amd64 signed-by=$GPG_KEY] $REPO_URL stable main" > $REPO_PATH
+echo "deb [arch=amd64,arm64 signed-by=$GPG_KEY] $REPO_URL stable main" > $REPO_PATH
 
 apt-get update
 apt-get install --no-install-recommends microsoft-edge-stable
