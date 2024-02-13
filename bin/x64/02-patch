@@ -3,8 +3,8 @@ require "pathname"
 require "fileutils"
 require "tempfile"
 
-IMAGE_OS, IMAGE_VERSION=ARGV[0].split("/", 2)
-RELEASE_DIR = Pathname.new("releases/#{IMAGE_OS}/#{IMAGE_VERSION}")
+IMAGE_OS, IMAGE_VERSION=ARGV
+RELEASE_DIR = Pathname.new("releases/#{IMAGE_OS}/#{IMAGE_VERSION}-x64")
 
 puts "Patching #{RELEASE_DIR}..."
 
@@ -124,4 +124,4 @@ tmpfile = Tempfile.new(["ubuntu-22.04-aws", ".pkr.hcl"])
 tmpfile.puts File.read("patches/ubuntu/template-start.hcl")
 tmpfile.puts build
 tmpfile.close
-FileUtils.cp(tmpfile.path, TEMPLATE_FILE.sub(".pkr", "-aws.pkr"), verbose: true)
+FileUtils.cp(tmpfile.path, TEMPLATE_FILE.sub(".pkr", "-x64-aws.pkr"), verbose: true)

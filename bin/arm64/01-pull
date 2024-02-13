@@ -1,0 +1,22 @@
+#!/bin/bash
+set -eo pipefail
+
+RELEASE_DIST="$1"
+RELEASE_DATE="$2"
+RELEASE_ARCH="arm64"
+
+if [ -z "$RELEASE_DIST" ]; then
+  echo "Usage: $0 <release-dist> <release-date>"
+  exit 1
+fi
+
+release_dir="$RELEASE_DIST/$RELEASE_DATE-$RELEASE_ARCH"
+mkdir -p releases && cd releases
+echo "Cloning $release_dir..."
+rm -rf "$release_dir"
+mkdir -p "$(dirname "$release_dir")"
+
+git clone --depth 1 --branch "$RELEASE_DIST/$RELEASE_DATE" https://github.com/actions/runner-images.git "$release_dir"
+for useless_dir in .git .github docs images.CI images/macos images/windows; do
+  rm -rf "${release_dir:?}/${useless_dir:?}"
+done

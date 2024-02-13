@@ -1,0 +1,35 @@
+name: Check arm64
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * *'
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      PUSH: true
+      SUBNET_ID: ${{ secrets.SUBNET_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - run: bin/arm64/00-check
+        id: check
+        timeout-minutes: 300
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Add ${{ steps.check.outputs.release }} release"
+      - if: always()
+        # make sure we terminate instances even if workflow is cancelled
+        run: bin/cleanup-instances

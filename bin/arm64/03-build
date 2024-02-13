@@ -1,0 +1,35 @@
+#!/bin/bash
+set -eo pipefail
+
+RELEASE_DIST="$1"
+RELEASE_DATE="$2"
+RELEASE_ARCH="arm64"
+
+set -u
+
+: $SUBNET_ID
+
+if [ -z "$RELEASE_DIST" ]; then
+  echo "Usage: $0 <release-dist> <release-date>"
+  exit 1
+fi
+
+
+export AMI_NAME=${AMI_NAME:="runs-on-${RELEASE_DIST}-full-$RELEASE_ARCH-${RELEASE_DATE}-$(date +%s)"}
+# for packer
+export IMAGE_OS="$RELEASE_DIST"
+export IMAGE_VERSION="$RELEASE_DATE"
+
+case "$RELEASE_DIST" in
+  "ubuntu22")
+    export PACKER_TEMPLATE="images/ubuntu/templates/ubuntu-22.04-$RELEASE_ARCH-aws.pkr.hcl"
+    ;;
+  *)
+    echo "Unsupported release dist: $RELEASE_DIST"
+    exit 1
+    ;;
+esac
+
+release_dir="releases/$RELEASE_DIST/$RELEASE_DATE-$RELEASE_ARCH"
+time packer init "$release_dir/$PACKER_TEMPLATE"
+time packer build -timestamp-ui "$release_dir/$PACKER_TEMPLATE"

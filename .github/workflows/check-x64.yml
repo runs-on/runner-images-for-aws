@@ -1,4 +1,4 @@
-name: Check
+name: Check x64
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -24,7 +24,7 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
-      - run: bin/check
+      - run: bin/x64/00-check
         id: check
         timeout-minutes: 300
       - uses: stefanzweifel/git-auto-commit-action@v5
