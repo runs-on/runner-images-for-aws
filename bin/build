@@ -17,7 +17,7 @@ fi
 RELEASE_DATE="${RELEASE##*/}"
 RELEASE_DIST="${RELEASE%/*}"
 
-export AMI_NAME=${AMI_NAME:="runs-on-${RELEASE_DIST}-full-x64-${RELEASE_DATE}-$(date +%s)"}
+export AMI_NAME=${AMI_NAME:="runs-on-${RELEASE_DIST}-full-arm64-${RELEASE_DATE}-$(date +%s)"}
 # for packer
 export IMAGE_OS="$RELEASE_DIST"
 export IMAGE_VERSION="$RELEASE_DATE"

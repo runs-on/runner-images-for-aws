@@ -17,19 +17,21 @@ for release in $RELEASES ; do
     exit 0
   fi
 
-  if [ -d "releases/$release" ]; then
-    echo "Skipping $release, already exists"
-    continue
-  else
-    ./bin/pull "$release"
-    ./bin/patch "$release"
-    ./bin/build "$release"
+  for arch in x64 arm64 ; do
+    release_dir="releases/$release-$arch"
+    if [ -d "$release_dir" ]; then
+      echo "Skipping $release_dir, already exists"
+      continue
+    else
+      ./bin/pull "$release_dir"
+      ./bin/patch "$release_dir"
+      ./bin/build "$release_dir"
 
-    if [ -n "$GITHUB_OUTPUT" ]; then
-      echo "release=$release" >> "$GITHUB_OUTPUT"
+      if [ -n "$GITHUB_OUTPUT" ]; then
+        echo "release=$release_dir" >> "$GITHUB_OUTPUT"
+      fi
+      # only perform one release per run, so that commits are clearer
+      exit 0
     fi
-
-    # only perform one release per run
-    exit 0
-  fi
+  done
 done

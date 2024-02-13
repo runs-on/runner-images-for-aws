@@ -3,6 +3,7 @@
 set -e
 set -o pipefail
 
+# example: bin/pull releases/ubuntu22/20240204.1-x64
 RELEASE="$1"
 
 if [ -z "$RELEASE" ]; then
@@ -14,7 +15,9 @@ mkdir -p releases && cd releases
 echo "Cloning $RELEASE..."
 rm -rf "$RELEASE"
 mkdir -p "$(dirname "$RELEASE")"
-git clone --depth 1 --reference "$RELEASE" https://github.com/actions/runner-images.git "$RELEASE"
+reference=${RELEASE/-*/}
+arch=${RELEASE/*-/}
+git clone --depth 1 --reference "$reference" https://github.com/actions/runner-images.git "$RELEASE"
 for useless_dir in .git .github docs images.CI images/macos images/windows; do
   rm -rf "${RELEASE:?}/${useless_dir:?}"
 done

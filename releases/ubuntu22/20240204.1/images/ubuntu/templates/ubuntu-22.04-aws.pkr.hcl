@@ -92,7 +92,8 @@ source "amazon-ebs" "build_ebs" {
   # make AMIs publicly accessible
   ami_groups                                = ["all"]
   ebs_optimized                             = true
-  spot_instance_types                       = ["c7a.xlarge", "m7a.xlarge", "c6a.xlarge", "m6a.xlarge"]
+  // spot_instance_types                       = ["c7a.xlarge", "m7a.xlarge", "c6a.xlarge", "m6a.xlarge"]
+  spot_instance_types                       = ["c7g.xlarge", "m7g.xlarge", "c6g.xlarge", "m6g.xlarge"]
   spot_price                                = "1.00"
   region                                    = "${var.region}"
   ssh_username                              = "ubuntu"
@@ -142,7 +143,7 @@ source "amazon-ebs" "build_ebs" {
   source_ami_filter {
     filters = {
       virtualization-type = "hvm"
-      name                = "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"
+      name                = "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-arm64-server-*"
       root-device-type    = "ebs"
     }
     owners      = ["099720109477"]
@@ -264,62 +265,62 @@ build {
       "${path.root}/../scripts/build/install-actions-cache.sh",
       "${path.root}/../scripts/build/install-runner-package.sh",
       "${path.root}/../scripts/build/install-apt-common.sh",
-      "${path.root}/../scripts/build/install-azcopy.sh",
-      "${path.root}/../scripts/build/install-azure-cli.sh",
-      "${path.root}/../scripts/build/install-azure-devops-cli.sh",
-      "${path.root}/../scripts/build/install-bicep.sh",
-      "${path.root}/../scripts/build/install-aliyun-cli.sh",
-      "${path.root}/../scripts/build/install-apache.sh",
+      // "${path.root}/../scripts/build/install-azcopy.sh",
+      // "${path.root}/../scripts/build/install-azure-cli.sh",
+      // "${path.root}/../scripts/build/install-azure-devops-cli.sh",
+      // "${path.root}/../scripts/build/install-bicep.sh",
+      // "${path.root}/../scripts/build/install-aliyun-cli.sh",
+      // "${path.root}/../scripts/build/install-apache.sh",
       "${path.root}/../scripts/build/install-aws-tools.sh",
       "${path.root}/../scripts/build/install-clang.sh",
-      "${path.root}/../scripts/build/install-swift.sh",
+      // "${path.root}/../scripts/build/install-swift.sh",
       "${path.root}/../scripts/build/install-cmake.sh",
       
       "${path.root}/../scripts/build/install-container-tools.sh",
-      "${path.root}/../scripts/build/install-dotnetcore-sdk.sh",
-      "${path.root}/../scripts/build/install-firefox.sh",
-      "${path.root}/../scripts/build/install-microsoft-edge.sh",
+      // "${path.root}/../scripts/build/install-dotnetcore-sdk.sh",
+      // "${path.root}/../scripts/build/install-firefox.sh",
+      // "${path.root}/../scripts/build/install-microsoft-edge.sh",
       "${path.root}/../scripts/build/install-gcc-compilers.sh",
-      "${path.root}/../scripts/build/install-gfortran.sh",
+      // "${path.root}/../scripts/build/install-gfortran.sh",
       "${path.root}/../scripts/build/install-git.sh",
       "${path.root}/../scripts/build/install-git-lfs.sh",
       "${path.root}/../scripts/build/install-github-cli.sh",
-      "${path.root}/../scripts/build/install-google-chrome.sh",
-      "${path.root}/../scripts/build/install-google-cloud-cli.sh",
+      // "${path.root}/../scripts/build/install-google-chrome.sh",
+      // "${path.root}/../scripts/build/install-google-cloud-cli.sh",
       
       
-      "${path.root}/../scripts/build/install-java-tools.sh",
+      // "${path.root}/../scripts/build/install-java-tools.sh",
       "${path.root}/../scripts/build/install-kubernetes-tools.sh",
-      "${path.root}/../scripts/build/install-oc-cli.sh",
-      "${path.root}/../scripts/build/install-leiningen.sh",
-      "${path.root}/../scripts/build/install-miniconda.sh",
-      "${path.root}/../scripts/build/install-mono.sh",
-      "${path.root}/../scripts/build/install-kotlin.sh",
-      "${path.root}/../scripts/build/install-mysql.sh",
-      "${path.root}/../scripts/build/install-mssql-tools.sh",
-      "${path.root}/../scripts/build/install-sqlpackage.sh",
-      "${path.root}/../scripts/build/install-nginx.sh",
+      // "${path.root}/../scripts/build/install-oc-cli.sh",
+      // "${path.root}/../scripts/build/install-leiningen.sh",
+      // "${path.root}/../scripts/build/install-miniconda.sh",
+      // "${path.root}/../scripts/build/install-mono.sh",
+      // "${path.root}/../scripts/build/install-kotlin.sh",
+      // "${path.root}/../scripts/build/install-mysql.sh",
+      // "${path.root}/../scripts/build/install-mssql-tools.sh",
+      // "${path.root}/../scripts/build/install-sqlpackage.sh",
+      // "${path.root}/../scripts/build/install-nginx.sh",
       "${path.root}/../scripts/build/install-nvm.sh",
       "${path.root}/../scripts/build/install-nodejs.sh",
       "${path.root}/../scripts/build/install-bazel.sh",
-      "${path.root}/../scripts/build/install-oras-cli.sh",
-      "${path.root}/../scripts/build/install-php.sh",
+      // "${path.root}/../scripts/build/install-oras-cli.sh",
+      // "${path.root}/../scripts/build/install-php.sh",
       "${path.root}/../scripts/build/install-postgresql.sh",
       
-      "${path.root}/../scripts/build/install-ruby.sh",
-      "${path.root}/../scripts/build/install-rlang.sh",
+      // "${path.root}/../scripts/build/install-ruby.sh",
+      // "${path.root}/../scripts/build/install-rlang.sh",
       "${path.root}/../scripts/build/install-rust.sh",
-      "${path.root}/../scripts/build/install-julia.sh",
-      "${path.root}/../scripts/build/install-sbt.sh",
-      "${path.root}/../scripts/build/install-selenium.sh",
+      // "${path.root}/../scripts/build/install-julia.sh",
+      // "${path.root}/../scripts/build/install-sbt.sh",
+      // "${path.root}/../scripts/build/install-selenium.sh",
       "${path.root}/../scripts/build/install-terraform.sh",
       "${path.root}/../scripts/build/install-packer.sh",
-      "${path.root}/../scripts/build/install-vcpkg.sh",
+      // "${path.root}/../scripts/build/install-vcpkg.sh",
       "${path.root}/../scripts/build/configure-dpkg.sh",
       "${path.root}/../scripts/build/install-yq.sh",
       
-      "${path.root}/../scripts/build/install-pypy.sh",
-      "${path.root}/../scripts/build/install-python.sh",
+      // "${path.root}/../scripts/build/install-pypy.sh",
+      // "${path.root}/../scripts/build/install-python.sh",
       "${path.root}/../scripts/build/install-zstd.sh"
     ]
   }
@@ -327,26 +328,28 @@ build {
   provisioner "shell" {
     environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}", "DOCKERHUB_LOGIN=${var.dockerhub_login}", "DOCKERHUB_PASSWORD=${var.dockerhub_password}", "DOCKERHUB_PULL_IMAGES=no"]
     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = ["${path.root}/../scripts/build/install-docker-compose.sh", "${path.root}/../scripts/build/install-docker.sh"]
+    // scripts          = ["${path.root}/../scripts/build/install-docker-compose.sh", "${path.root}/../scripts/build/install-docker.sh"]
+    // don't care about docker v1
+    scripts          = ["${path.root}/../scripts/build/install-docker.sh"]
   }
 
-  provisioner "shell" {
-    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
-    execute_command  = "sudo sh -c '{{ .Vars }} pwsh -f {{ .Path }}'"
-    scripts          = ["${path.root}/../scripts/build/Install-Toolset.ps1", "${path.root}/../scripts/build/Configure-Toolset.ps1"]
-  }
+  // provisioner "shell" {
+  //   environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
+  //   execute_command  = "sudo sh -c '{{ .Vars }} pwsh -f {{ .Path }}'"
+  //   scripts          = ["${path.root}/../scripts/build/Install-Toolset.ps1", "${path.root}/../scripts/build/Configure-Toolset.ps1"]
+  // }
 
-  provisioner "shell" {
-    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
-    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = ["${path.root}/../scripts/build/install-pipx-packages.sh"]
-  }
+  // provisioner "shell" {
+  //   environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
+  //   execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+  //   scripts          = ["${path.root}/../scripts/build/install-pipx-packages.sh"]
+  // }
 
-  provisioner "shell" {
-    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "DEBIAN_FRONTEND=noninteractive", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
-    execute_command  = "/bin/sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = ["${path.root}/../scripts/build/install-homebrew.sh"]
-  }
+  // provisioner "shell" {
+  //   environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "DEBIAN_FRONTEND=noninteractive", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
+  //   execute_command  = "/bin/sh -c '{{ .Vars }} {{ .Path }}'"
+  //   scripts          = ["${path.root}/../scripts/build/install-homebrew.sh"]
+  // }
 
   provisioner "shell" {
     environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}"]

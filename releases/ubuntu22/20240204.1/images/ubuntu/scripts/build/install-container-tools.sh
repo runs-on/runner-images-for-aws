@@ -24,7 +24,7 @@ if is_ubuntu20; then
     REPO_PATH="/etc/apt/sources.list.d/devel:kubic:libcontainers:stable.list"
 
     curl -fsSL "${REPO_URL}/Release.key" | gpg --dearmor -o $GPG_KEY
-    echo "deb [arch=amd64 signed-by=$GPG_KEY] ${REPO_URL}/ /" > $REPO_PATH
+    echo "deb [arch=amd64,arm64 signed-by=$GPG_KEY] ${REPO_URL}/ /" > $REPO_PATH
 fi
 
 # Install podman, buildah, scopeo container's tools
