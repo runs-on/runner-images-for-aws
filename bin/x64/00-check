@@ -12,7 +12,7 @@ for release in $RELEASES ; do
 
   printf "\n## RELEASE_DIST=%s RELEASE_DATE=%s\n" "$RELEASE_DIST" "$RELEASE_DATE"
 
-  if [[ "$RELEASE_DATE" < "202311" ]]; then
+  if [[ "$RELEASE_DATE" < "20240211" ]]; then
     echo "$RELEASE_DATE is a too old release. Not supported."
     exit 0
   fi
