@@ -1,7 +1,7 @@
 name: Check arm64
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: check
 
 on:
   workflow_dispatch:
