@@ -61,7 +61,7 @@ variable "subnet_id" {
 
 variable "volume_size" {
   type    = number
-  default = 30
+  default = 22
 }
 
 variable "volume_type" {
@@ -93,6 +93,7 @@ source "amazon-ebs" "build_ebs" {
 
   ami_regions = [
     "us-east-1",
+    "us-west-2",
     "eu-west-1"
   ]
 
