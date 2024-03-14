@@ -94,7 +94,8 @@ source "amazon-ebs" "build_ebs" {
   ami_regions = [
     "us-east-1",
     "us-west-2",
-    "eu-west-1"
+    "eu-west-1",
+    "eu-central-1"
   ]
 
   // make underlying snapshot public
