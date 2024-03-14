@@ -6,7 +6,12 @@ Official images are replicated and published within 48h of their release by GitH
 
 ## AMI details
 
-Supported regions: `us-east-1`, `eu-west-1`.
+Supported regions:
+
+* North Virginia (`us-east-1`)
+* Ireland (`eu-west-1`)
+* Oregon (`us-west-2`)
+* Frankfurt (`eu-central-1`)
 
 For x64, search for `runs-on-ubuntu22-full-x64-*` with owner `135269210855`.
 
