@@ -1,6 +1,6 @@
 # GitHub Action runner images for AWS
 
-GitHub Action Runner images for AWS, to be used with [RunsOn](https://runs-on.com), or for your own usage.
+GitHub Action Runner images for AWS, to be used with [RunsOn](https://runs-on.com/?ref=runner-images-for-aws), or for your own usage.
 
 Official images are replicated and published within 48h of their release by GitHub.
 
