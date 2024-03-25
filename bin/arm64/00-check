@@ -22,9 +22,9 @@ for release in $RELEASES ; do
     echo "Skipping $release_full, already exists"
     continue
   else
-    ./bin/$RELEASE_ARCH/01-pull "$RELEASE_DIST" "$RELEASE_DATE"
-    ./bin/$RELEASE_ARCH/02-patch "$RELEASE_DIST" "$RELEASE_DATE"
-    ./bin/$RELEASE_ARCH/03-build "$RELEASE_DIST" "$RELEASE_DATE"
+    ./bin/$RELEASE_ARCH/01-pull "releases/$release_full"
+    ./bin/$RELEASE_ARCH/02-patch "releases/$release_full"
+    ./bin/$RELEASE_ARCH/03-build "releases/$release_full"
 
     if [ -n "$GITHUB_OUTPUT" ]; then
       echo "release=$RELEASE_DIST-$RELEASE_DATE-$RELEASE_ARCH" >> "$GITHUB_OUTPUT"

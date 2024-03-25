@@ -1,50 +1,69 @@
-#!/bin/bash
-# Deregisters old AMIs and deletes associated snapshots, in all regions
+#!/usr/bin/env ruby
+require 'aws-sdk-ec2'
+require 'terminal-table'
 
-set -e
-set -o pipefail
+AWS_PROFILE = ENV.fetch('AWS_PROFILE')
+AMI_PREFIX = ENV.fetch('AMI_PREFIX', 'runs-on-dev')
 
-APPLICATION="RunsOn"
-REGIONS="$(aws ec2 describe-regions --query "Regions[].RegionName" --output text)"
-# Number of days to keep AMIs
-DAYS_TO_KEEP=${DAYS_TO_KEEP:=30}
-# Define the age threshold in seconds
-AGE_THRESHOLD=$((DAYS_TO_KEEP*24*3600))
-# Get the current timestamp in seconds since epoch
-CURRENT_TIMESTAMP=$(date +%s)
 
-for region in ${REGIONS[@]}; do
-    echo "---- Region: ${region} ---"
-    # List all your AMIs and extract relevant information using the AWS CLI
-    image_count=$(aws ec2 describe-images --owner self --filters "Name=tag:application, Values=${APPLICATION}" --query 'length(Images)' --region "$region" --output text)
-    echo "     Total AMIs in this region: ${image_count}"
-  
-    if [ "$image_count" -lt 2 ]; then
-      echo "     Less than 2 AMIs found, skipping"
-      continue
-    fi
+def cleanup_region(region)
+  ec2 = Aws::EC2::Client.new(region: region)
 
-    aws ec2 describe-images --owner self --region "${region}" --filters "Name=tag:application, Values=${APPLICATION}" --query 'Images[*] | sort_by(@, &CreationDate)[].[Name,ImageId,CreationDate]' --output text | \
-      while read -r name image_id creation_date; do
-        # Parse the creation date into seconds since epoch
-        image_timestamp=$(date -d "$creation_date" +%s)
-  
-        # Calculate the age of the AMI in seconds
-        age=$((CURRENT_TIMESTAMP - image_timestamp))
+  ["x64", "arm64"].each do |arch|
+    puts "## #{region} #{AMI_PREFIX} #{arch}"
 
-        echo "     AMI: ${image_id} (${name}) created on $creation_date ($age seconds ago)"
-  
-        # Check if the AMI is older than the threshold
-        if [ $age -gt $AGE_THRESHOLD ]; then    
-          echo "     ! Deregistering AMI..."
-          snapshot_id=$(aws ec2 describe-images --image-ids "$image_id" --query "Images[].BlockDeviceMappings[].Ebs.SnapshotId" --region "${region}" --output text)
-          if [ "$DRY_RUN" = "true" ]; then
-            echo "     DRY_RUN is set to true, skipping deregistering AMI ${image_id} and deleting snapshot ${snapshot_id}"
-            continue
-          fi
-          aws ec2 deregister-image --image-id "$image_id" --region "${region}"
-          echo "     ! Deleting snapshot ${snapshot_id} for AMI ${image_id}"
-          aws ec2 delete-snapshot --snapshot-id "${snapshot_id}" --region "${region}"
-        fi
-      done
-done
+    # Get all AMIs with the specified name pattern
+    resp = ec2.describe_images({
+      filters: [
+        {
+          name: "name",
+          values: ["#{AMI_PREFIX}-ubuntu22-full-#{arch}-*"],
+        },
+      ],
+    })
+    amis = resp.images.sort_by(&:creation_date).reverse
+
+    table = Terminal::Table.new do |t|
+      t.headings = ['AMI ID', 'Created at', 'Name']
+      amis.each do |ami|
+        t << [ami.image_id, ami.creation_date, ami.name]
+      end
+    end
+
+    puts table
+    most_recent_ami = nil
+    amis.each do |ami|
+      # Skip the most recent AMI
+      if most_recent_ami.nil?
+        most_recent_ami = ami
+        next
+      end
+
+      puts ""
+
+      # Ask for confirmation before each removal
+      print "Are you sure you want to deregister AMI #{ami.image_id} and delete its associated snapshot? (y/n) "
+      reply = gets.chomp
+
+      if reply.downcase == 'y'
+        sleep 2
+        # Deregister the AMI
+        ec2.deregister_image({image_id: ami.image_id})
+
+        # Get the snapshot associated with the AMI
+        snapshot_id = ami.block_device_mappings[0].ebs.snapshot_id
+
+        # Delete the snapshot
+        ec2.delete_snapshot({snapshot_id: snapshot_id})
+      else
+        puts "Skipping AMI #{ami.image_id}"
+      end
+    end
+
+    puts ""
+  end
+end
+
+["us-east-1", "us-west-2", "eu-west-1", "eu-central-1"].each do |region|
+  cleanup_region(region)
+end

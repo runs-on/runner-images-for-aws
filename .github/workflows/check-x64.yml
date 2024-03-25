@@ -6,7 +6,7 @@ concurrency:
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 5 * * *'
+    - cron: "0 5 * * *"
 
 jobs:
   check:
@@ -27,6 +27,8 @@ jobs:
       - run: bin/x64/00-check
         id: check
         timeout-minutes: 300
+        env:
+          AMI_PREFIX: runs-on-v2
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Add ${{ steps.check.outputs.release }} release"

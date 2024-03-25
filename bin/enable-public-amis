@@ -1,0 +1,16 @@
+#!/bin/bash
+set -eux
+set -o pipefail
+
+aws ec2 disable-image-block-public-access --region $AWS_REGION
+
+# Make the AMI public
+aws ec2 modify-image-attribute --image-id $AMI_ID --launch-permission "Add=[{Group=all}]" --region $AWS_REGION
+
+# Get the snapshot ID associated with the AMI
+SNAPSHOT_ID=$(aws ec2 describe-images --image-ids $AMI_ID --query 'Images[*].BlockDeviceMappings[*].Ebs.SnapshotId' --output text --region $AWS_REGION)
+
+# Make the snapshot public
+aws ec2 modify-snapshot-attribute --snapshot-id $SNAPSHOT_ID --attribute createVolumePermission --operation-type add --group-names all --region $AWS_REGION
+
+echo "DONE"
