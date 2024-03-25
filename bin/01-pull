@@ -1,0 +1,62 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require 'open-uri'
+require 'slop'
+require 'fileutils'
+
+options = {}
+
+usage = Slop::Options.new do |opts|
+  opts.banner = "Usage: #{$0} [--force] --arch x64|arm64"
+
+  opts.string '-d', '--dist', 'Distribution', default: "ubuntu22"
+  opts.string '-a', '--arch', 'Architecture', required: true
+  opts.bool '-f', '--force', 'Force'
+end
+
+begin
+  options = usage.parse(ARGV).to_hash
+rescue Slop::Error => e
+  puts "Error: #{e.message}"
+  puts
+  puts usage
+  exit 1
+end
+
+# Fetch the latest release from the upstream repository
+RELEASES = JSON.parse(URI.open('https://api.github.com/repos/actions/runner-images/releases').read)
+LATEST_RELEASE = RELEASES.select{|r| r["tag_name"].include?(options[:dist])}.sort_by{|r| r["published_at"]}.last
+
+dist, date = LATEST_RELEASE["tag_name"].split("/")
+arch = options[:arch]
+RELEASE_DIR = "releases/#{dist}/#{date}-#{arch}"
+
+if options[:force]
+  FileUtils.rm_rf(RELEASE_DIR)
+end
+
+if Dir.exist?(RELEASE_DIR)
+  puts "Skipping #{RELEASE_DIR}, already exists"
+  exit 0
+end
+
+FileUtils.mkdir_p(File.dirname(RELEASE_DIR))
+system("git clone --depth 1 --branch \"#{dist}/#{date}\" https://github.com/actions/runner-images.git \"#{RELEASE_DIR}\"")
+['.git', '.github', 'docs', 'images.CI', 'images/macos', 'images/windows'].each do |useless_dir|
+  FileUtils.rm_rf("#{RELEASE_DIR}/#{useless_dir}")
+end
+
+system("./bin/patch/#{dist}-#{arch} #{RELEASE_DIR}") || fail("Failed to patch #{RELEASE_DIR}")
+
+if ENV['GITHUB_OUTPUT']
+  File.open(ENV['GITHUB_OUTPUT'], 'a') { |f| f.write("release=#{RELEASE_DIR}\n") }
+end
+
+puts "Next (CI):"
+puts "AMI_PREFIX=runs-on-v2 ./bin/02-build #{RELEASE_DIR}"
+puts
+puts "Next (DEV):"
+puts "AMI_PREFIX=runs-on-dev env $(cat .env) ./bin/02-build #{RELEASE_DIR}"
+
+

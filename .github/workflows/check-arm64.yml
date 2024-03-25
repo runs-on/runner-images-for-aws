@@ -24,14 +24,16 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
-      - run: bin/arm64/00-check
-        id: check
+      - run: bin/01-pull --arch arm64
+        id: pull
+      - run: bin/02-build ${{ steps.check.outputs.release_dir }}
+        if: ${{ steps.check.outputs.release_dir }}
         timeout-minutes: 300
         env:
           AMI_PREFIX: runs-on-v2
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Add ${{ steps.check.outputs.release }} release"
+          commit_message: "Add ${{ steps.pull.outputs.release_dir }}"
       - if: always()
-        # make sure we terminate instances even if workflow is cancelled
+        # make sure we terminate instances even if workflow is canceled
         run: bin/cleanup-instances

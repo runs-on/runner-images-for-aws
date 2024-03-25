@@ -2,20 +2,19 @@
 set -eo pipefail
 
 RELEASE_DIR="$1"
-RELEASE_ARCH="x64"
-
-set -u
-
-: $SUBNET_ID
 
 if [ -z "$RELEASE_DIR" ]; then
   echo "Usage: $0 <RELEASE_DIR>"
   exit 1
 fi
 
+set -u
+: $SUBNET_ID
+
 # Extract RELEASE_DIST and RELEASE_DATE from RELEASE_DIR
 RELEASE_DIST=$(basename $(dirname "$RELEASE_DIR"))
 RELEASE_DATE=$(basename "$RELEASE_DIR" | cut -d '-' -f 1)
+RELEASE_ARCH=$(basename "$RELEASE_DIR" | cut -d '-' -f 2)
 
 export AMI_PREFIX=${AMI_PREFIX:="runs-on-dev"}
 export AMI_NAME=${AMI_NAME:="${AMI_PREFIX}-${RELEASE_DIST}-full-$RELEASE_ARCH-${RELEASE_DATE}-$(date +%s)"}
@@ -43,9 +42,6 @@ case "$RELEASE_DIST" in
     ;;
 esac
 
-
-release_dir="releases/$RELEASE_DIST/$RELEASE_DATE-$RELEASE_ARCH"
-
 set -x
-time packer init "$release_dir/$PACKER_TEMPLATE"
-time packer build -timestamp-ui -var ami_regions="$AMI_REGIONS" "$release_dir/$PACKER_TEMPLATE"
+time packer init "$RELEASE_DIR/$PACKER_TEMPLATE"
+time packer build -timestamp-ui -var ami_regions="$AMI_REGIONS" "$RELEASE_DIR/$PACKER_TEMPLATE"
