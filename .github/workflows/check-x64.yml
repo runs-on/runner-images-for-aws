@@ -18,6 +18,10 @@ jobs:
       SUBNET_ID: ${{ secrets.SUBNET_ID }}
     steps:
       - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: 3.2.2
+          bundler-cache: true
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
