@@ -28,7 +28,7 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
-      - run: bin/01-pull --arch arm64
+      - run: bundle exec bin/01-pull --arch arm64
         id: pull
       - run: bin/02-build ${{ steps.check.outputs.release_dir }}
         if: ${{ steps.check.outputs.release_dir }}
