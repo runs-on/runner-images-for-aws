@@ -261,6 +261,7 @@ build {
       // this ends up in/ home/ubuntu/.cache for some reason, so not useful anyway
       // "${path.root}/../scripts/build/install-bazel.sh",
       "${path.root}/../scripts/build/install-postgresql.sh",
+      "${path.root}/../scripts/build/install-ruby.sh",
       "${path.root}/../scripts/build/install-rust.sh",
       "${path.root}/../scripts/build/install-terraform.sh",
       "${path.root}/../scripts/build/configure-dpkg.sh",

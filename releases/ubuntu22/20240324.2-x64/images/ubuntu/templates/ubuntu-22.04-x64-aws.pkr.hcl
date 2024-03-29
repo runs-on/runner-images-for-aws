@@ -303,8 +303,7 @@ build {
       // action is better for that
       // "${path.root}/../scripts/build/install-php.sh",
       "${path.root}/../scripts/build/install-postgresql.sh",
-      // action is better for that
-      // "${path.root}/../scripts/build/install-ruby.sh",
+      "${path.root}/../scripts/build/install-ruby.sh",
       "${path.root}/../scripts/build/install-rlang.sh",
       "${path.root}/../scripts/build/install-rust.sh",
       "${path.root}/../scripts/build/install-julia.sh",
