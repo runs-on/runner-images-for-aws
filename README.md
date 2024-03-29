@@ -4,6 +4,9 @@ GitHub Action Runner images for AWS, to be used with [RunsOn](https://runs-on.co
 
 Official images are replicated and published within 48h of their release by GitHub.
 
+[![ubuntu22 x64](https://github.com/runs-on/runner-images-for-aws/actions/workflows/check-x64.yml/badge.svg)](https://github.com/runs-on/runner-images-for-aws/actions/workflows/check-x64.yml)
+[![ubuntu22 arm64](https://github.com/runs-on/runner-images-for-aws/actions/workflows/check-arm64.yml/badge.svg)](https://github.com/runs-on/runner-images-for-aws/actions/workflows/check-arm64.yml)
+
 ## AMI details
 
 Supported regions:
