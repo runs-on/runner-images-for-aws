@@ -23,8 +23,9 @@ cp patches/ubuntu/waagent.conf "$release_dir/images/ubuntu/custom/waagent.conf"
 yq -oj -i '.docker.images = []' $TOOLSET_PATH
 yq -oj -i 'del(.toolcache[] | select(.name == "CodeQL"))' $TOOLSET_PATH
 
-# only keep one last python version
-yq -oj -i 'eval(.toolcache[] | select(.name == "Python") | .versions |= [.[-1]])' $TOOLSET_PATH
+# only keep 4 last python version
+yq -oj -i 'eval(.toolcache[] | select(.name == "Python") | .versions |= [.[-4],.[-3],.[-2],.[-1]])' $TOOLSET_PATH
+
 # only keep one last pypy version
 yq -oj -i 'eval(.toolcache[] | select(.name == "PyPy") | .versions |= [.[-1]])' $TOOLSET_PATH
 # only keep one last go version

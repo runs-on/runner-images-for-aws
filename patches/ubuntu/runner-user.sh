@@ -3,9 +3,15 @@ set -e
 
 RUNS_ON_AGENT_VERSION=v2.0.10
 
+# add kvm virt, only available on metal instances
+apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virtinst
+modprobe kvm
+systemctl disable libvirtd.service
+
 echo "Setting up runner user..."
 adduser --shell /bin/bash --disabled-password --gecos "" --uid 1001 runner
 usermod -aG sudo runner
+usermod -aG kvm runner
 echo "%sudo   ALL=(ALL:ALL) NOPASSWD:ALL" >> /etc/sudoers
 echo "Defaults env_keep += \"DEBIAN_FRONTEND\"" >> /etc/sudoers
 
@@ -47,7 +53,7 @@ systemctl enable runs-on-agent.service
 
 # speed-up boot
 systemctl disable containerd.service docker.service
-systemctl disable polkit.service rsyslog.service apport.service logrotate.service snapd.seeded.service grub-common.service keyboard-setup.service systemd-update-utmp.service systemd-fsck-root.service systemd-tmpfiles-setup.service plymouth-quit.service plymouth-quit-wait.service systemd-journal-flush.service apparmor.service systemd-fsck-root.service e2scrub_reap.service
+systemctl disable chrony.service polkit.service rsyslog.service apport.service logrotate.service snapd.seeded.service grub-common.service keyboard-setup.service systemd-update-utmp.service systemd-fsck-root.service systemd-tmpfiles-setup.service plymouth-quit.service plymouth-quit-wait.service systemd-journal-flush.service apparmor.service systemd-fsck-root.service e2scrub_reap.service
 systemctl disable ufw.service snapd.service snap.lxd.activate.service snapd.apparmor.service ec2-instance-connect.service snap.amazon-ssm-agent.amazon-ssm-agent.service cron.service
 
 # cleanup

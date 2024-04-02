@@ -8,6 +8,14 @@ if [ -z "$RELEASE_DIR" ]; then
   exit 1
 fi
 
+if [ -z "$AMI_REGIONS" ]; then
+  if [ -n "${CI:=""}" ]; then
+    export AMI_REGIONS='["us-east-1","eu-west-1","us-west-2","eu-central-1"]'
+  else
+    export AMI_REGIONS='["us-east-1"]'
+  fi
+fi
+
 set -u
 : $SUBNET_ID
 
@@ -22,11 +30,6 @@ export AMI_NAME=${AMI_NAME:="${AMI_PREFIX}-${RELEASE_DIST}-full-$RELEASE_ARCH-${
 export IMAGE_OS="$RELEASE_DIST"
 export IMAGE_VERSION="$RELEASE_DATE"
 
-if [ -n "${CI:=""}" ]; then
-  export AMI_REGIONS='["us-east-1","eu-west-1","us-west-2","eu-central-1"]'
-else
-  export AMI_REGIONS='["us-east-1"]'
-fi
 
 echo "AMI_NAME=$AMI_NAME"
 echo "AMI_REGIONS=$AMI_REGIONS"
