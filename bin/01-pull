@@ -26,7 +26,7 @@ end
 
 # Fetch the latest release from the upstream repository
 RELEASES = JSON.parse(URI.open('https://api.github.com/repos/actions/runner-images/releases').read)
-LATEST_RELEASE = RELEASES.select{|r| r["tag_name"].include?(options[:dist])}.sort_by{|r| r["published_at"]}.last
+LATEST_RELEASE = RELEASES.select{|r| r["prerelease"] == false && r["tag_name"].include?(options[:dist])}.sort_by{|r| r["published_at"]}.last
 
 dist, date = LATEST_RELEASE["tag_name"].split("/")
 arch = options[:arch]

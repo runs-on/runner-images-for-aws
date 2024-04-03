@@ -75,7 +75,7 @@ variable "subnet_id" {
 
 variable "volume_size" {
   type    = number
-  default = 30
+  default = 40
 }
 
 variable "volume_type" {
@@ -289,7 +289,7 @@ build {
       "${path.root}/../scripts/build/install-oc-cli.sh",
       "${path.root}/../scripts/build/install-leiningen.sh",
       "${path.root}/../scripts/build/install-miniconda.sh",
-      "${path.root}/../scripts/build/install-mono.sh",
+      // "${path.root}/../scripts/build/install-mono.sh",
       "${path.root}/../scripts/build/install-kotlin.sh",
       "${path.root}/../scripts/build/install-mysql.sh",
       "${path.root}/../scripts/build/install-mssql-tools.sh",
@@ -314,6 +314,7 @@ build {
       "${path.root}/../scripts/build/install-vcpkg.sh",
       "${path.root}/../scripts/build/configure-dpkg.sh",
       "${path.root}/../scripts/build/install-yq.sh",
+      // "${path.root}/../scripts/build/install-android-sdk.sh",
       "${path.root}/../scripts/build/install-pypy.sh",
       "${path.root}/../scripts/build/install-python.sh",
       "${path.root}/../scripts/build/install-zstd.sh"
