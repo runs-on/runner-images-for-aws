@@ -75,7 +75,7 @@ variable "subnet_id" {
 
 variable "volume_size" {
   type    = number
-  default = 40
+  default = 30
 }
 
 variable "volume_type" {
@@ -96,7 +96,7 @@ source "amazon-ebs" "build_ebs" {
   # make AMIs publicly accessible
   ami_groups                                = ["all"]
   ebs_optimized                             = true
-  spot_instance_types                       = ["m7a.xlarge", "m7i.xlarge", "m7i-flex.xlarge"]
+  spot_instance_types                       = ["m7a.xlarge", "c7a.xlarge"]
   spot_price                                = "1.00"
   region                                    = "${var.region}"
   ssh_username                              = "ubuntu"
@@ -115,8 +115,8 @@ source "amazon-ebs" "build_ebs" {
     volume_type = "${var.volume_type}"
     volume_size = "${var.volume_size}"
     delete_on_termination = "true"
-    iops = 4000
-    throughput = 1000
+    iops = 3000
+    throughput = 750
     encrypted = "false"
   }
 
@@ -149,10 +149,20 @@ build {
   
   sources = ["source.amazon-ebs.build_ebs"]
 
+  provisioner "file" {
+    source      = "${path.root}/../custom/files/01_runs_on.cfg"
+    destination = "/tmp/01_runs_on.cfg"
+  }
+
+  provisioner "shell" {
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    inline          = ["mv /tmp/01_runs_on.cfg /etc/cloud/cloud.cfg.d/"]
+  }
+
   # Dummy file added to please Azure script compatibility
   provisioner "file" {
     destination = "/tmp/waagent.conf"
-    source      = "${path.root}/../custom/waagent.conf"
+    source      = "${path.root}/../custom/files/waagent.conf"
   }
 
   provisioner "shell" {
@@ -360,7 +370,7 @@ build {
   provisioner "shell" {
     execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     pause_before        = "1m0s"
-    scripts             = ["${path.root}/../custom/runner-user.sh", "${path.root}/../scripts/build/cleanup.sh"]
+    scripts             = ["${path.root}/../custom/files/runner-user.sh", "${path.root}/../scripts/build/cleanup.sh"]
     start_retry_timeout = "10m"
   }
 
