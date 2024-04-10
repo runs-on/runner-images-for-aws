@@ -16,6 +16,6 @@ Supported regions:
 - Oregon (`us-west-2`)
 - Frankfurt (`eu-central-1`)
 
-For x64, search for `runs-on-v2-ubuntu22-full-x64-*` with owner `135269210855`.
+For x64, search for `runs-on-v2.2-ubuntu22-full-x64-*` with owner `135269210855`.
 
-For ARM64, search for `runs-on-v2-ubuntu22-full-arm64-*` with owner `135269210855`.
+For ARM64, search for `runs-on-v2.2-ubuntu22-full-arm64-*` with owner `135269210855`.
