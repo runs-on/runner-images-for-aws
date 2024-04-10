@@ -139,10 +139,15 @@ build {
   
   sources = ["source.amazon-ebs.build_ebs"]
 
+  provisioner "shell" {
+    execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    scripts             = ["${path.root}/../custom/files/pre.sh"]
+  }
+
   # Dummy file added to please Azure script compatibility
   provisioner "file" {
     destination = "/tmp/waagent.conf"
-    source      = "${path.root}/../custom/waagent.conf"
+    source      = "${path.root}/../custom/files/waagent.conf"
   }
 
   provisioner "shell" {
@@ -266,6 +271,7 @@ build {
       "${path.root}/../scripts/build/install-terraform.sh",
       "${path.root}/../scripts/build/configure-dpkg.sh",
       "${path.root}/../scripts/build/install-yq.sh",
+      // "${path.root}/../scripts/build/install-android-sdk.sh",
       "${path.root}/../scripts/build/install-zstd.sh"
     ]
   }
@@ -301,6 +307,11 @@ build {
   }
 
   provisioner "shell" {
+    execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    scripts             = ["${path.root}/../custom/files/runner-user.sh"]
+  }
+
+  provisioner "shell" {
     execute_command   = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     expect_disconnect = true
     inline            = ["echo 'Reboot VM'", "sudo reboot"]
@@ -309,7 +320,7 @@ build {
   provisioner "shell" {
     execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     pause_before        = "1m0s"
-    scripts             = ["${path.root}/../custom/runner-user.sh", "${path.root}/../scripts/build/cleanup.sh"]
+    scripts             = ["${path.root}/../scripts/build/cleanup.sh", "${path.root}/../custom/files/after-reboot.sh"]
     start_retry_timeout = "10m"
   }
 

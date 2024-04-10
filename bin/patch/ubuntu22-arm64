@@ -19,8 +19,7 @@ cp patches/ubuntu/build/install-powershell.sh "$release_dir/images/ubuntu/script
 
 # custom stuff
 mkdir -p $release_dir/images/ubuntu/custom
-cp patches/ubuntu/runner-user.sh "$release_dir/images/ubuntu/custom/runner-user.sh"
-cp patches/ubuntu/waagent.conf "$release_dir/images/ubuntu/custom/waagent.conf"
+cp -r patches/ubuntu/files $release_dir/images/ubuntu/custom/
 
 # fix other build scripts inplace
 sed -i 's|awscli-exe-linux-x86_64.zip|awscli-exe-linux-aarch64.zip|g' $build_dir/*.sh
@@ -38,10 +37,13 @@ sed -i 's|arch=="amd64"|arch=="arm64"|g' $build_dir/*.sh
 
 # Save ~3.2GB by removing default docker images
 yq -oj -i '.docker.images = []' $TOOLSET_PATH
+
+# Use official runners for CodeQL
 yq -oj -i 'del(.toolcache[] | select(.name == "CodeQL"))' $TOOLSET_PATH
 
-# only keep one last python version
-yq -oj -i 'eval(.toolcache[] | select(.name == "Python") | .versions |= [.[-1]])' $TOOLSET_PATH
+# only keep 4 last python version
+yq -oj -i 'eval(.toolcache[] | select(.name == "Python") | .versions |= [.[-4],.[-3],.[-2],.[-1]])' $TOOLSET_PATH
+# yq -oj -i 'eval(.toolcache[] | select(.name == "Python") | .versions |= [.[-1]])' $TOOLSET_PATH
 # only keep one last pypy version
 yq -oj -i 'eval(.toolcache[] | select(.name == "PyPy") | .versions |= [.[-1]])' $TOOLSET_PATH
 # only keep one last go version
@@ -50,6 +52,15 @@ yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .default |= (parent | .ve
 # only keep one last clang version
 yq -oj -i 'eval(.clang | .versions |= [.[-1]])' $TOOLSET_PATH
 yq -oj -i 'eval(.clang | .default_version |= (parent | .versions[-1]))' $TOOLSET_PATH
+# only keep latest dotnet version
+yq -oj -i 'eval(.dotnet | .aptPackages |= [.[-1]])' $TOOLSET_PATH
+yq -oj -i 'eval(.dotnet | .versions |= [.[-1]])' $TOOLSET_PATH
+# remove PSScriptAnalyzer
+yq -oj -i 'eval(del(.powershellModules[] | select(.name == "PSScriptAnalyzer")))' $TOOLSET_PATH
+# only keep the default java version
+yq -oj -i 'eval(.java | .versions |= [(parent | .default)])' $TOOLSET_PATH
+# only keep latest gfortran version
+yq -oj -i 'eval(.gfortran | .versions |= [.[-1]])' $TOOLSET_PATH
 # only keep one last gcc version
 yq -oj -i 'eval(.gcc | .versions |= [.[-1]])' $TOOLSET_PATH
 # remove sphinxsearch
@@ -59,6 +70,11 @@ yq -oj -i 'del(.apt.cmd_packages[] | select(. == "sphinxsearch"))' $TOOLSET_PATH
 yq -oj -i 'del(.node_modules[] | (select(.name != "yarn" and .name != "typescript")))' $TOOLSET_PATH
 
 yq -oj -i 'del(.azureModules[])' $TOOLSET_PATH
+
+# Remove chromium since chrome already installed. 500MB saved
+# https://github.com/actions/runner-images/issues/2388
+# might need to add symlinks if causing issues, but let's see
+sed -i 's|# Download and unpack Chromium|invoke_tests "Browsers" "Chrome" && exit 0|' $release_dir/images/ubuntu/scripts/build/install-google-chrome.sh
 
 # finally, copy over the packer template
 cp patches/ubuntu/templates/ubuntu-22.04-arm64-aws.pkr.hcl "$release_dir/images/ubuntu/templates/"

@@ -75,7 +75,7 @@ variable "subnet_id" {
 
 variable "volume_size" {
   type    = number
-  default = 40
+  default = 30
 }
 
 variable "volume_type" {
@@ -96,7 +96,7 @@ source "amazon-ebs" "build_ebs" {
   # make AMIs publicly accessible
   ami_groups                                = ["all"]
   ebs_optimized                             = true
-  spot_instance_types                       = ["m7a.xlarge", "m7i.xlarge", "m7i-flex.xlarge"]
+  spot_instance_types                       = ["m7a.xlarge", "c7a.xlarge", "m7i-flex.xlarge"]
   spot_price                                = "1.00"
   region                                    = "${var.region}"
   ssh_username                              = "ubuntu"
@@ -115,8 +115,8 @@ source "amazon-ebs" "build_ebs" {
     volume_type = "${var.volume_type}"
     volume_size = "${var.volume_size}"
     delete_on_termination = "true"
-    iops = 4000
-    throughput = 1000
+    iops = 3000
+    throughput = 750
     encrypted = "false"
   }
 
@@ -149,10 +149,15 @@ build {
   
   sources = ["source.amazon-ebs.build_ebs"]
 
+  provisioner "shell" {
+    execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    scripts             = ["${path.root}/../custom/files/pre.sh"]
+  }
+
   # Dummy file added to please Azure script compatibility
   provisioner "file" {
     destination = "/tmp/waagent.conf"
-    source      = "${path.root}/../custom/waagent.conf"
+    source      = "${path.root}/../custom/files/waagent.conf"
   }
 
   provisioner "shell" {
@@ -262,8 +267,9 @@ build {
       "${path.root}/../scripts/build/install-runner-package.sh",
       "${path.root}/../scripts/build/install-apt-common.sh",
       "${path.root}/../scripts/build/install-azcopy.sh",
-      "${path.root}/../scripts/build/install-azure-cli.sh",
-      "${path.root}/../scripts/build/install-azure-devops-cli.sh",
+      // Massive, disabling for now since this is not our target
+      // "${path.root}/../scripts/build/install-azure-cli.sh",
+      // "${path.root}/../scripts/build/install-azure-devops-cli.sh",
       "${path.root}/../scripts/build/install-bicep.sh",
       "${path.root}/../scripts/build/install-aliyun-cli.sh",
       "${path.root}/../scripts/build/install-apache.sh",
@@ -283,10 +289,11 @@ build {
       "${path.root}/../scripts/build/install-git-lfs.sh",
       "${path.root}/../scripts/build/install-github-cli.sh",
       "${path.root}/../scripts/build/install-google-chrome.sh",
-      "${path.root}/../scripts/build/install-google-cloud-cli.sh",
+      // so massive, faster to just download if needed
+      // "${path.root}/../scripts/build/install-google-cloud-cli.sh",
       "${path.root}/../scripts/build/install-java-tools.sh",
       "${path.root}/../scripts/build/install-kubernetes-tools.sh",
-      "${path.root}/../scripts/build/install-oc-cli.sh",
+      // "${path.root}/../scripts/build/install-oc-cli.sh",
       "${path.root}/../scripts/build/install-leiningen.sh",
       "${path.root}/../scripts/build/install-miniconda.sh",
       // "${path.root}/../scripts/build/install-mono.sh",
@@ -295,7 +302,7 @@ build {
       "${path.root}/../scripts/build/install-mssql-tools.sh",
       "${path.root}/../scripts/build/install-sqlpackage.sh",
       // "${path.root}/../scripts/build/install-nginx.sh",
-      "${path.root}/../scripts/build/install-nvm.sh",
+      // "${path.root}/../scripts/build/install-nvm.sh",
       "${path.root}/../scripts/build/install-nodejs.sh",
       // for some reason doesn't end up in the correct folder, so removing
       // "${path.root}/../scripts/build/install-bazel.sh",
@@ -306,14 +313,15 @@ build {
       "${path.root}/../scripts/build/install-ruby.sh",
       "${path.root}/../scripts/build/install-rlang.sh",
       "${path.root}/../scripts/build/install-rust.sh",
-      "${path.root}/../scripts/build/install-julia.sh",
+      // "${path.root}/../scripts/build/install-julia.sh",
       "${path.root}/../scripts/build/install-sbt.sh",
       "${path.root}/../scripts/build/install-selenium.sh",
       "${path.root}/../scripts/build/install-terraform.sh",
       "${path.root}/../scripts/build/install-packer.sh",
-      "${path.root}/../scripts/build/install-vcpkg.sh",
+      // "${path.root}/../scripts/build/install-vcpkg.sh",
       "${path.root}/../scripts/build/configure-dpkg.sh",
       "${path.root}/../scripts/build/install-yq.sh",
+      // Use https://github.com/android-actions/setup-android instead (adds 14s)
       // "${path.root}/../scripts/build/install-android-sdk.sh",
       "${path.root}/../scripts/build/install-pypy.sh",
       "${path.root}/../scripts/build/install-python.sh",
@@ -352,6 +360,11 @@ build {
   }
 
   provisioner "shell" {
+    execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    scripts             = ["${path.root}/../custom/files/runner-user.sh"]
+  }
+
+  provisioner "shell" {
     execute_command   = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     expect_disconnect = true
     inline            = ["echo 'Reboot VM'", "sudo reboot"]
@@ -360,7 +373,7 @@ build {
   provisioner "shell" {
     execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     pause_before        = "1m0s"
-    scripts             = ["${path.root}/../custom/runner-user.sh", "${path.root}/../scripts/build/cleanup.sh"]
+    scripts             = ["${path.root}/../scripts/build/cleanup.sh", "${path.root}/../custom/files/after-reboot.sh"]
     start_retry_timeout = "10m"
   }
 
