@@ -1,0 +1,71 @@
+#!/usr/bin/env ruby
+
+require 'aws-sdk-ec2' # v3
+
+INSTANCE_TYPE = ENV.fetch('INSTANCE_TYPE', 'm7i-flex.large')
+
+def launch_ami(ami_id, subnet_id, security_group_id, user_data_script)
+  ec2 = Aws::EC2::Client.new
+  instance_params = {
+    image_id: ami_id,
+    instance_type: INSTANCE_TYPE,
+    min_count: 1,
+    max_count: 1,
+    subnet_id: subnet_id,
+    security_group_ids: [security_group_id],
+    instance_initiated_shutdown_behavior: "terminate",
+    user_data: Base64.encode64(user_data_script),
+    tag_specifications: [{
+      resource_type: "instance",
+      tags: [
+        {
+          key: "runs-on-service-enabled",
+          value: "false"
+        },
+        {
+          key: "runs-on-bucket-cache",
+          value: "dummy"
+        },
+        {
+          key: "runs-on-version",
+          value: "dummy"
+        },
+        {
+          key: "runs-on-role-id",
+          value: "dummy"
+        },
+        { key: "application", value: "RunsOn" }
+      ]
+    }]
+  }
+
+  instance = ec2.run_instances(instance_params).instances.first
+  puts "Launched instance with ID: #{instance.instance_id}"
+
+  # Wait for the instance to be running
+  ec2.wait_until(:instance_running, instance_ids: [instance.instance_id])
+  instance = ec2.describe_instances(instance_ids: [instance.instance_id]).reservations.first.instances.first
+
+  puts "Instance Public IP: #{instance.public_ip_address}"
+end
+
+subnet_id = ENV.fetch("SUBNET_ID")
+ami_id = ENV.fetch("AMI_ID", ARGV[0])
+security_group_id = ENV.fetch("SECURITY_GROUP_ID")
+user_data = <<EOF
+#!/bin/bash
+set -ex
+
+mkdir -p /root/.ssh
+chmod 0700 /root/.ssh
+curl --retry 3 --connect-timeout 5 -L https://github.com/crohr.keys -o /root/.ssh/authorized_keys
+chmod 0600 /root/.ssh/authorized_keys
+systemctl start ssh.service || true
+
+EOF
+
+# Example usage
+launch_ami(ami_id, subnet_id, security_group_id, user_data)
+
+
+
