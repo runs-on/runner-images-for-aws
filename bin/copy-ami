@@ -32,14 +32,31 @@ def copy_ami_to_regions(ami_id, regions, name)
   end
 end
 
-if ARGV.length < 2
-  puts "Usage: #{$PROGRAM_NAME} <ami_id> <name> [region1,region2,...]"
+if ARGV.length < 1
+  puts "Usage: #{$PROGRAM_NAME} <ami_id> [name] [region1,region2,...]"
   exit 1
 end
 
 ami_id = ARGV.shift
 name = ARGV.shift
-regions = ARGV[0] ? ARGV.shift.split(',') : ["us-east-1", "us-west-2", "eu-west-1", "eu-central-1"]
+regions = ARGV[0] ? ARGV.shift.split(',') : ["us-east-1", "us-west-2", "eu-west-1", "eu-central-1", "eu-west-2", "ap-northeast-1"]
+
+if name.nil?
+  ec2 = Aws::EC2::Client.new(region: "us-east-1")
+  ami_description = ec2.describe_images({
+    image_ids: [ami_id]
+  }).images.first
+
+  if ami_description.nil?
+    puts "AMI #{ami_id} not found."
+    exit 1
+  end
+
+  architecture = ami_description.architecture.sub("x86_64", "x64")
+  puts "AMI #{ami_id} architecture is #{architecture}."
+
+  name = "runs-on-v2.2-ubuntu22-full-#{architecture}-#{Time.now.strftime('%Y%m%d%H%M')}"
+end
 
 if name.start_with?("runs-on-v")
   puts "Warning: you are copying the AMI as an official image (#{name})."
