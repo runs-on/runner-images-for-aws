@@ -1,12 +1,12 @@
 name: Check arm64
 
 concurrency:
-  group: check
+  group: check-arm64
 
 on:
   workflow_dispatch:
-  # schedule:
-  #   - cron: "0 8 * * *"
+  schedule:
+    - cron: "0 4 */15 * 4"
 
 jobs:
   check:
@@ -28,16 +28,16 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
-      - run: bundle exec bin/01-pull --arch arm64
+      - run: bundle exec bin/01-pull --arch arm64 --force
         id: pull
       - run: bin/02-build ${{ steps.check.outputs.release_dir }}
         if: ${{ steps.check.outputs.release_dir }}
         timeout-minutes: 300
         env:
-          AMI_PREFIX: runs-on-v2
+          AMI_PREFIX: runs-on-dev
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "Add ${{ steps.pull.outputs.release_dir }}"
+          commit_message: "Update ${{ steps.pull.outputs.release_dir }} from upstream"
       - if: always()
         # make sure we terminate instances even if workflow is canceled
         run: bin/cleanup-instances
