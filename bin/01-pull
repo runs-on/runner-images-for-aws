@@ -24,13 +24,9 @@ rescue Slop::Error => e
   exit 1
 end
 
-# Fetch the latest release from the upstream repository
-RELEASES = JSON.parse(URI.open('https://api.github.com/repos/actions/runner-images/releases').read)
-LATEST_RELEASE = RELEASES.select{|r| r["prerelease"] == false && r["tag_name"].include?(options[:dist])}.sort_by{|r| r["published_at"]}.last
-
-dist, date = LATEST_RELEASE["tag_name"].split("/")
 arch = options[:arch]
-RELEASE_DIR = "releases/#{dist}/#{date}-#{arch}"
+dist = options[:dist]
+RELEASE_DIR = "releases/#{dist}/#{arch}"
 
 if options[:force]
   FileUtils.rm_rf(RELEASE_DIR)
@@ -42,7 +38,7 @@ if Dir.exist?(RELEASE_DIR)
 end
 
 FileUtils.mkdir_p(File.dirname(RELEASE_DIR))
-system("git clone --depth 1 --branch \"#{dist}/#{date}\" https://github.com/actions/runner-images.git \"#{RELEASE_DIR}\"")
+system("git clone --depth 1 --branch main https://github.com/actions/runner-images.git \"#{RELEASE_DIR}\"")
 ['.git', '.github', 'docs', 'images.CI', 'images/macos', 'images/windows'].each do |useless_dir|
   FileUtils.rm_rf("#{RELEASE_DIR}/#{useless_dir}")
 end
@@ -54,7 +50,7 @@ if ENV['GITHUB_OUTPUT']
 end
 
 puts "Next (CI):"
-puts "AMI_PREFIX=runs-on-v2 ./bin/02-build #{RELEASE_DIR}"
+puts "AMI_PREFIX=runs-on-v2.2 ./bin/02-build #{RELEASE_DIR}"
 puts
 puts "Next (DEV):"
 puts "AMI_PREFIX=runs-on-dev env $(cat .env) ./bin/02-build #{RELEASE_DIR}"
