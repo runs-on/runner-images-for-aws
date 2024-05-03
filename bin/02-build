@@ -9,11 +9,7 @@ if [ -z "$RELEASE_DIR" ]; then
 fi
 
 if [ -z "$AMI_REGIONS" ]; then
-  if [ -n "${CI:=""}" ]; then
-    export AMI_REGIONS='["us-east-1","eu-west-1","us-west-2","eu-central-1"]'
-  else
-    export AMI_REGIONS='["us-east-1"]'
-  fi
+  export AMI_REGIONS='["us-east-1"]'
 fi
 
 set -u
