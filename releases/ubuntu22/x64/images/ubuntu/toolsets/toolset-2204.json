@@ -252,12 +252,12 @@
   },
   "gcc": {
     "versions": [
-      "g++-13"
+      "g++-12"
     ]
   },
   "gfortran": {
     "versions": [
-      "gfortran-13"
+      "gfortran-12"
     ]
   },
   "php": {
