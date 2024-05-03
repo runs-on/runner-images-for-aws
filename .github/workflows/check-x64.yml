@@ -31,7 +31,6 @@ jobs:
       - run: bundle exec bin/01-pull --arch x64 --force
         id: pull
       - run: bin/02-build ${{ steps.check.outputs.release_dir }}
-        if: ${{ steps.check.outputs.release_dir }}
         timeout-minutes: 300
         env:
           AMI_PREFIX: runs-on-dev
