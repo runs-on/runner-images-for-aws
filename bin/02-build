@@ -17,18 +17,17 @@ set -u
 
 # Extract RELEASE_DIST and RELEASE_DATE from RELEASE_DIR
 RELEASE_DIST=$(basename $(dirname "$RELEASE_DIR"))
-RELEASE_DATE=$(basename "$RELEASE_DIR" | cut -d '-' -f 1)
-RELEASE_ARCH=$(basename "$RELEASE_DIR" | cut -d '-' -f 2)
-
-export AMI_PREFIX=${AMI_PREFIX:="runs-on-dev"}
-export AMI_NAME=${AMI_NAME:="${AMI_PREFIX}-${RELEASE_DIST}-full-$RELEASE_ARCH-${RELEASE_DATE}-$(date +%s)"}
+RELEASE_ARCH=$(basename "$RELEASE_DIR" | cut -d '-' -f 1)
 # for packer
 export IMAGE_OS="$RELEASE_DIST"
-export IMAGE_VERSION="$RELEASE_DATE"
+export IMAGE_VERSION="$(date -u +%Y%m%d%H%M%S)"
 
+export AMI_PREFIX=${AMI_PREFIX:="runs-on-dev"}
+export AMI_NAME=${AMI_NAME:="${AMI_PREFIX}-${RELEASE_DIST}-full-$RELEASE_ARCH-$IMAGE_VERSION"}
 
 echo "AMI_NAME=$AMI_NAME"
 echo "AMI_REGIONS=$AMI_REGIONS"
+
 sleep 5
 
 case "$RELEASE_DIST" in
