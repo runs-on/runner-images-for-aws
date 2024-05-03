@@ -30,7 +30,7 @@ jobs:
           aws-region: us-east-1
       - run: bundle exec bin/01-pull --arch arm64 --force
         id: pull
-      - run: bin/02-build ${{ steps.check.outputs.release_dir }}
+      - run: bin/02-build releases/ubuntu22/arm64
         timeout-minutes: 300
         env:
           AMI_PREFIX: runs-on-dev
