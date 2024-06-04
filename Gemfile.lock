@@ -14,6 +14,7 @@ GEM
     aws-sigv4 (1.8.0)
       aws-eventstream (~> 1, >= 1.0.2)
     jmespath (1.6.2)
+    net-ssh (7.2.3)
     ox (2.14.18)
     slop (4.10.1)
     terminal-table (3.0.2)
@@ -25,6 +26,7 @@ PLATFORMS
 
 DEPENDENCIES
   aws-sdk-ec2
+  net-ssh
   ox
   slop
   terminal-table
