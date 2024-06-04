@@ -67,6 +67,16 @@ variable "ami_regions" {
   type    = list(string)
 }
 
+variable "source_ami_owner" {
+  type    = string
+  default = "099720109477"
+}
+
+variable "source_ami_name" {
+  type    = string
+  default = "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"
+}
+
 // make sure the subnet auto-assigns public IPs
 variable "subnet_id" {
   type    = string
@@ -138,10 +148,10 @@ source "amazon-ebs" "build_ebs" {
   source_ami_filter {
     filters = {
       virtualization-type = "hvm"
-      name                = "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"
+      name                = "${var.source_ami_name}"
       root-device-type    = "ebs"
     }
-    owners      = ["099720109477"]
+    owners      = ["${var.source_ami_owner}"]
     most_recent = true
   }
 }

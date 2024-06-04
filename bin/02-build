@@ -33,7 +33,11 @@ sleep 5
 case "$RELEASE_DIST" in
   "ubuntu22")
     export PACKER_TEMPLATE="$RELEASE_DIR/images/ubuntu/templates/ubuntu-22.04-$RELEASE_ARCH-aws.pkr.hcl"
-    export SOURCE_AMI_NAME="ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"
+    if [ "$RELEASE_ARCH" == "arm64" ]; then
+      export SOURCE_AMI_NAME="ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-arm64-server-*"
+    else
+      export SOURCE_AMI_NAME="ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*"
+    fi
     export SOURCE_AMI_OWNER="099720109477"
     export VOLUME_SIZE=30
     ;;
