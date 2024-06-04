@@ -60,8 +60,8 @@ mkdir -p /root/.ssh
 chmod 0700 /root/.ssh
 curl --retry 3 --connect-timeout 5 -L https://github.com/crohr.keys -o /root/.ssh/authorized_keys
 chmod 0600 /root/.ssh/authorized_keys
-systemctl start ssh.service || true
-
+systemctl enable ssh || true
+systemctl start ssh || true
 EOF
 
 # Example usage

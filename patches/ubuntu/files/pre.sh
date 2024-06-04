@@ -10,6 +10,10 @@ cat > /etc/cloud/cloud.cfg.d/01_runs_on.cfg <<EOF
 # The modules that run in the 'init' stage
 cloud_init_modules:
   - seed_random
+  - growpart
+  - resizefs
+  - disk_setup
+  - mounts
   - users_groups
   - ssh
 
