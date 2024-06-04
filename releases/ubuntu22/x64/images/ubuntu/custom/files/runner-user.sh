@@ -58,6 +58,8 @@ rm -f /home/ubuntu/minikube-linux-amd64
 rm -rf /usr/share/doc
 rm -rf /usr/share/man
 rm -rf /usr/share/icons
+# remove linux kernel source code
+rm -rf /usr/src/linux-*
 
 rm -rf /usr/local/n
 rm -rf /usr/local/doc
