@@ -1,7 +1,7 @@
 name: Check arm64
 
 concurrency:
-  group: check-arm64
+  group: check
 
 on:
   workflow_dispatch:
