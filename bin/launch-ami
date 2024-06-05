@@ -15,6 +15,16 @@ def launch_ami(ami_id, subnet_id, security_group_id, user_data_script)
     security_group_ids: [security_group_id],
     instance_initiated_shutdown_behavior: "terminate",
     user_data: Base64.encode64(user_data_script),
+    block_device_mappings: [
+      {
+        device_name: "/dev/sda1",
+        ebs: {
+          volume_type: "gp3",
+          volume_size: 60,
+          delete_on_termination: true
+        }
+      }
+    ],
     tag_specifications: [{
       resource_type: "instance",
       tags: [
