@@ -2,9 +2,7 @@
 require 'aws-sdk-ec2'
 require 'terminal-table'
 
-AWS_PROFILE = ENV.fetch('AWS_PROFILE')
 AMI_PREFIX = ENV.fetch('AMI_PREFIX', 'runs-on-dev')
-
 
 def cleanup_region(region)
   ec2 = Aws::EC2::Client.new(region: region)
