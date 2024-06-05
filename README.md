@@ -12,6 +12,7 @@ Official images are replicated and published every 15 days.
 Supported regions:
 
 - North Virginia (`us-east-1`)
+- Ohio (`us-east-2`)
 - Oregon (`us-west-2`)
 - Ireland (`eu-west-1`)
 - Frankfurt (`eu-central-1`)
