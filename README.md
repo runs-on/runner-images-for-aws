@@ -18,8 +18,15 @@ Supported regions:
 - Frankfurt (`eu-central-1`)
 - London (`eu-west-2`)
 - Tokyo (`ap-northeast-1`)
+- Singapore (`ap-southeast-1`)
 - Sydney (`ap-southeast-2`)
 
-For the `x86_64` image, search for `runs-on-v2.2-ubuntu22-full-x64-*` with owner `135269210855`.
+For the `x86_64` image, search for:
 
-For the `ARM64` image, search for `runs-on-v2.2-ubuntu22-full-arm64-*` with owner `135269210855`.
+*  name: `runs-on-v2.2-ubuntu22-full-x64-*`
+*  owner: `135269210855`
+
+For the `ARM64` image, search for:
+
+*  name: `runs-on-v2.2-ubuntu22-full-arm64-*`
+*  owner: `135269210855`
