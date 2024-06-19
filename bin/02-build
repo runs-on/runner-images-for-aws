@@ -31,6 +31,16 @@ echo "AMI_REGIONS=$AMI_REGIONS"
 sleep 5
 
 case "$RELEASE_DIST" in
+  "ubuntu24")
+    export PACKER_TEMPLATE="$RELEASE_DIR/images/ubuntu/templates/ubuntu-24.04-$RELEASE_ARCH-aws.pkr.hcl"
+    if [ "$RELEASE_ARCH" == "arm64" ]; then
+      export SOURCE_AMI_NAME="ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-arm64-server-*"
+    else
+      export SOURCE_AMI_NAME="ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"
+    fi
+    export SOURCE_AMI_OWNER="099720109477"
+    export VOLUME_SIZE=30
+    ;;
   "ubuntu22")
     export PACKER_TEMPLATE="$RELEASE_DIR/images/ubuntu/templates/ubuntu-22.04-$RELEASE_ARCH-aws.pkr.hcl"
     if [ "$RELEASE_ARCH" == "arm64" ]; then
