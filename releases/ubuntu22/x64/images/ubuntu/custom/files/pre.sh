@@ -1,10 +1,16 @@
 #!/bin/bash
-
 set -exo pipefail
 
 cat > /root/.gemrc <<EOF
 gem: --no-document
 EOF
+
+cd /tmp
+wget https://amazoncloudwatch-agent.s3.amazonaws.com/ubuntu/amd64/latest/amazon-cloudwatch-agent.deb
+sudo dpkg -i -E ./amazon-cloudwatch-agent.deb
+systemctl disable amazon-cloudwatch-agent
+rm -f ./amazon-cloudwatch-agent.deb
+cd -
 
 cat > /etc/cloud/cloud.cfg.d/01_runs_on.cfg <<EOF
 # The modules that run in the 'init' stage
