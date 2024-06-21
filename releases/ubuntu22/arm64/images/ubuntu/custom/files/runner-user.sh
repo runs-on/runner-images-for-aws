@@ -54,7 +54,7 @@ systemctl disable apport.service logrotate.service grub-common.service keyboard-
 systemctl disable ufw.service snapd.service snap.lxd.activate.service snapd.apparmor.service ec2-instance-connect.service snap.amazon-ssm-agent.amazon-ssm-agent.service cron.service
 
 # cleanup
-rm -f /home/ubuntu/minikube-linux-amd64
+rm -f /home/ubuntu/minikube-linux-arm64
 rm -rf /usr/share/doc
 rm -rf /usr/share/man
 rm -rf /usr/share/icons
