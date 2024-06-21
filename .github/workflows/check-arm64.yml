@@ -45,7 +45,7 @@ jobs:
   test:
     needs: check
     strategy:
-      concurrency: 1
+      max-parallel: 1
       matrix:
         index: [1, 2, 3, 4, 5]
     runs-on: runs-on,runner=2cpu-linux-arm64,image=ubuntu22-dev-arm64,index=${{ matrix.index }}
