@@ -6,10 +6,11 @@ concurrency:
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 4 */15 * 4"
+    - cron: "0 4 */15 * *"
 
 jobs:
   check:
+    id: check
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -28,15 +29,26 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
-      - run: bundle exec bin/01-pull --arch arm64 --force
-        id: pull
-      - run: bin/02-build releases/ubuntu22/arm64
-        timeout-minutes: 300
-        env:
-          AMI_PREFIX: runs-on-dev
-      - uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "Update ${{ steps.pull.outputs.release_dir }} from upstream"
-      - if: always()
-        # make sure we terminate instances even if workflow is canceled
-        run: bin/cleanup-instances
+      # - run: bundle exec bin/01-pull --arch arm64 --force
+      #   id: pull
+      # - run: bin/02-build releases/ubuntu22/arm64
+      #   timeout-minutes: 300
+      #   env:
+      #     AMI_PREFIX: runs-on-dev
+      # - uses: stefanzweifel/git-auto-commit-action@v5
+      #   with:
+      #     commit_message: "Update ${{ steps.pull.outputs.release_dir }} from upstream"
+      # - if: always()
+      #   # make sure we terminate instances even if workflow is canceled
+      #   run: bin/cleanup-instances
+
+  test:
+    needs: check
+    strategy:
+      concurrency: 1
+      matrix:
+        index: [1, 2, 3, 4, 5]
+    runs-on: runs-on,runner=2cpu-linux-arm64,image=ubuntu22-dev-arm64,index=${{ matrix.index }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Testing arm64 ${{ matrix.index }}"
