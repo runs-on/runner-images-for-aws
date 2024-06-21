@@ -10,7 +10,6 @@ on:
 
 jobs:
   check:
-    id: check
     runs-on: ubuntu-latest
     permissions:
       contents: write
