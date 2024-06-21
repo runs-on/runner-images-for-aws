@@ -11,6 +11,7 @@ fi
 
 release_dir="$RELEASE_DIR"
 build_dir="$release_dir/images/ubuntu/scripts/build"
+custom_dir="$release_dir/images/ubuntu/custom"
 toolsets_dir="$release_dir/images/ubuntu/toolsets"
 TOOLSET_PATH="$toolsets_dir/toolset-2204.json"
 
@@ -18,8 +19,9 @@ TOOLSET_PATH="$toolsets_dir/toolset-2204.json"
 cp patches/ubuntu/build/install-powershell.sh "$release_dir/images/ubuntu/scripts/build/"
 
 # custom stuff
-mkdir -p $release_dir/images/ubuntu/custom
-cp -r patches/ubuntu/files $release_dir/images/ubuntu/custom/
+mkdir -p $custom_dir
+cp -r patches/ubuntu/files $custom_dir/
+sed -i 's|amd64|arm64|g' $custom_dir/files/*.sh
 
 # fix other build scripts inplace
 sed -i 's|awscli-exe-linux-x86_64.zip|awscli-exe-linux-aarch64.zip|g' $build_dir/*.sh
