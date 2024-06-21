@@ -41,13 +41,40 @@ jobs:
       #   # make sure we terminate instances even if workflow is canceled
       #   run: bin/cleanup-instances
 
-  test:
+  test1:
     needs: check
-    strategy:
-      max-parallel: 1
-      matrix:
-        index: [1, 2, 3, 4, 5]
-    runs-on: runs-on,runner=2cpu-linux-x64,image=ubuntu22-dev-x64,index=${{ matrix.index }}
+    runs-on: runs-on,runner=2cpu-linux-x64,image=ubuntu22-dev-x64
     steps:
       - uses: actions/checkout@v4
-      - run: echo "Testing x64 ${{ matrix.index }}"
+      - run: echo "Testing x64"
+
+
+  test2:
+    needs: test1
+    runs-on: runs-on,runner=2cpu-linux-x64,image=ubuntu22-dev-x64
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Testing x64"
+
+
+  test3:
+    needs: test2
+    runs-on: runs-on,runner=2cpu-linux-x64,image=ubuntu22-dev-x64
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Testing x64"
+
+
+  test4:
+    needs: test3
+    runs-on: runs-on,runner=2cpu-linux-x64,image=ubuntu22-dev-x64
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Testing x64"
+
+  test5:
+    needs: test4
+    runs-on: runs-on,runner=2cpu-linux-x64,image=ubuntu22-dev-x64
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Testing x64"
