@@ -1,0 +1,11 @@
+images:
+  ubuntu22-dev-x64:
+    platform: "linux"
+    arch: "x64"
+    owner: "135269210855"
+    name: "runs-on-dev-ubuntu22-full-x64-*"
+  ubuntu22-dev-arm64:
+    platform: "linux"
+    arch: "arm64"
+    owner: "135269210855"
+    name: "runs-on-dev-ubuntu22-full-arm64-*"
