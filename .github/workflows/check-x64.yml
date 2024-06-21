@@ -47,7 +47,7 @@ jobs:
       max-parallel: 1
       matrix:
         index: [1, 2, 3, 4, 5]
-    runs-on: runs-on,runner=2cpu-linux-arm64,image=ubuntu22-dev-arm64,index=${{ matrix.index }}
+    runs-on: runs-on,runner=2cpu-linux-x64,image=ubuntu22-dev-x64,index=${{ matrix.index }}
     steps:
       - uses: actions/checkout@v4
-      - run: echo "Testing arm64 ${{ matrix.index }}"
+      - run: echo "Testing x64 ${{ matrix.index }}"
