@@ -28,19 +28,18 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
-      # - run: bundle exec bin/01-pull --arch arm64 --force
-      #   id: pull
-      # - run: bin/02-build releases/ubuntu22/arm64
-      #   timeout-minutes: 300
-      #   env:
-      #     AMI_PREFIX: runs-on-dev
-      # - uses: stefanzweifel/git-auto-commit-action@v5
-      #   with:
-      #     commit_message: "Update ${{ steps.pull.outputs.release_dir }} from upstream"
-      # - if: always()
-      #   # make sure we terminate instances even if workflow is canceled
-      #   run: bin/cleanup-instances
-
+      - run: bundle exec bin/01-pull --arch arm64 --force
+        id: pull
+      - run: bin/02-build releases/ubuntu22/arm64
+        timeout-minutes: 300
+        env:
+          AMI_PREFIX: runs-on-dev
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Update ${{ steps.pull.outputs.release_dir }} from upstream"
+      - if: always()
+        # make sure we terminate instances even if workflow is canceled
+        run: bin/cleanup-instances
 
   test1:
     needs: check
@@ -49,7 +48,6 @@ jobs:
       - uses: actions/checkout@v4
       - run: echo "Testing arm64"
 
-
   test2:
     needs: test1
     runs-on: runs-on,runner=2cpu-linux-arm64,image=ubuntu22-dev-arm64
@@ -57,14 +55,12 @@ jobs:
       - uses: actions/checkout@v4
       - run: echo "Testing arm64"
 
-
   test3:
     needs: test2
     runs-on: runs-on,runner=2cpu-linux-arm64,image=ubuntu22-dev-arm64
     steps:
       - uses: actions/checkout@v4
       - run: echo "Testing arm64"
-
 
   test4:
     needs: test3
