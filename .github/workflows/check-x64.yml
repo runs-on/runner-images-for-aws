@@ -6,7 +6,7 @@ concurrency:
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 6 */15 * 4"
+    - cron: "0 6 */15 * *"
 
 jobs:
   check:
@@ -40,3 +40,38 @@ jobs:
       - if: always()
         # make sure we terminate instances even if workflow is canceled
         run: bin/cleanup-instances
+
+  test1:
+    needs: check
+    runs-on: runs-on,runner=2cpu-linux-x64,image=ubuntu22-dev-x64
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Testing x64"
+
+  test2:
+    needs: test1
+    runs-on: runs-on,runner=2cpu-linux-x64,image=ubuntu22-dev-x64
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Testing x64"
+
+  test3:
+    needs: test2
+    runs-on: runs-on,runner=2cpu-linux-x64,image=ubuntu22-dev-x64
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Testing x64"
+
+  test4:
+    needs: test3
+    runs-on: runs-on,runner=2cpu-linux-x64,image=ubuntu22-dev-x64
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Testing x64"
+
+  test5:
+    needs: test4
+    runs-on: runs-on,runner=2cpu-linux-x64,image=ubuntu22-dev-x64
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "Testing x64"
