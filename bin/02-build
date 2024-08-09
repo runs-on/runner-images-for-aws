@@ -55,7 +55,7 @@ case "$RELEASE_DIST" in
     export PACKER_TEMPLATE="releases/ubuntu22/$RELEASE_ARCH/images/ubuntu/templates/ubuntu-22.04-$RELEASE_ARCH-aws.pkr.hcl"
     export SOURCE_AMI_NAME="NVIDIA GPU Cloud VMI Base 2024.05.1 x86_64-676eed8d-dcf5-4784-87d7-0de463205c17"
     export SOURCE_AMI_OWNER="679593333241"
-    export VOLUME_SIZE=80
+    export VOLUME_SIZE=128
     ;;
   *)
     echo "Unsupported release dist: $RELEASE_DIST"
