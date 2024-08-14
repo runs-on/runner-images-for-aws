@@ -159,6 +159,11 @@ build {
   sources = ["source.amazon-ebs.build_ebs"]
 
   provisioner "shell" {
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    script          = "${path.root}/../scripts/build/configure-apt-mock.sh"
+  }
+
+  provisioner "shell" {
     execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     scripts             = ["${path.root}/../custom/files/pre.sh"]
   }
