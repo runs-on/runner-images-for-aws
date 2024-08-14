@@ -327,7 +327,7 @@ build {
       // "${path.root}/../scripts/build/install-postgresql.sh",
       // "${path.root}/../scripts/build/install-ruby.sh",
       // "${path.root}/../scripts/build/install-rlang.sh",
-      "${path.root}/../scripts/build/install-rust.sh",
+      // "${path.root}/../scripts/build/install-rust.sh",
       // "${path.root}/../scripts/build/install-julia.sh",
       // "${path.root}/../scripts/build/install-sbt.sh",
       // "${path.root}/../scripts/build/install-selenium.sh",
