@@ -283,7 +283,8 @@ build {
       "${path.root}/../scripts/build/install-bicep.sh",
       "${path.root}/../scripts/build/install-aliyun-cli.sh",
       "${path.root}/../scripts/build/install-apache.sh",
-      "${path.root}/../scripts/build/install-aws-tools.sh",
+      // Conflicts with Nvidia source image
+      // "${path.root}/../scripts/build/install-aws-tools.sh",
       "${path.root}/../scripts/build/install-clang.sh",
       // not enabling it for now, very space consuming
       // "${path.root}/../scripts/build/install-swift.sh",
