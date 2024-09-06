@@ -11,6 +11,9 @@ GEM
     aws-sdk-ec2 (1.447.0)
       aws-sdk-core (~> 3, >= 3.191.0)
       aws-sigv4 (~> 1.1)
+    aws-sdk-servicequotas (1.35.0)
+      aws-sdk-core (~> 3, >= 3.191.0)
+      aws-sigv4 (~> 1.1)
     aws-sigv4 (1.8.0)
       aws-eventstream (~> 1, >= 1.0.2)
     jmespath (1.6.2)
@@ -26,6 +29,7 @@ PLATFORMS
 
 DEPENDENCIES
   aws-sdk-ec2
+  aws-sdk-servicequotas
   net-ssh
   ox
   slop

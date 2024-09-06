@@ -1,10 +1,39 @@
 #!/usr/bin/env ruby
 require 'aws-sdk-ec2'
 require 'terminal-table'
+require 'slop'
+require 'yaml'
+
+REGIONS = YAML.load_file(File.expand_path("../config.yml", __dir__)).fetch("regions")
+
+options = {}
+
+usage = Slop::Options.new do |opts|
+  opts.banner = "Usage: #{$0} [--force] [--all] [--help]"
+  opts.bool '-f', '--force', 'Do not ask for confirmation'
+  opts.bool '-a', '--all', 'Consider all AMIs [warn: this could delete all AMIs]'
+  opts.bool '-h', '--help', 'Show help'
+end
+
+begin
+  options = usage.parse(ARGV).to_hash
+rescue Slop::Error => e
+  puts "Error: #{e.message}"
+  puts
+  puts usage
+  exit 1
+end
+
+if options[:help]
+  puts usage
+  exit 0
+end
 
 AMI_PREFIX = ENV.fetch('AMI_PREFIX', 'runs-on-dev')
 
-def cleanup_region(region)
+def cleanup_region(region, options)
+  force, all = options.values_at(:force, :all)
+  skip_most_recent = !all
   ec2 = Aws::EC2::Client.new(region: region)
 
   ["x64", "arm64"].each do |arch|
@@ -29,21 +58,24 @@ def cleanup_region(region)
     end
 
     puts table
-    most_recent_ami = nil
-    amis.each do |ami|
-      # Skip the most recent AMI
-      if most_recent_ami.nil?
-        most_recent_ami = ami
+    amis.each_with_index do |ami, index|
+      # Skip the 2 most recent AMIs
+      if skip_most_recent && index <= 1
         next
       end
 
       puts ""
 
       # Ask for confirmation before each removal
-      print "Are you sure you want to deregister AMI #{ami.image_id} and delete its associated snapshot? (y/n) "
-      reply = gets.chomp
+      reply = if force
+        "y"
+      else
+        print "Are you sure you want to deregister AMI #{ami.image_id} and delete its associated snapshot? (y/n) "
+        $stdin.gets.chomp
+      end
 
       if reply.downcase == 'y'
+        puts "Deregistering AMI #{ami.image_id}..."
         sleep 2
         # Deregister the AMI
         ec2.deregister_image({image_id: ami.image_id})
@@ -62,6 +94,6 @@ def cleanup_region(region)
   end
 end
 
-["us-east-1", "us-west-2", "eu-west-1", "eu-central-1", "eu-west-2", "ap-northeast-1", "ap-southeast-2"].each do |region|
-  cleanup_region(region)
+REGIONS.each do |region|
+  cleanup_region(region, options)
 end
