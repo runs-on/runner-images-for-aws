@@ -43,16 +43,20 @@ def request_quota_increase_for_region(region)
   end
 end
 
-def copy_ami_to_regions(ami_id, regions)
+def copy_ami_to_regions(ami_id_or_name, regions)
   ec2 = Aws::EC2::Client.new(region: SOURCE_REGION)
   ami_description = ec2.describe_images({
-    image_ids: [ami_id]
+    filters: [
+      ami_id_or_name.start_with?("ami-") ? { name: "image-id", values: [ami_id_or_name] } : { name: "name", values: [ami_id_or_name] },
+      { name: "state", values: ["available"] }
+    ]
   }).images.first
 
   if ami_description.nil?
     fail "no AMI found"
   end
 
+  ami_id = ami_description.image_id
   name = ami_description.name.sub(AMI_DEV_PREFIX, AMI_PROD_PREFIX)
   puts "Going to copy AMI #{ami_id} (#{ami_description.name}) to #{regions.join(', ')} with name: #{name}"
 
@@ -99,15 +103,15 @@ def copy_ami_to_regions(ami_id, regions)
 end
 
 if ARGV.length < 1
-  puts "Usage: #{$PROGRAM_NAME} <ami_id>"
+  puts "Usage: #{$PROGRAM_NAME} <ami_id_or_name>"
   exit 1
 end
 
-ami_id = ARGV.shift
+ami_id_or_name = ARGV.shift
 
 REGIONS.each do |region|
   enable_public_amis_for_region(region)
   request_quota_increase_for_region(region)
 end if ENV['CI']
 
-copy_ami_to_regions(ami_id, REGIONS)
+copy_ami_to_regions(ami_id_or_name, REGIONS)

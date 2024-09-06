@@ -77,3 +77,9 @@ esac
 set -x
 time packer init "$PACKER_TEMPLATE"
 time packer build -timestamp-ui -var source_ami_owner="$SOURCE_AMI_OWNER" -var source_ami_name="$SOURCE_AMI_NAME" -var volume_size="$VOLUME_SIZE" -var ami_regions="$AMI_REGIONS" "$PACKER_TEMPLATE"
+
+# Output the AMI name to GitHub Actions if running in CI
+if [ -n "$GITHUB_OUTPUT" ]; then
+  echo "ami_name=$AMI_NAME" >> $GITHUB_OUTPUT
+  echo "AMI name $AMI_NAME output to GitHub Actions"
+fi
