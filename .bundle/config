@@ -1,0 +1,4 @@
+---
+BUNDLE_PATH: "/home/runner/work/runner-images-for-aws/runner-images-for-aws/vendor/bundle"
+BUNDLE_DEPLOYMENT: "true"
+BUNDLE_JOBS: "4"
