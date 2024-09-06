@@ -1,17 +1,83 @@
 #!/usr/bin/env ruby
 
 require 'aws-sdk-ec2' # v3
+require 'aws-sdk-servicequotas'
+require 'yaml'
 
-def copy_ami_to_regions(ami_id, regions, name)
+AMI_DEV_PREFIX = "runs-on-dev"
+AMI_PROD_PREFIX = "runs-on-v2.2"
+SOURCE_REGION = "us-east-1"
+REGIONS = YAML.load_file(File.expand_path("../config.yml", __dir__)).fetch("regions")
+
+def enable_public_amis_for_region(region)
+  ec2 = Aws::EC2::Client.new(region: region)
+  ec2.disable_image_block_public_access
+  puts "Image block public access disabled for region #{region}"
+end
+
+def request_quota_increase_for_region(region)
+  client = Aws::ServiceQuotas::Client.new(region: region)
+  
+  quota_value = 30
+  quota_code = 'L-0E3CBAB9'
+  params = {
+    service_code: 'ec2',
+    quota_code: quota_code,
+  }
+  
+  begin
+    # Check if quota needs increase
+    current_quota = client.get_service_quota({
+      service_code: 'ec2',
+      quota_code: quota_code
+    })
+
+    if current_quota.quota.value < quota_value
+      response = client.request_service_quota_increase(params.merge(desired_value: quota_value))
+      puts "Quota increase requested successfully: #{response.requested_quota}"
+    else
+      puts "Current quota is sufficient: #{current_quota.quota.value}"
+    end
+  rescue Aws::ServiceQuotas::Errors::ServiceError => e
+    puts "Error requesting quota increase: #{e.message}"
+  end
+end
+
+def copy_ami_to_regions(ami_id, regions)
+  ec2 = Aws::EC2::Client.new(region: SOURCE_REGION)
+  ami_description = ec2.describe_images({
+    image_ids: [ami_id]
+  }).images.first
+
+  if ami_description.nil?
+    fail "no AMI found"
+  end
+
+  name = ami_description.name.sub(AMI_DEV_PREFIX, AMI_PROD_PREFIX)
+  puts "Going to copy AMI #{ami_id} (#{ami_description.name}) to #{regions.join(', ')} with name: #{name}"
+
+  if name.start_with?("runs-on-v")
+    puts "Warning: you are copying the AMI as an official image (#{name})."
+    print "Make sure you know what you are doing (y/n) "
+    reply = gets.chomp
+
+    if reply.downcase != 'y'
+      puts "Exiting"
+      exit 1
+    end
+  end
+
+  sleep 5
+
   results = regions.map do |region|
     puts "Copying AMI #{ami_id} to #{region}..."
     ec2 = Aws::EC2::Client.new(region: region)
     response = ec2.copy_image({
-      source_region: "us-east-1",
+      source_region: SOURCE_REGION,
       source_image_id: ami_id,
       copy_image_tags: true,
       name: name,
-      description: "Copy of #{ami_id} to #{region}",
+      description: "RunsOn copy of #{ami_id} to #{region}",
     })
     {client: ec2, region: region, image_id: response.image_id}
   end
@@ -33,42 +99,15 @@ def copy_ami_to_regions(ami_id, regions, name)
 end
 
 if ARGV.length < 1
-  puts "Usage: #{$PROGRAM_NAME} <ami_id> [name] [region1,region2,...]"
+  puts "Usage: #{$PROGRAM_NAME} <ami_id>"
   exit 1
 end
 
 ami_id = ARGV.shift
-name = ARGV.shift
-regions = ARGV[0] ? ARGV.shift.split(',') : ["us-east-1", "us-east-2", "us-west-2", "eu-west-1", "eu-west-2", "eu-west-3", "eu-central-1", "ap-northeast-1", "ap-southeast-1", "ap-southeast-2"]
 
-if name.nil?
-  ec2 = Aws::EC2::Client.new(region: "us-east-1")
-  ami_description = ec2.describe_images({
-    image_ids: [ami_id]
-  }).images.first
+REGIONS.each do |region|
+  enable_public_amis_for_region(region)
+  request_quota_increase_for_region(region)
+end if ENV['CI']
 
-  if ami_description.nil?
-    puts "AMI #{ami_id} not found."
-    exit 1
-  end
-
-  architecture = ami_description.architecture.sub("x86_64", "x64")
-  puts "AMI #{ami_id} architecture is #{architecture}."
-
-  name = "runs-on-v2.2-ubuntu22-full-#{architecture}-#{Time.now.strftime('%Y%m%d%H%M')}"
-end
-
-if name.start_with?("runs-on-v")
-  puts "Warning: you are copying the AMI as an official image (#{name})."
-  print "Make sure you know what you are doing (y/n) "
-  reply = gets.chomp
-
-  if reply.downcase != 'y'
-    puts "Exiting"
-    exit 1
-  else
-    sleep 5
-  end
-end
-
-copy_ami_to_regions(ami_id, regions, name)
+copy_ami_to_regions(ami_id, REGIONS)

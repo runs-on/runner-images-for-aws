@@ -31,6 +31,17 @@ echo "AMI_REGIONS=$AMI_REGIONS"
 sleep 5
 
 case "$RELEASE_DIST" in
+  "windows22")
+    export PACKER_TEMPLATE="$RELEASE_DIR/images/windows/templates/windows-22-$RELEASE_ARCH-aws.pkr.hcl"
+    if [ "$RELEASE_ARCH" == "arm64" ]; then
+      echo "Unsupported arch"
+      exit 1
+    else
+      export SOURCE_AMI_NAME="Windows_Server-2022-English-Full-Base-*"
+    fi
+    export SOURCE_AMI_OWNER="801119661308"
+    export VOLUME_SIZE=30
+    ;;
   "ubuntu24")
     export PACKER_TEMPLATE="$RELEASE_DIR/images/ubuntu/templates/ubuntu-24.04-$RELEASE_ARCH-aws.pkr.hcl"
     if [ "$RELEASE_ARCH" == "arm64" ]; then
