@@ -30,6 +30,10 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
+      - name: Cleanup dev AMIs
+        env:
+          AMI_PREFIX: runs-on-dev
+        run: bundle exec bin/cleanup-amis --force
       - run: bundle exec bin/01-pull --arch arm64 --force
         id: pull
       - run: bin/02-build releases/ubuntu22/arm64
@@ -99,8 +103,4 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
       - name: Promote AMI
-        run: bundle exec ,/bin/copy-ami ${{ needs.check.outputs.ami_name }} | yes
-      - name: Cleanup dev AMIs
-        env:
-          AMI_PREFIX: runs-on-dev
-        run: bundle exec ./bin/cleanup-amis --force
+        run: bundle exec bin/copy-ami --force ${{ needs.check.outputs.ami_name }}

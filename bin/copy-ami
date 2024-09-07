@@ -3,6 +3,7 @@
 require 'aws-sdk-ec2' # v3
 require 'aws-sdk-servicequotas'
 require 'yaml'
+require 'slop'
 
 AMI_DEV_PREFIX = "runs-on-dev"
 AMI_PROD_PREFIX = "runs-on-v2.2"
@@ -43,7 +44,7 @@ def request_quota_increase_for_region(region)
   end
 end
 
-def copy_ami_to_regions(ami_id_or_name, regions)
+def copy_ami_to_regions(ami_id_or_name, regions, force = false)
   ec2 = Aws::EC2::Client.new(region: SOURCE_REGION)
   ami_description = ec2.describe_images({
     filters: [
@@ -62,8 +63,12 @@ def copy_ami_to_regions(ami_id_or_name, regions)
 
   if name.start_with?("runs-on-v")
     puts "Warning: you are copying the AMI as an official image (#{name})."
-    print "Make sure you know what you are doing (y/n) "
-    reply = gets.chomp
+    reply = if force
+      'y'
+    else
+      print "Make sure you know what you are doing (y/n) "
+      gets.chomp
+    end
 
     if reply.downcase != 'y'
       puts "Exiting"
@@ -102,16 +107,33 @@ def copy_ami_to_regions(ami_id_or_name, regions)
   end
 end
 
-if ARGV.length < 1
-  puts "Usage: #{$PROGRAM_NAME} <ami_id_or_name>"
+
+options = {}
+
+usage = Slop::Options.new do |opts|
+  opts.banner = "Usage: #{$0} [--force] ami_id_or_name"
+  opts.bool '-f', '--force', 'Do not ask for confirmation'
+  opts.bool '-h', '--help', 'Show help'
+end
+
+begin
+  options = usage.parse(ARGV)
+  if options.arguments.empty?
+    raise Slop::Error.new("AMI ID or name is required")
+  end
+rescue Slop::Error => e
+  puts "Error: #{e.message}"
+  puts
+  puts usage
   exit 1
 end
 
-ami_id_or_name = ARGV.shift
+ami_id_or_name = options.arguments.first
+force = options.force?
 
 REGIONS.each do |region|
   enable_public_amis_for_region(region)
   request_quota_increase_for_region(region)
 end if ENV['CI']
 
-copy_ami_to_regions(ami_id_or_name, REGIONS)
+copy_ami_to_regions(ami_id_or_name, REGIONS, force)
