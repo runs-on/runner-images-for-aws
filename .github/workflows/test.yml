@@ -12,18 +12,21 @@ on:
       ami_id:
         required: true
         type: string
-      index:
-        required: true
-        type: number
 
 jobs:
   test:
-    name: Test${{ inputs.index || '1' }}
+    strategy:
+      max-parallel: 1
+      fail-fast: true
+      matrix:
+        index: [1, 2, 3, 4, 5]
+    name: Test${{ matrix.index }}
     runs-on:
       - runs-on
       - family=m7
       - cpu=2
       - ami=${{ inputs.ami_id }}
+      - index=${{ matrix.index }}
     steps:
       - name: Logs
         run: sudo cat /var/log/cloud-init-output.log
