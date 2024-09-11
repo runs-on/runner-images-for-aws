@@ -24,35 +24,44 @@ jobs:
     secrets: inherit
 
   test1:
-    needs: build
+    needs:
+      - build
     uses: ./.github/workflows/test.yml
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 1
 
   test2:
-    needs: test1
+    needs:
+      - build
+      - test1
     uses: ./.github/workflows/test.yml
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 2
 
   test3:
-    needs: test2
+    needs:
+      - build
+      - test2
     uses: ./.github/workflows/test.yml
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 3
 
   test4:
-    needs: test3
+    needs:
+      - build
+      - test3
     uses: ./.github/workflows/test.yml
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 4
 
   test5:
-    needs: test4
+    needs:
+      - build
+      - test4
     uses: ./.github/workflows/test.yml
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
