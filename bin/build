@@ -39,7 +39,11 @@ fail "Skipping #{release_dir}, not found" unless Dir.exist?(release_dir)
 
 ami_name = [options[:image_prefix], dist, "full", arch, options[:image_version]].join('-')
 packer_template = "#{release_dir}/images/#{dist.sub(/\d+$/, '')}/templates/#{image['id']}.pkr.hcl"
-packer_cmd = [
+packer_init_cmd = [
+  "packer", "init",
+  packer_template
+]
+packer_build_cmd = [
   "packer", "build",
   "-var", %{ami_regions=["us-east-1"]},
   "-var", "ami_name=#{ami_name}",
@@ -52,8 +56,11 @@ packer_cmd = [
   packer_template
 ]
 
-puts "Running Packer command: #{packer_cmd.join(' ')}"
-system(*packer_cmd) or fail("Packer build failed")
+puts "Running Packer init command: #{packer_init_cmd.join(' ')}"
+system(*packer_init_cmd) or fail("Packer init failed")
+
+puts "Running Packer build command: #{packer_build_cmd.join(' ')}"
+system(*packer_build_cmd) or fail("Packer build failed")
 
 if github_output_file = ENV.fetch('GITHUB_OUTPUT', nil)
   File.open(github_output_file, 'a') do |f|
