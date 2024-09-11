@@ -1,5 +1,5 @@
-name: Promote
-run-name: Promote ${{ inputs.image_id }}
+name: Release
+run-name: Release ${{ inputs.image_id }}
 
 on:
   workflow_call:
@@ -14,7 +14,7 @@ on:
         type: string
 
 jobs:
-  promote:
+  release:
     runs-on: ubuntu-latest
     environment:
       name: ${{ inputs.image_id }}
@@ -34,5 +34,5 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
-      - name: Promote AMI
+      - name: Copy dev AMI to prod
         run: bundle exec bin/copy-ami --force ${{ inputs.ami_name }}
