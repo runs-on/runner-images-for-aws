@@ -79,4 +79,4 @@ yq -oj -i 'del(.azureModules[])' $TOOLSET_PATH
 sed -i 's|# Download and unpack Chromium|invoke_tests "Browsers" "Chrome" && exit 0|' $release_dir/images/ubuntu/scripts/build/install-google-chrome.sh
 
 # finally, copy over the packer template
-cp patches/ubuntu/templates/ubuntu-22.04-arm64-aws.pkr.hcl "$release_dir/images/ubuntu/templates/"
+cp patches/ubuntu/templates/ubuntu22-full-arm64.pkr.hcl "$release_dir/images/ubuntu/templates/"

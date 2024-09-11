@@ -1,4 +1,4 @@
-name: Cleanup
+name: Cleanup production AMIs
 
 concurrency:
   group: cleanup
@@ -24,4 +24,6 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
-      - run: yes | bundle exec bin/cleanup-amis
+      - run: bundle exec bin/utils/cleanup-amis -f
+        env:
+          AMI_PREFIX: runs-on-v2.2

@@ -1,1 +1,7 @@
-/.env
+# CI job writes and commits this, but we don't want it locally
+/.bundle/config
+/.env*
+warm-ami
+ec2-boot-bench
+.trash
+*.pem

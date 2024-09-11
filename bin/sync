@@ -1,0 +1,55 @@
+#!/usr/bin/env ruby
+  
+require 'fileutils'
+require 'tmpdir'
+require 'yaml'
+require 'slop'
+
+IMAGES = YAML.load_file(File.expand_path("../config.yml", __dir__)).fetch("images")
+
+options = {}
+
+usage = Slop::Options.new do |opts|
+  opts.banner = "Usage: #{$0} [--image-id IMAGE_ID]"
+  opts.string '--image-id', 'Image ID', required: false
+end
+
+begin
+  options = usage.parse(ARGV).to_hash
+rescue Slop::Error => e
+  puts "Error: #{e.message}"
+  puts
+  puts usage
+  exit 1
+end
+
+workspace = Dir.mktmpdir
+repo_dir = File.join(workspace, 'repo')
+
+begin
+  system("git clone -q --depth 1 --branch main https://github.com/actions/runner-images.git \"#{repo_dir}\"") || fail("Failed to clone runner-images")
+  IMAGES.each do |image|
+    if options[:image_id] && image['id'] != options[:image_id]
+      next
+    end
+
+    puts "Syncing #{image['id']}..."
+    dist, variant, arch = image['id'].split('-', 3)
+    release_dir = "releases/#{dist}/#{arch}"
+    FileUtils.rm_rf(release_dir)
+    FileUtils.mkdir_p(File.dirname(release_dir))
+    system("git clone -q --branch main \"#{repo_dir}\" \"#{release_dir}\"")
+    ['.git', '.github', 'docs', '.vscode', 'images.CI', '.gitignore', '.gitattributes', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'SECURITY.md'].each do |useless_dir|
+      FileUtils.rm_rf("#{release_dir}/#{useless_dir}")
+    end
+    ['images/macos', 'images/windows', 'images/ubuntu'].each do |useless_dir|
+      FileUtils.rm_rf("#{release_dir}/#{useless_dir}") unless useless_dir =~ %r{#{dist.sub(/[0-9]+/, '')}}
+    end
+    
+    system("./bin/patch/#{dist}-#{arch} #{release_dir}") || fail("Failed to patch #{release_dir}")
+    system("git add #{release_dir} && git --no-pager diff --staged --stat #{release_dir}")
+    puts "OK"
+  end
+ensure
+  FileUtils.rm_rf(workspace)
+end

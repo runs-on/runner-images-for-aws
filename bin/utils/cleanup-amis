@@ -4,10 +4,10 @@ require 'terminal-table'
 require 'slop'
 require 'yaml'
 
-REGIONS = YAML.load_file(File.expand_path("../config.yml", __dir__)).fetch("regions")
+REGIONS = YAML.load_file(File.expand_path("../../config.yml", __dir__)).fetch("regions")
+AMI_PREFIX = ENV.fetch('AMI_PREFIX', 'runs-on-dev')
 
 options = {}
-
 usage = Slop::Options.new do |opts|
   opts.banner = "Usage: #{$0} [--force] [--all] [--help]"
   opts.bool '-f', '--force', 'Do not ask for confirmation'
@@ -29,27 +29,28 @@ if options[:help]
   exit 0
 end
 
-AMI_PREFIX = ENV.fetch('AMI_PREFIX', 'runs-on-dev')
-
 def cleanup_region(region, options)
   force, all = options.values_at(:force, :all)
   skip_most_recent = !all
   ec2 = Aws::EC2::Client.new(region: region)
 
-  ["x64", "arm64"].each do |arch|
-    puts "## #{region} #{AMI_PREFIX} #{arch}"
+  # Get all AMIs with the specified name pattern
+  resp = ec2.describe_images({
+    filters: [
+      {
+        name: "name",
+        values: ["#{AMI_PREFIX}-*"],
+      },
+    ],
+  })
 
-    # Get all AMIs with the specified name pattern
-    resp = ec2.describe_images({
-      filters: [
-        {
-          name: "name",
-          values: ["#{AMI_PREFIX}-ubuntu22-full-#{arch}-*"],
-        },
-      ],
-    })
-    amis = resp.images.sort_by(&:creation_date).reverse
+  grouped_amis = resp.images.group_by { |ami| ami.name.sub(AMI_PREFIX + "-", "").split('-')[0..2] }.each do |(dist, variant, arch), amis|
+    amis.sort_by!(&:creation_date)
+    amis.reverse!
+  end
 
+  grouped_amis.each do |(dist, variant, arch), amis|
+    puts "## #{region} #{AMI_PREFIX} #{dist} #{variant} #{arch}"
     table = Terminal::Table.new do |t|
       t.headings = ['AMI ID', 'Created at', 'Name']
       amis.each do |ami|
@@ -58,6 +59,7 @@ def cleanup_region(region, options)
     end
 
     puts table
+
     amis.each_with_index do |ami, index|
       # Skip the 2 most recent AMIs
       if skip_most_recent && index <= 1
@@ -94,6 +96,11 @@ def cleanup_region(region, options)
   end
 end
 
-REGIONS.each do |region|
+REGIONS.each_with_index do |region, index|
+  if AMI_PREFIX == "runs-on-dev" && region != "us-east-1"
+    next
+  end
+
+  3.times { puts "" } unless index == 0
   cleanup_region(region, options)
 end

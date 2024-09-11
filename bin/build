@@ -1,0 +1,63 @@
+#!/usr/bin/env ruby
+
+require 'json'
+require 'open-uri'
+require 'slop'
+require 'fileutils'
+require 'yaml'
+
+IMAGES = YAML.load_file(File.expand_path("../config.yml", __dir__)).fetch("images")
+
+options = {}
+
+usage = Slop::Options.new do |opts|
+  opts.banner = "Usage: #{$0} --image-id [IMAGE_ID]"
+
+  opts.string '--image-id', 'Image ID', required: true
+  opts.string '--image-prefix', 'Image Prefix', default: ENV.fetch('AMI_PREFIX', "runs-on-dev")
+  opts.string '--image-version', 'Image Version', default: Time.now.strftime("%Y%m%d%H%M%S")
+  opts.string '--subnet-id', 'Subnet ID', default: ENV.fetch('SUBNET_ID', nil)
+end
+
+begin
+  options = usage.parse(ARGV).to_hash
+rescue Slop::Error => e
+  puts "Error: #{e.message}"
+  puts
+  puts usage
+  exit 1
+end
+
+image = IMAGES.find do |i|
+  i['id'] == options[:image_id]
+end
+fail("Image not found: #{options[:image_id]}") unless image
+
+dist, variant, arch = image['id'].split('-', 3)
+release_dir = "releases/#{dist}/#{arch}"
+fail "Skipping #{release_dir}, not found" unless Dir.exist?(release_dir)
+
+ami_name = [options[:image_prefix], dist, "full", arch, options[:image_version]].join('-')
+packer_template = "#{release_dir}/images/#{dist.sub(/\d+$/, '')}/templates/#{image['id']}.pkr.hcl"
+packer_cmd = [
+  "packer", "build",
+  "-var", "ami_regions=us-east-1",
+  "-var", "ami_name=#{ami_name}",
+  "-var", "image_os=#{dist}",
+  "-var", "image_version=#{options[:image_version]}",
+  "-var", "subnet_id=#{options[:subnet_id]}",
+  "-var", "source_ami_name=#{image['source_ami_name']}",
+  "-var", "source_ami_owner=#{image['source_ami_owner']}",
+  "-var", "volume_size=#{image['volume_size']}",
+  packer_template
+]
+
+puts "Running Packer command: #{packer_cmd.join(' ')}"
+system(*packer_cmd) or fail("Packer build failed")
+
+if github_output_file = ENV.fetch('GITHUB_OUTPUT', nil)
+  File.open(github_output_file, 'a') do |f|
+    f.puts "ami_name=#{ami_name}"
+  end
+  puts "AMI name #{ami_name} added to GitHub Actions outputs"
+end

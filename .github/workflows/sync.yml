@@ -1,0 +1,61 @@
+name: Sync
+
+on:
+  workflow_dispatch:
+    inputs:
+      distribution:
+        type: string
+        required: true
+        description: 'Distribution(s) to build'
+        default: '["ubuntu22", "ubuntu24"]'
+      architecture:
+        type: string
+        required: true
+        description: 'Architecture(s) to build'
+        default: '["x64", "arm64"]'
+      promote:
+        type: boolean
+        required: false
+        description: 'Run the promotion job'
+        default: 'false'
+  schedule:
+    - cron: '0 8 */15 * *'
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: 3.2.2
+          bundler-cache: true
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Cleanup dev AMIs
+        env:
+          AMI_PREFIX: runs-on-dev
+        run: bundle exec bin/utils/cleanup-amis --force
+      - run: bundle exec bin/sync
+      - uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "Sync from upstream"
+
+  build-and-release:
+    needs: sync
+    strategy:
+      fail-fast: false
+      matrix:
+        distribution: ${{ fromJSON(github.event.inputs.distribution || '["ubuntu22"]') }}
+        architecture: ${{ fromJSON(github.event.inputs.architecture || '["x64", "arm64"]') }}
+    uses: ./.github/workflows/build-and-release.yml
+    secrets: inherit
+    with:
+      architecture: ${{ matrix.architecture }}
+      distribution: ${{ matrix.distribution }}

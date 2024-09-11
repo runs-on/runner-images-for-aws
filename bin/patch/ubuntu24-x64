@@ -11,12 +11,13 @@ fi
 
 release_dir="$RELEASE_DIR"
 build_dir="$release_dir/images/ubuntu/scripts/build"
+custom_dir="$release_dir/images/ubuntu/custom"
 toolsets_dir="$release_dir/images/ubuntu/toolsets"
 TOOLSET_PATH="$toolsets_dir/toolset-2404.json"
 
 # custom stuff
-mkdir -p $release_dir/images/ubuntu/custom
-cp -r patches/ubuntu/files $release_dir/images/ubuntu/custom/
+mkdir -p $custom_dir
+cp -r patches/ubuntu/files $custom_dir/
 
 # Save ~3.2GB by removing default docker images
 yq -oj -i '.docker.images = []' $TOOLSET_PATH
@@ -63,4 +64,4 @@ yq -oj -i 'del(.azureModules[])' $TOOLSET_PATH
 sed -i 's|# Download and unpack Chromium|invoke_tests "Browsers" "Chrome" && exit 0|' $release_dir/images/ubuntu/scripts/build/install-google-chrome.sh
 
 # finally, copy over the packer template
-cp patches/ubuntu/templates/ubuntu-24.04-x64-aws.pkr.hcl "$release_dir/images/ubuntu/templates/"
+cp patches/ubuntu/templates/ubuntu24-full-x64.pkr.hcl "$release_dir/images/ubuntu/templates/"
