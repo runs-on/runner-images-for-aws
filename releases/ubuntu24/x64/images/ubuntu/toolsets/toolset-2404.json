@@ -38,9 +38,9 @@
       "arch": "x64",
       "platform": "linux",
       "versions": [
-        "1.22.*"
+        "1.23.*"
       ],
-      "default": "1.22.*"
+      "default": "1.23.*"
     },
     {
       "name": "Ruby",
@@ -68,9 +68,9 @@
     "addon_list": [],
     "additional_tools": [],
     "ndk": {
-      "default": "26",
+      "default": "27",
       "versions": [
-        "26"
+        "27"
       ]
     }
   },
