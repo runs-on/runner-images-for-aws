@@ -1,0 +1,38 @@
+name: Promote
+run-name: Promote ${{ inputs.image_id }}
+
+on:
+  workflow_call:
+    inputs:
+      # e.g. ubuntu22-full-x64
+      image_id:
+        required: true
+        type: string
+      # e.g. runs-on-dev-ubuntu22-full-x64-20240911101937
+      ami_name:
+        required: true
+        type: string
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment:
+      name: ${{ inputs.image_id }}
+    steps:
+      # Make sure AMI name includes the image ID
+      - name: Verify AMI name
+        run: |
+          echo "${{ inputs.ami_name }}" | grep "${{ inputs.image_id }}"
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: 3.2.2
+          bundler-cache: true
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Promote AMI
+        run: bundle exec bin/copy-ami --force ${{ inputs.ami_name }}
