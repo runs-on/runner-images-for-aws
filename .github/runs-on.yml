@@ -9,3 +9,13 @@ images:
     arch: "arm64"
     owner: "135269210855"
     name: "runs-on-dev-ubuntu22-full-arm64-*"
+  ubuntu24-dev-x64:
+    platform: "linux"
+    arch: "x64"
+    owner: "135269210855"
+    name: "runs-on-dev-ubuntu24-full-x64-*"
+  ubuntu24-dev-arm64:
+    platform: "linux"
+    arch: "arm64"
+    owner: "135269210855"
+    name: "runs-on-dev-ubuntu24-full-arm64-*"
