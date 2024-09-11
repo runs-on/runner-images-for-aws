@@ -2,6 +2,16 @@ name: Release
 run-name: Release ${{ inputs.image_id }}
 
 on:
+  workflow_dispatch:
+    inputs:
+      # e.g. ubuntu22-full-x64
+      image_id:
+        required: true
+        type: string
+      # e.g. runs-on-dev-ubuntu22-full-x64-20240911101937
+      ami_name:
+        required: true
+        type: string
   workflow_call:
     inputs:
       # e.g. ubuntu22-full-x64

@@ -2,6 +2,11 @@ name: Build
 run-name: Build ${{ inputs.image_id }}
 
 on:
+  workflow_dispatch:
+    inputs:
+      image_id:
+        required: true
+        type: string
   workflow_call:
     inputs:
       image_id:
