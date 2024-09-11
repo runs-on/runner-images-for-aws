@@ -13,6 +13,7 @@ on:
 
 jobs:
   sync:
+    name: Synchronize
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -39,6 +40,7 @@ jobs:
           commit_message: "Sync from upstream"
 
   build-test-release:
+    name: Build/Test/Release ${{ matrix.image_id }}
     needs: sync
     strategy:
       fail-fast: false

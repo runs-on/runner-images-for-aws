@@ -1,5 +1,5 @@
-name: Build and Release
-run-name: ${{ inputs.distribution }}-full-${{ inputs.architecture }}
+name: Build
+run-name: Build ${{ inputs.image_id }}
 
 on:
   workflow_call:
@@ -17,6 +17,7 @@ on:
 
 jobs:
   build:
+    name: Build ${{ inputs.image_id }}
     runs-on: ubuntu-latest
     env:
       SUBNET_ID: ${{ secrets.SUBNET_ID }}
