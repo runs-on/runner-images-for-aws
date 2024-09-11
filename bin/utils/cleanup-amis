@@ -29,9 +29,20 @@ if options[:help]
   exit 0
 end
 
-def cleanup_region(region, options)
-  force, all = options.values_at(:force, :all)
-  skip_most_recent = !all
+force, all = options.values_at(:force, :all)
+skip_most_recent = !all
+images_to_remove = []
+
+class Image < Struct.new(:ami, :region)
+end
+
+REGIONS.each_with_index do |region, index|
+  if AMI_PREFIX == "runs-on-dev" && region != "us-east-1"
+    next
+  end
+
+  3.times { puts "" } unless index == 0
+
   ec2 = Aws::EC2::Client.new(region: region)
 
   # Get all AMIs with the specified name pattern
@@ -66,41 +77,63 @@ def cleanup_region(region, options)
         next
       end
 
-      puts ""
-
-      # Ask for confirmation before each removal
-      reply = if force
-        "y"
-      else
-        print "Are you sure you want to deregister AMI #{ami.image_id} and delete its associated snapshot? (y/n) "
-        $stdin.gets.chomp
-      end
-
-      if reply.downcase == 'y'
-        puts "Deregistering AMI #{ami.image_id}..."
-        sleep 2
-        # Deregister the AMI
-        ec2.deregister_image({image_id: ami.image_id})
-
-        # Get the snapshot associated with the AMI
-        snapshot_id = ami.block_device_mappings[0].ebs.snapshot_id
-
-        # Delete the snapshot
-        ec2.delete_snapshot({snapshot_id: snapshot_id})
-      else
-        puts "Skipping AMI #{ami.image_id}"
-      end
+      images_to_remove << Image.new(ami, region)
     end
-
-    puts ""
   end
 end
 
-REGIONS.each_with_index do |region, index|
-  if AMI_PREFIX == "runs-on-dev" && region != "us-east-1"
-    next
-  end
 
-  3.times { puts "" } unless index == 0
-  cleanup_region(region, options)
+if images_to_remove.empty?
+  puts "No images to remove"
+  exit 0
+end
+
+puts ""
+puts "Found #{images_to_remove.count} images to remove"
+puts ""
+
+grouped_images_to_remove = images_to_remove.group_by { |image| image.ami.name.sub(AMI_PREFIX + "-", "").split('-')[0..2] }.each do |(dist, variant, arch), images|
+  images.sort_by{|i| i.ami.creation_date}
+  images.reverse!
+end
+
+table = Terminal::Table.new do |t|
+  t.headings = ['Region', 'AMI ID', 'Created at', 'Name']
+  grouped_images_to_remove.each do |(dist, variant, arch), images|
+    images.each do |image|
+      t << [image.region, image.ami.image_id, image.ami.creation_date, image.ami.name]
+    end
+  end
+end
+puts table
+puts ""
+
+# Ask for confirmation before each removal
+reply = if force
+  "y"
+else
+  print "Are you sure you want to deregister the above AMIs and delete their associated snapshots? (y/n) "
+  $stdin.gets.chomp
+end
+
+if reply.downcase == 'y'
+  grouped_images_to_remove.each do |(dist, variant, arch), images|
+    images.each do |image|
+      ec2 = Aws::EC2::Client.new(region: image.region)
+
+      puts "Deregistering AMI #{image.ami.image_id}..."
+      sleep 2
+
+      # Deregister the AMI
+      ec2.deregister_image({image_id: image.ami.image_id})
+
+      # Get the snapshot associated with the AMI
+      snapshot_id = image.ami.block_device_mappings[0].ebs.snapshot_id
+
+      # Delete the snapshot
+      ec2.delete_snapshot({snapshot_id: snapshot_id})
+    end
+  end
+else
+  puts "Skipping AMI removal"
 end

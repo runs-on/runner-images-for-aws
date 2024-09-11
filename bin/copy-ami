@@ -76,9 +76,12 @@ def copy_ami_to_regions(ami_id_or_name, regions, force = false)
       name: name,
       description: "RunsOn copy of #{ami_id} to #{region}",
     })
-    {client: ec2, region: region, image_id: response.image_id}
+
+    res = {client: ec2, region: region, image_id: response.image_id}
+
     # to avoid throttling
     sleep 2
+    res
   end
 
   results.each do |res|
