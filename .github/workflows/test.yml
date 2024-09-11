@@ -19,7 +19,10 @@ on:
 jobs:
   test:
     name: Test${{ inputs.index || '1' }}
-    runs-on: runs-on,cpu=2,ami=${{ inputs.ami_id }}
+    runs-on:
+      - runs-on
+      - cpu=2
+      - ami=${{ inputs.ami_id }}
     steps:
       - name: Logs
         run: sudo cat /var/log/cloud-init-output.log
