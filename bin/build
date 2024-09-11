@@ -68,3 +68,10 @@ if github_output_file = ENV.fetch('GITHUB_OUTPUT', nil)
   end
   puts "AMI name #{ami_name} added to GitHub Actions outputs"
 end
+
+if github_step_summary_file = ENV.fetch('GITHUB_STEP_SUMMARY', nil)
+  File.open(github_step_summary_file, 'a') do |f|
+    f.puts "## #{image['id']}"
+    f.puts "- **AMI Name:** `#{ami_name}`"
+  end
+end
