@@ -133,6 +133,7 @@ source "amazon-ebs" "build_ebs" {
   run_tags = {
     creator     = "RunsOn"
     contact     = "ops@runs-on.com"
+    ami_name    = "${var.ami_name}"
   }
 
   tags = {
