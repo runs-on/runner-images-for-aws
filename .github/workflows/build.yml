@@ -25,6 +25,9 @@ jobs:
       ami_id: ${{ steps.build.outputs.ami_id }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+      - run: git log --oneline -n 1
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: 3.2.2
