@@ -41,7 +41,7 @@ ami_name = [options[:image_prefix], dist, "full", arch, options[:image_version]]
 packer_template = "#{release_dir}/images/#{dist.sub(/\d+$/, '')}/templates/#{image['id']}.pkr.hcl"
 packer_cmd = [
   "packer", "build",
-  "-var", "ami_regions=us-east-1",
+  "-var", %{ami_regions=["us-east-1"]},
   "-var", "ami_name=#{ami_name}",
   "-var", "image_os=#{dist}",
   "-var", "image_version=#{options[:image_version]}",
