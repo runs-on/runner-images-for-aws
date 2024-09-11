@@ -89,4 +89,4 @@ jobs:
     uses: ./.github/workflows/promote.yml
     with:
       image_id: ${{ inputs.distribution }}-full-${{ inputs.architecture }}
-      ami_name: ${{ steps.build.outputs.ami_name }}
+      ami_name: ${{ needs.build.outputs.ami_name }}
