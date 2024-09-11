@@ -3,21 +3,11 @@ name: Sync
 on:
   workflow_dispatch:
     inputs:
-      distribution:
+      images:
         type: string
         required: true
         description: 'Distribution(s) to build'
-        default: '["ubuntu22", "ubuntu24"]'
-      architecture:
-        type: string
-        required: true
-        description: 'Architecture(s) to build'
-        default: '["x64", "arm64"]'
-      promote:
-        type: boolean
-        required: false
-        description: 'Run the promotion job'
-        default: 'false'
+        default: '["ubuntu22-full-x64", "ubuntu22-full-arm64", "ubuntu24-full-x64", "ubuntu24-full-arm64"]'
   schedule:
     - cron: '0 8 */15 * *'
 
@@ -42,20 +32,19 @@ jobs:
         env:
           AMI_PREFIX: runs-on-dev
         run: bundle exec bin/utils/cleanup-amis --force
-      - run: bundle exec bin/sync
+      - name: Synchronize with upstream repository
+        run: bundle exec bin/sync
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Sync from upstream"
 
-  build-and-release:
+  build-test-release:
     needs: sync
     strategy:
       fail-fast: false
       matrix:
-        distribution: ${{ fromJSON(github.event.inputs.distribution || '["ubuntu22"]') }}
-        architecture: ${{ fromJSON(github.event.inputs.architecture || '["x64", "arm64"]') }}
-    uses: ./.github/workflows/build-and-release.yml
+        image_id: ${{ fromJSON(github.event.inputs.images || '["ubuntu22-full-x64", "ubuntu22-full-arm64", "ubuntu24-full-x64", "ubuntu24-full-arm64"]') }}
+    uses: ./.github/workflows/build-test-release.yml
     secrets: inherit
     with:
-      architecture: ${{ matrix.architecture }}
-      distribution: ${{ matrix.distribution }}
+      image_id: ${{ matrix.image_id }}

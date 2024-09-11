@@ -1,27 +1,25 @@
 name: Test
-run-name: Test ${{ inputs.distribution }}-full-${{ inputs.architecture }}
+run-name: Test ${{ inputs.ami_id }}
 
 on:
   workflow_dispatch:
     inputs:
-      distribution:
-        required: true
-        type: string
-      architecture:
+      ami_id:
         required: true
         type: string
   workflow_call:
     inputs:
-      distribution:
+      ami_id:
         required: true
         type: string
-      architecture:
+      index:
         required: true
-        type: string
+        type: number
 
 jobs:
   test:
-    runs-on: runs-on,runner=2cpu-linux-${{ inputs.architecture }},image=${{ inputs.distribution }}-dev-${{ inputs.architecture }}
+    name: Test${{ inputs.index || '1' }}
+    runs-on: runs-on,cpu=2,ami=${{ inputs.ami_id }}
     steps:
       - name: Logs
         run: sudo cat /var/log/cloud-init-output.log

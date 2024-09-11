@@ -1,0 +1,69 @@
+name: Build Test Release
+run-name: ${{ inputs.image_id }}
+
+on:
+  workflow_call:
+    inputs:
+      # e.g. ubuntu22-full-x64
+      image_id:
+        required: true
+        type: string
+    outputs:
+      ami_name:
+        description: "The name of the built AMI"
+        value: ${{ jobs.build.outputs.ami_name }}
+      ami_id:
+        description: "The ID of the built AMI"
+        value: ${{ jobs.build.outputs.ami_id }}
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      image_id: ${{ inputs.image_id }}
+    secrets: inherit
+
+  test1:
+    needs: build
+    uses: ./.github/workflows/test.yml
+    with:
+      ami_id: ${{ needs.build.outputs.ami_id }}
+      index: 1
+
+  test2:
+    needs: test1
+    uses: ./.github/workflows/test.yml
+    with:
+      ami_id: ${{ needs.build.outputs.ami_id }}
+      index: 2
+
+  test3:
+    needs: test2
+    uses: ./.github/workflows/test.yml
+    with:
+      ami_id: ${{ needs.build.outputs.ami_id }}
+      index: 3
+
+  test4:
+    needs: test3
+    uses: ./.github/workflows/test.yml
+    with:
+      ami_id: ${{ needs.build.outputs.ami_id }}
+      index: 4
+
+  test5:
+    needs: test4
+    uses: ./.github/workflows/test.yml
+    with:
+      ami_id: ${{ needs.build.outputs.ami_id }}
+      index: 5
+
+  release:
+    needs:
+      - build
+      - test5
+    uses: ./.github/workflows/release.yml
+    secrets: inherit
+    with:
+      image_id: ${{ inputs.image_id }}
+      ami_name: ${{ needs.build.outputs.ami_name }}

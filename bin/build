@@ -60,18 +60,56 @@ puts "Running Packer init command: #{packer_init_cmd.join(' ')}"
 system(*packer_init_cmd) or fail("Packer init failed")
 
 puts "Running Packer build command: #{packer_build_cmd.join(' ')}"
-system(*packer_build_cmd) or fail("Packer build failed")
+unless system(*packer_build_cmd)
+  # Cleanup any dangling EC2 instances
+  ec2_client = Aws::EC2::Client.new(region: 'us-east-1')
+  instances = ec2_client.describe_instances(
+    filters: [
+      { name: 'instance-state-name', values: ['running', 'pending', 'stopping', 'stopped'] },
+      { name: 'tag:ami_name', values: [ami_name] }
+    ]
+  ).reservations.flat_map(&:instances)
+
+  instances.each do |instance|
+    puts "Terminating instance #{instance.instance_id}"
+    ec2_client.terminate_instances(instance_ids: [instance.instance_id])
+  end
+
+  fail("Packer build failed")
+end
+
+# Fetch AMI ID corresponding to AMI name
+ec2_client = Aws::EC2::Client.new(region: 'us-east-1')
+ami_id = nil
+
+begin
+  response = ec2_client.describe_images({
+    filters: [{ name: 'name', values: [ami_name] }]
+  })
+  
+  if response.images.any?
+    ami_id = response.images.first.image_id
+    puts "Found AMI ID: #{ami_id} for AMI name: #{ami_name}"
+  else
+    puts "No AMI found with name: #{ami_name}"
+  end
+rescue Aws::EC2::Errors::ServiceError => e
+  puts "Error fetching AMI ID: #{e.message}"
+end
+
 
 if github_output_file = ENV.fetch('GITHUB_OUTPUT', nil)
   File.open(github_output_file, 'a') do |f|
     f.puts "ami_name=#{ami_name}"
+    f.puts "ami_id=#{ami_id}"
   end
-  puts "AMI name #{ami_name} added to GitHub Actions outputs"
+  puts "AMI name #{ami_name} and ID #{ami_id} added to GitHub Actions outputs"
 end
 
 if github_step_summary_file = ENV.fetch('GITHUB_STEP_SUMMARY', nil)
   File.open(github_step_summary_file, 'a') do |f|
     f.puts "## #{image['id']}"
     f.puts "- **AMI Name:** `#{ami_name}`"
+    f.puts "- **AMI ID:** `#{ami_id}`"
   end
 end
