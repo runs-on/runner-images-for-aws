@@ -1,7 +1,6 @@
 #!/usr/bin/env ruby
 
 require 'aws-sdk-ec2' # v3
-require 'aws-sdk-servicequotas'
 require 'yaml'
 require 'slop'
 
@@ -10,39 +9,28 @@ AMI_PROD_PREFIX = "runs-on-v2.2"
 SOURCE_REGION = "us-east-1"
 REGIONS = YAML.load_file(File.expand_path("../config.yml", __dir__)).fetch("regions")
 
-def enable_public_amis_for_region(region)
-  ec2 = Aws::EC2::Client.new(region: region)
-  ec2.disable_image_block_public_access
-  puts "Image block public access disabled for region #{region}"
+options = {}
+
+usage = Slop::Options.new do |opts|
+  opts.banner = "Usage: #{$0} [--force] ami_id_or_name"
+  opts.bool '-f', '--force', 'Do not ask for confirmation'
+  opts.bool '-h', '--help', 'Show help'
 end
 
-def request_quota_increase_for_region(region)
-  client = Aws::ServiceQuotas::Client.new(region: region)
-  
-  quota_value = 30
-  quota_code = 'L-0E3CBAB9'
-  params = {
-    service_code: 'ec2',
-    quota_code: quota_code,
-  }
-  
-  begin
-    # Check if quota needs increase
-    current_quota = client.get_service_quota({
-      service_code: 'ec2',
-      quota_code: quota_code
-    })
-
-    if current_quota.quota.value < quota_value
-      response = client.request_service_quota_increase(params.merge(desired_value: quota_value))
-      puts "Quota increase requested successfully: #{response.requested_quota}"
-    else
-      puts "Current quota is sufficient: #{current_quota.quota.value}"
-    end
-  rescue Aws::ServiceQuotas::Errors::ServiceError => e
-    puts "Error requesting quota increase: #{e.message}"
+begin
+  options = usage.parse(ARGV)
+  if options.arguments.empty?
+    raise Slop::Error.new("AMI ID or name is required")
   end
+rescue Slop::Error => e
+  puts "Error: #{e.message}"
+  puts
+  puts usage
+  exit 1
 end
+
+ami_id_or_name = options.arguments.first
+force = options.force?
 
 def copy_ami_to_regions(ami_id_or_name, regions, force = false)
   ec2 = Aws::EC2::Client.new(region: SOURCE_REGION)
@@ -89,6 +77,8 @@ def copy_ami_to_regions(ami_id_or_name, regions, force = false)
       description: "RunsOn copy of #{ami_id} to #{region}",
     })
     {client: ec2, region: region, image_id: response.image_id}
+    # to avoid throttling
+    sleep 2
   end
 
   results.each do |res|
@@ -104,36 +94,9 @@ def copy_ami_to_regions(ami_id_or_name, regions, force = false)
       }
     })
     puts "Launch permissions for AMI #{image_id} updated to public"
+    # to avoid throttling
+    sleep 2
   end
 end
-
-
-options = {}
-
-usage = Slop::Options.new do |opts|
-  opts.banner = "Usage: #{$0} [--force] ami_id_or_name"
-  opts.bool '-f', '--force', 'Do not ask for confirmation'
-  opts.bool '-h', '--help', 'Show help'
-end
-
-begin
-  options = usage.parse(ARGV)
-  if options.arguments.empty?
-    raise Slop::Error.new("AMI ID or name is required")
-  end
-rescue Slop::Error => e
-  puts "Error: #{e.message}"
-  puts
-  puts usage
-  exit 1
-end
-
-ami_id_or_name = options.arguments.first
-force = options.force?
-
-REGIONS.each do |region|
-  enable_public_amis_for_region(region)
-  request_quota_increase_for_region(region)
-end if ENV['CI']
 
 copy_ami_to_regions(ami_id_or_name, REGIONS, force)

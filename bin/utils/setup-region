@@ -1,0 +1,46 @@
+#!/usr/bin/env ruby
+
+require 'aws-sdk-ec2' # v3
+require 'aws-sdk-servicequotas'
+require 'yaml'
+
+REGIONS = YAML.load_file(File.expand_path("../../config.yml", __dir__)).fetch("regions")
+
+def enable_public_amis_for_region(region)
+  ec2 = Aws::EC2::Client.new(region: region)
+  ec2.disable_image_block_public_access
+  puts "Image block public access disabled for region #{region}"
+end
+
+def request_quota_increase_for_region(region)
+  client = Aws::ServiceQuotas::Client.new(region: region)
+  
+  quota_value = 30
+  quota_code = 'L-0E3CBAB9'
+  params = {
+    service_code: 'ec2',
+    quota_code: quota_code,
+  }
+  
+  begin
+    # Check if quota needs increase
+    current_quota = client.get_service_quota({
+      service_code: 'ec2',
+      quota_code: quota_code
+    })
+
+    if current_quota.quota.value < quota_value
+      response = client.request_service_quota_increase(params.merge(desired_value: quota_value))
+      puts "Quota increase requested successfully: #{response.requested_quota}"
+    else
+      puts "Current quota is sufficient: #{current_quota.quota.value}"
+    end
+  rescue Aws::ServiceQuotas::Errors::ServiceError => e
+    puts "Error requesting quota increase: #{e.message}"
+  end
+end
+
+REGIONS.each do |region|
+  enable_public_amis_for_region(region)
+  request_quota_increase_for_region(region)
+end
