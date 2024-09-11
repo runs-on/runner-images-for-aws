@@ -5,6 +5,7 @@ require 'open-uri'
 require 'slop'
 require 'fileutils'
 require 'yaml'
+require 'aws-sdk-ec2'
 
 IMAGES = YAML.load_file(File.expand_path("../config.yml", __dir__)).fetch("images")
 
@@ -60,6 +61,7 @@ puts "Running Packer init command: #{packer_init_cmd.join(' ')}"
 system(*packer_init_cmd) or fail("Packer init failed")
 
 puts "Running Packer build command: #{packer_build_cmd.join(' ')}"
+
 unless system(*packer_build_cmd)
   # Cleanup any dangling EC2 instances
   ec2_client = Aws::EC2::Client.new(region: 'us-east-1')
