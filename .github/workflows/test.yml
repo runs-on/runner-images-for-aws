@@ -2,6 +2,14 @@ name: Test
 run-name: Test ${{ inputs.distribution }}-full-${{ inputs.architecture }}
 
 on:
+  workflow_dispatch:
+    inputs:
+      distribution:
+        required: true
+        type: string
+      architecture:
+        required: true
+        type: string
   workflow_call:
     inputs:
       distribution:
