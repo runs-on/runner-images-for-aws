@@ -11,6 +11,7 @@ fi
 
 release_dir="$RELEASE_DIR"
 build_dir="$release_dir/images/ubuntu/scripts/build"
+tests_dir="$release_dir/images/ubuntu/scripts/tests"
 custom_dir="$release_dir/images/ubuntu/custom"
 toolsets_dir="$release_dir/images/ubuntu/toolsets"
 TOOLSET_PATH="$toolsets_dir/toolset-2204.json"
@@ -30,6 +31,10 @@ sed -i 's|aws-sam-cli-linux-x86_64.zip|aws-sam-cli-linux-arm64.zip|g' $build_dir
 sed -i 's|inux-x86_64|inux-aarch64|g' $build_dir/*.sh $toolsets_dir/*.json
 sed -i 's|linux-amd64|linux-arm64|g' $build_dir/*.sh $toolsets_dir/*.json
 sed -i 's|linux_amd64|linux_arm64|g' $build_dir/*.sh
+sed -i 's|jdk-amd64|jdk-arm64|g' $build_dir/install-java-tools.sh
+sed -i 's|X64|ARM64|g' $build_dir/install-java-tools.sh
+sed -i 's|x64|arm64|g' $build_dir/install-java-tools.sh
+sed -i 's|_X64|_ARM64|g' $tests_dir/Java.Tests.ps1
 sed -i 's|linux-x64|linux-arm64|g' $build_dir/*.sh
 sed -i 's|ubuntu_64bit|ubuntu_arm64|g' $build_dir/*.sh
 sed -i 's|arch=amd64 |arch=amd64,arm64 |g' $build_dir/*.sh
