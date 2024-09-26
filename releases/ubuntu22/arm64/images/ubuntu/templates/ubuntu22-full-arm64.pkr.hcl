@@ -271,6 +271,7 @@ build {
       "${path.root}/../scripts/build/install-cmake.sh",
       "${path.root}/../scripts/build/install-gcc-compilers.sh",
       "${path.root}/../scripts/build/install-git.sh",
+      "${path.root}/../scripts/build/install-java-tools.sh",
       "${path.root}/../scripts/build/install-kubernetes-tools.sh",
       "${path.root}/../scripts/build/install-nvm.sh",
       "${path.root}/../scripts/build/install-nodejs.sh",

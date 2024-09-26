@@ -7,7 +7,7 @@ Describe "Java" {
 
     It "Java <DefaultJavaVersion> is default" -TestCases @{ DefaultJavaVersion = $defaultVersion } {
         $actualJavaPath = [System.Environment]::GetEnvironmentVariable("JAVA_HOME")
-        $expectedJavaPath = [System.Environment]::GetEnvironmentVariable("JAVA_HOME_${DefaultJavaVersion}_X64")
+        $expectedJavaPath = [System.Environment]::GetEnvironmentVariable("JAVA_HOME_${DefaultJavaVersion}_ARM64")
 
         $actualJavaPath | Should -Not -BeNullOrEmpty
         $expectedJavaPath | Should -Not -BeNullOrEmpty
@@ -24,7 +24,7 @@ Describe "Java" {
     $testCases = $jdkVersions | ForEach-Object { @{Version = $_ } }
 
     It "Java <Version>" -TestCases $testCases {
-        $javaVariableValue = [System.Environment]::GetEnvironmentVariable("JAVA_HOME_${Version}_X64")
+        $javaVariableValue = [System.Environment]::GetEnvironmentVariable("JAVA_HOME_${Version}_ARM64")
         $javaVariableValue | Should -Not -BeNullOrEmpty
         $javaPath = Join-Path $javaVariableValue "bin/java"
 

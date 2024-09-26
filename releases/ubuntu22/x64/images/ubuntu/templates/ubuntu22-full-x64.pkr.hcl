@@ -279,7 +279,7 @@ build {
       "${path.root}/../scripts/build/install-apt-common.sh",
       "${path.root}/../scripts/build/install-azcopy.sh",
       // Massive, disabling for now since this is not our target
-      // "${path.root}/../scripts/build/install-azure-cli.sh",
+      "${path.root}/../scripts/build/install-azure-cli.sh",
       // "${path.root}/../scripts/build/install-azure-devops-cli.sh",
       "${path.root}/../scripts/build/install-bicep.sh",
       "${path.root}/../scripts/build/install-aliyun-cli.sh",
