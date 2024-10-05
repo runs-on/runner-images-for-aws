@@ -56,6 +56,9 @@ EOF
 # Reload systemd-tmpfiles to apply the new configuration
 systemd-tmpfiles --create /etc/tmpfiles.d/docker.conf
 
+# Change the default storage location for Docker images and layers to the runner woker's volume.
+echo '{"data-root": "/home/runner/_work/docker"}' | sudo tee /etc/docker/daemon.json > /dev/null
+
 # Enable docker.service
 systemctl is-active --quiet docker.service || systemctl start docker.service
 systemctl is-enabled --quiet docker.service || systemctl enable docker.service
