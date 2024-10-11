@@ -291,7 +291,7 @@ provisioner "shell" {
       # "${path.root}/../scripts/build/install-gfortran.sh",
       "${path.root}/../scripts/build/install-git.sh",
       # "${path.root}/../scripts/build/install-git-lfs.sh",
-      # "${path.root}/../scripts/build/install-github-cli.sh",
+      "${path.root}/../scripts/build/install-github-cli.sh",
       # "${path.root}/../scripts/build/install-google-chrome.sh",
       // "${path.root}/../scripts/build/install-haskell.sh",
       "${path.root}/../scripts/build/install-java-tools.sh",
