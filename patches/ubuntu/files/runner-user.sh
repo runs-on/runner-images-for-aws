@@ -7,6 +7,9 @@ usermod -aG sudo runner
 echo "%sudo   ALL=(ALL:ALL) NOPASSWD:ALL" >> /etc/sudoers
 echo "Defaults env_keep += \"DEBIAN_FRONTEND\"" >> /etc/sudoers
 
+# add git-crypt
+apt-get install -y git-crypt
+
 # add kvm virt, only available on metal instances
 apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virtinst
 modprobe kvm
@@ -28,18 +31,7 @@ echo 'server 169.254.169.123 prefer iburst minpoll 4 maxpoll 4' >  /etc/chrony/c
 echo "Storage=Volatile" >> /etc/systemd/journald.conf
 echo "RuntimeMaxUse=64M" >> /etc/systemd/journald.conf
 
-snap remove amazon-ssm-agent
-snap remove core18
-
-snap remove lxd
-snap remove core20
-rm -rf /var/lib/snapd/seed/snaps
-
 apt-get purge plymouth update-notifier-common multipath-tools -y
-
-
-# avoid nvme0n1: Process '/usr/bin/unshare -m /usr/bin/snap auto-import --mount=/dev/nvme0n1' failed with exit code 1.
-snap set system experimental.hotplug=false
 
 # speed-up boot
 systemctl disable timers.target
