@@ -17,7 +17,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      release_name: ${{ steps.generate-release-name.outputs.release_name }}
     steps:
+      - name: Generate release name
+        id: generate-release-name
+        run: echo "release_name=$(date +%Y%m%d%H%M%S)" >> $GITHUB_OUTPUT
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
         with:
@@ -38,6 +43,7 @@ jobs:
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Sync from upstream"
+          tagging_message: ${{ steps.generate-release-name.outputs.release_name }}
 
   build-test-release:
     name: Build/Test/Release ${{ matrix.image_id }}
@@ -50,3 +56,16 @@ jobs:
     secrets: inherit
     with:
       image_id: ${{ matrix.image_id }}
+
+  generate-release:
+    name: Generate release
+    needs:
+      - sync
+      - build-test-release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          tag_name: ${{ needs.sync.outputs.release_name }}
+          make_latest: true
