@@ -63,6 +63,8 @@ jobs:
       - sync
       - build-test-release
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: softprops/action-gh-release@v2
         with:
