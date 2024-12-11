@@ -118,7 +118,7 @@ source "amazon-ebs" "build_ebs" {
   ami_regions = "${var.ami_regions}"
 
   // make underlying snapshot public
-  snapshot_groups = ["all"]
+  # snapshot_groups = ["all"]
 
   launch_block_device_mappings {
     device_name = "/dev/sda1"
