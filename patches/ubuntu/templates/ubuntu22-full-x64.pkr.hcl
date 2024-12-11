@@ -104,7 +104,7 @@ source "amazon-ebs" "build_ebs" {
   ami_description                           = "${var.ami_description}"
   ami_virtualization_type                   = "hvm"
   # make AMIs publicly accessible
-  ami_groups                                = ["all"]
+  # ami_groups                                = ["all"]
   ebs_optimized                             = true
   spot_instance_types                       = ["m7a.xlarge", "c7a.xlarge", "m7i-flex.xlarge"]
   spot_price                                = "1.00"
