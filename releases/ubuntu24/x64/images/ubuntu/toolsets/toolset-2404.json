@@ -192,6 +192,14 @@
       }
     ]
   },
+  "nvidia-driver": {
+    "components": [
+      {
+        "package": "cuda-drivers",
+        "version": "latest"
+      }
+    ]
+  },
   "pipx": [
     {
       "package": "yamllint",
