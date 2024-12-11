@@ -7,7 +7,8 @@ on:
         type: string
         required: true
         description: 'Distribution(s) to build'
-        default: '["ubuntu22-full-x64", "ubuntu22-full-arm64", "ubuntu24-full-x64", "ubuntu24-full-arm64"]'
+        # default: '["ubuntu22-full-x64", "ubuntu22-full-arm64", "ubuntu24-full-x64", "ubuntu24-full-arm64"]'
+        default: '["ubuntu24-full-x64"]'
   schedule:
     - cron: '0 8 */15 * *'
 
@@ -51,7 +52,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image_id: ${{ fromJSON(github.event.inputs.images || '["ubuntu22-full-x64", "ubuntu22-full-arm64", "ubuntu24-full-x64", "ubuntu24-full-arm64"]') }}
+        # image_id: ${{ fromJSON(github.event.inputs.images || '["ubuntu22-full-x64", "ubuntu22-full-arm64", "ubuntu24-full-x64", "ubuntu24-full-arm64"]') }}
+        image_id: ${{ fromJSON(github.event.inputs.images || '["ubuntu24-full-x64"]') }}
     uses: ./.github/workflows/build-test-release.yml
     secrets: inherit
     with:
