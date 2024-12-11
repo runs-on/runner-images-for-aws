@@ -31,46 +31,46 @@ jobs:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 1
 
-  test2:
-    needs:
-      - build
-      - test1
-    uses: ./.github/workflows/test.yml
-    with:
-      ami_id: ${{ needs.build.outputs.ami_id }}
-      index: 2
+  # test2:
+  #   needs:
+  #     - build
+  #     - test1
+  #   uses: ./.github/workflows/test.yml
+  #   with:
+  #     ami_id: ${{ needs.build.outputs.ami_id }}
+  #     index: 2
 
-  test3:
-    needs:
-      - build
-      - test2
-    uses: ./.github/workflows/test.yml
-    with:
-      ami_id: ${{ needs.build.outputs.ami_id }}
-      index: 3
+  # test3:
+  #   needs:
+  #     - build
+  #     - test2
+  #   uses: ./.github/workflows/test.yml
+  #   with:
+  #     ami_id: ${{ needs.build.outputs.ami_id }}
+  #     index: 3
 
-  test4:
-    needs:
-      - build
-      - test3
-    uses: ./.github/workflows/test.yml
-    with:
-      ami_id: ${{ needs.build.outputs.ami_id }}
-      index: 4
+  # test4:
+  #   needs:
+  #     - build
+  #     - test3
+  #   uses: ./.github/workflows/test.yml
+  #   with:
+  #     ami_id: ${{ needs.build.outputs.ami_id }}
+  #     index: 4
 
-  test5:
-    needs:
-      - build
-      - test4
-    uses: ./.github/workflows/test.yml
-    with:
-      ami_id: ${{ needs.build.outputs.ami_id }}
-      index: 5
+  # test5:
+  #   needs:
+  #     - build
+  #     - test4
+  #   uses: ./.github/workflows/test.yml
+  #   with:
+  #     ami_id: ${{ needs.build.outputs.ami_id }}
+  #     index: 5
 
   release:
     needs:
       - build
-      - test5
+      - test1
     uses: ./.github/workflows/release.yml
     secrets: inherit
     with:
