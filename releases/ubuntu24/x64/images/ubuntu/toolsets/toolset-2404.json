@@ -192,6 +192,14 @@
       }
     ]
   },
+  "nvidia-container": {
+    "components": [
+      {
+        "package": "nvidia-container-toolkit",
+        "version": "latest"
+      }
+    ]
+  },
   "nvidia-driver": {
     "components": [
       {
