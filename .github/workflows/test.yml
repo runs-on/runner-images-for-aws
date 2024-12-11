@@ -21,8 +21,7 @@ jobs:
     name: Test${{ inputs.index || '1' }}
     runs-on:
       - runs-on
-      - family=m7
-      - cpu=2
+      - family=g4dn.xlarge
       - ami=${{ inputs.ami_id }}
     steps:
       - name: Logs
