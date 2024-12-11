@@ -38,6 +38,10 @@ jobs:
         uses: actions/checkout@v4
       - name: Docker
         run: docker run hello-world
+      - name: Nvidia
+        run: nvidia-smi
+      - name: Docker Nvidia
+        run: docker run --rm --runtime=nvidia --gpus all ubuntu nvidia-smi
       - name: envinfo
         run: npx envinfo
       - name: env
