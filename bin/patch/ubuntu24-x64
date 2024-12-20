@@ -2,6 +2,10 @@
 
 set -eo pipefail
 
+gnu_sed() {
+  $(which gsed || which sed) "$@"
+}
+
 RELEASE_DIR="$1"
 
 if [ -z "$RELEASE_DIR" ]; then
@@ -14,6 +18,9 @@ build_dir="$release_dir/images/ubuntu/scripts/build"
 custom_dir="$release_dir/images/ubuntu/custom"
 toolsets_dir="$release_dir/images/ubuntu/toolsets"
 TOOLSET_PATH="$toolsets_dir/toolset-2404.json"
+
+# add gpu install script
+cp patches/ubuntu/build/install-gpu.sh "$release_dir/images/ubuntu/scripts/build/"
 
 # custom stuff
 mkdir -p $custom_dir
@@ -61,7 +68,7 @@ yq -oj -i 'del(.azureModules[])' $TOOLSET_PATH
 # Remove chromium since chrome already installed. 500MB saved
 # https://github.com/actions/runner-images/issues/2388
 # might need to add symlinks if causing issues, but let's see
-sed -i 's|# Download and unpack Chromium|invoke_tests "Browsers" "Chrome" && exit 0|' $release_dir/images/ubuntu/scripts/build/install-google-chrome.sh
+gnu_sed -i 's|# Download and unpack Chromium|invoke_tests "Browsers" "Chrome" && exit 0|' $release_dir/images/ubuntu/scripts/build/install-google-chrome.sh
 
 # finally, copy over the packer template
 cp patches/ubuntu/templates/ubuntu24-full-x64.pkr.hcl "$release_dir/images/ubuntu/templates/"
