@@ -25,6 +25,7 @@ esac
 DEBIAN_FILE="cuda-keyring_1.1-1_all.deb"
 REPO_URL="https://developer.download.nvidia.com/compute/cuda/repos/$DIST_SLUG/x86_64/$DEBIAN_FILE"
 GPG_KEY="/usr/share/keyrings/cuda-archive-keyring.gpg"
+REPO_PATH="/etc/apt/sources.list.d/cuda-$DIST_SLUG-x86_64.list"
 
 wget $REPO_URL
 sudo dpkg -i $DEBIAN_FILE
@@ -41,6 +42,7 @@ fi
 
 rm $DEBIAN_FILE
 rm $GPG_KEY
+rm $REPO_PATH
 
 # NVIDIA container toolkit
 REPO_URL="https://nvidia.github.io/libnvidia-container/stable/deb/\$(ARCH)"
