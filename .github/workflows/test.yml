@@ -7,6 +7,10 @@ on:
       ami_id:
         required: true
         type: string
+      instance_family:
+        required: true
+        type: string
+        default: "m7"
   workflow_call:
     inputs:
       ami_id:
