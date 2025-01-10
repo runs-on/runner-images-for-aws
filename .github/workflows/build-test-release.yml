@@ -40,7 +40,7 @@ jobs:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 2
 
-  test3:
+  test-extras1:
     needs:
       - build
       - test2
@@ -48,21 +48,23 @@ jobs:
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 3
+      extras: "s3cache"
 
-  test4:
+  test-extras2:
     needs:
       - build
-      - test3
+      - test-extras1
     uses: ./.github/workflows/test.yml
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 4
+      extras: "s3cache"
 
   test-gpu:
     if: contains(inputs.image_id, 'x64')
     needs:
       - build
-      - test4
+      - test-extras2
     uses: ./.github/workflows/test.yml
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
