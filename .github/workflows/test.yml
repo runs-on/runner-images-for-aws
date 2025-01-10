@@ -11,6 +11,10 @@ on:
         required: true
         type: string
         default: "m7"
+      extras:
+        required: false
+        type: string
+        default: ""
   workflow_call:
     inputs:
       ami_id:
@@ -23,6 +27,10 @@ on:
         required: true
         type: string
         default: "m7"
+      extras:
+        required: false
+        type: string
+        default: ""
 
 jobs:
   test:
@@ -32,11 +40,17 @@ jobs:
       - family=${{ inputs.instance_family }}
       - cpu=2+4
       - ami=${{ inputs.ami_id }}
+      - extras=${{ inputs.extras }}
+    env:
+      FILENAME: random-file
     steps:
       - name: Logs
         run: sudo cat /var/log/cloud-init-output.log
       - name: Systemctl status
         run: sudo systemctl status
+      - uses: runs-on/action@v1
+        with:
+          show-env: true
       - name: Disk
         run: |
           sudo df -ah
@@ -63,6 +77,96 @@ jobs:
           nvidia-smi
           nvidia-smi -L
           nvidia-smi -q -d Memory
-      - name: Do something
+      # Test for docker build and caching
+      - uses: actions/checkout@v4
+        with:
+          repository: dockersamples/example-voting-app
+      - name: Generate random file to test caching
         run: |
-          echo "Hello world from $HOSTNAME"
+          dd if=/dev/urandom of=vote/random.bin bs=1M count=1024
+          ls -lh vote/random.bin
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: "Build and push image (type=gha)"
+        uses: docker/build-push-action@v4
+        with:
+          context: "vote"
+          push: false
+          tags: test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Test for artifact upload and download
+      - run: mkdir -p path/to/artifact
+      - run: echo hello > path/to/artifact/world.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: my-artifact
+          path: path/to/artifact/world.txt
+      - run: rm path/to/artifact/world.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: my-artifact
+          path: path/to/artifact/world.txt
+
+      # Test for cache
+      - name: Generate file
+        run: |
+          echo "Generating random file..."
+          dd if=/dev/urandom of=${{ env.FILENAME }} bs=1M count=1024
+          ls -lh ${{ env.FILENAME }}
+      - name: Calculate MD5
+        id: md5
+        run: echo "hash=$(md5sum ${{ env.FILENAME }} | cut -d' ' -f1)" >> $GITHUB_OUTPUT
+      - name: Save to cache (actions/cache)
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.FILENAME }}
+          key: github-${{github.run_id}}-actions-cache-${{ env.FILENAME }}
+      - name: Restore from cache (actions/cache)
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.FILENAME }}
+          fail-on-cache-miss: true
+          key: github-${{github.run_id}}-actions-cache-${{ env.FILENAME }}
+      - name: Restore from cache (actions/cache, restoreKeys)
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.FILENAME }}
+          fail-on-cache-miss: true
+          key: github-${{github.run_id}}-actions-cache-unknown
+          restore-keys: |
+            github-${{github.run_id}}-actions-cache-
+      - name: Check MD5
+        run: |
+          hash=$(md5sum ${{ env.FILENAME }} | cut -d' ' -f1)
+          if [ "$hash" != "${{ steps.md5.outputs.hash }}" ]; then
+            echo "MD5 hash mismatch"
+            exit 1
+          fi
+      - name: Save to cache (runs-on/cache)
+        uses: runs-on/cache/save@v4
+        with:
+          path: ${{ env.FILENAME }}
+          key: github-${{github.run_id}}-runs-on-cache-${{ env.FILENAME }}
+      - name: Restore from cache (runs-on/cache)
+        uses: runs-on/cache/restore@v4
+        with:
+          fail-on-cache-miss: true
+          path: ${{ env.FILENAME }}
+          key: github-${{github.run_id}}-runs-on-cache-${{ env.FILENAME }}
+      - name: Restore from cache (runs-on/cache, restoreKeys)
+        uses: runs-on/cache/restore@v4
+        with:
+          fail-on-cache-miss: true
+          path: ${{ env.FILENAME }}
+          key: github-${{github.run_id}}-runs-on-cache-unknown
+          restore-keys: |
+            github-${{github.run_id}}-runs-on-cache-
+      - name: Check MD5
+        run: |
+          hash=$(md5sum ${{ env.FILENAME }} | cut -d' ' -f1)
+          if [ "$hash" != "${{ steps.md5.outputs.hash }}" ]; then
+            echo "MD5 hash mismatch"
+            exit 1
+          fi
