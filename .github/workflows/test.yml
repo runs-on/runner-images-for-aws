@@ -30,7 +30,7 @@ jobs:
     runs-on:
       - runs-on
       - family=${{ inputs.instance_family }}
-      - cpu=2
+      - cpu=2+4
       - ami=${{ inputs.ami_id }}
     steps:
       - name: Logs
