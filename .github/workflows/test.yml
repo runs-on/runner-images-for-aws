@@ -15,13 +15,17 @@ on:
       index:
         required: true
         type: number
+      instance_family:
+        required: true
+        type: string
+        default: "m7"
 
 jobs:
   test:
     name: Test${{ inputs.index || '1' }}
     runs-on:
       - runs-on
-      - family=m7
+      - family=${{ inputs.instance_family }}
       - cpu=2
       - ami=${{ inputs.ami_id }}
     steps:
@@ -35,7 +39,9 @@ jobs:
           sudo lsblk -l
       - name: env
         run: env | sort
-      - name: Checkout
+      - name: Ensure apt-get update is working
+        run: sudo apt-get update
+      - name: Ensure code can be checked out
         uses: actions/checkout@v4
       - name: Docker
         run: docker run hello-world
@@ -47,6 +53,12 @@ jobs:
         run: ls -al $HOME
       - name: rustup
         run: rustup --version
+      - name: Ensure NVIDIA drivers are ok
+        if: contains(inputs.instance_family, 'g4dn')
+        run: |
+          nvidia-smi
+          nvidia-smi -L
+          nvidia-smi -q -d Memory
       - name: Do something
         run: |
           echo "Hello world from $HOSTNAME"
