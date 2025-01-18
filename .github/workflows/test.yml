@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       instance_family:
-        required: true
+        required: false
         type: string
         default: "m7"
       extras:
@@ -24,7 +24,7 @@ on:
         required: true
         type: number
       instance_family:
-        required: true
+        required: false
         type: string
         default: "m7"
       extras:
@@ -37,7 +37,7 @@ jobs:
     name: Test${{ inputs.index || '1' }}
     runs-on:
       - runs-on
-      - family=${{ inputs.instance_family }}
+      - family=${{ inputs.instance_family || 'm7' }}
       - cpu=2+4
       - ami=${{ inputs.ami_id }}
       - extras=${{ inputs.extras }}
