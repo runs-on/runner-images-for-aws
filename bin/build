@@ -39,7 +39,7 @@ dist, variant, arch = image['id'].split('-', 3)
 release_dir = "releases/#{dist}/#{arch}"
 fail "Skipping #{release_dir}, not found" unless Dir.exist?(release_dir)
 
-ami_name = [options[:image_prefix], dist, "full", arch, options[:image_version]].join('-')
+ami_name = [options[:image_prefix], image['id'], options[:image_version]].join('-')
 packer_template = "#{release_dir}/images/#{dist.sub(/\d+$/, '')}/templates/#{image['id']}.pkr.hcl"
 packer_init_cmd = [
   "packer", "init",

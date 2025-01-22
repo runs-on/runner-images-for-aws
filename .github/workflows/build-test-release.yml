@@ -61,7 +61,7 @@ jobs:
       extras: "s3cache"
 
   test-gpu:
-    if: contains(inputs.image_id, 'x64')
+    if: contains(inputs.image_id, 'gpu-x64')
     needs:
       - build
       - test-extras2

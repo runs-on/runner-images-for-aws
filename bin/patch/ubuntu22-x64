@@ -72,3 +72,4 @@ gnu_sed -i 's|# Download and unpack Chromium|invoke_tests "Browsers" "Chrome" &&
 
 # finally, copy over the packer template
 cp patches/ubuntu/templates/ubuntu22-full-x64.pkr.hcl "$release_dir/images/ubuntu/templates/"
+cp patches/ubuntu/templates/ubuntu22-gpu-x64.pkr.hcl "$release_dir/images/ubuntu/templates/"

@@ -106,8 +106,8 @@ source "amazon-ebs" "build_ebs" {
   # make AMIs publicly accessible
   ami_groups                                = ["all"]
   ebs_optimized                             = true
-  spot_instance_types                       = ["m7a.xlarge", "c7a.xlarge", "m7i-flex.xlarge"]
-  spot_price                                = "1.00"
+  spot_instance_types                       = ["m7a.xlarge", "c7a.xlarge", "c7i.xlarge", "m7i.xlarge", "m7i-flex.xlarge"]
+  spot_price                                = "auto"
   region                                    = "${var.region}"
   ssh_username                              = "ubuntu"
   subnet_id                                 = "${var.subnet_id}"
@@ -370,11 +370,11 @@ build {
     scripts          = ["${path.root}/../scripts/build/configure-snap.sh"]
   }
 
-  provisioner "shell" {
-    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
-    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = ["${path.root}/../scripts/build/install-gpu.sh"]
-  }
+  # provisioner "shell" {
+  #   environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
+  #   execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+  #   scripts          = ["${path.root}/../scripts/build/install-gpu.sh"]
+  # }
 
   provisioner "shell" {
     execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"

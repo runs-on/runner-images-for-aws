@@ -31,3 +31,11 @@ images:
     volume_size: 120
     source_ami_name: Windows_Server-2022-English-Full-Base-*
     source_ami_owner: 801119661308
+  - id: ubuntu22-gpu-x64
+    volume_size: 30
+    source_ami_name: runs-on-dev-ubuntu22-full-x64-*
+    source_ami_owner: 135269210855
+  - id: ubuntu24-gpu-x64
+    volume_size: 30
+    source_ami_name: runs-on-dev-ubuntu24-full-x64-*
+    source_ami_owner: 135269210855
