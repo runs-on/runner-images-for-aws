@@ -8,8 +8,11 @@ on:
         required: true
         description: 'Distribution(s) to build'
         default: '["ubuntu22-gpu-x64", "ubuntu24-gpu-x64"]'
+  # doesn't work because release is created by github actions, which does not trigger a new event
   release:
     types: [published]
+  schedule:
+    - cron: '0 16 */15 * *'
 
 jobs:
   build-test-release:
