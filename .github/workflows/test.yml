@@ -42,7 +42,7 @@ jobs:
       - ami=${{ inputs.ami_id }}
       - extras=${{ inputs.extras }}
     env:
-      FILENAME: random-file
+      FILENAME: random-file-${{ inputs.index }}
     steps:
       - name: Logs
         run: sudo cat /var/log/cloud-init-output.log
