@@ -48,7 +48,6 @@ variable "volume_type" {
 
 variable "region" {
   type    = string
-  default = "${env("AWS_DEFAULT_REGION")}"
 }
 
 variable "source_ami_owner" {

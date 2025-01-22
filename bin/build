@@ -18,6 +18,7 @@ usage = Slop::Options.new do |opts|
   opts.string '--image-prefix', 'Image Prefix', default: ENV.fetch('AMI_PREFIX', "runs-on-dev")
   opts.string '--image-version', 'Image Version', default: Time.now.strftime("%Y%m%d%H%M%S")
   opts.string '--subnet-id', 'Subnet ID', default: ENV.fetch('SUBNET_ID', nil)
+  opts.string '--region', 'Region', default: ENV.fetch('AWS_DEFAULT_REGION', "us-east-1")
   opts.boolean '--debug', 'Debug mode', default: false
 end
 
@@ -62,6 +63,7 @@ packer_build_cmd = [
   "-var", "image_os=#{dist}",
   "-var", "image_version=#{options[:image_version]}",
   "-var", "subnet_id=#{options[:subnet_id]}",
+  "-var", "region=#{options[:region]}",
   "-var", "source_ami_name=#{image['source_ami_name']}",
   "-var", "source_ami_owner=#{image['source_ami_owner']}",
   "-var", "volume_size=#{image['volume_size']}",
