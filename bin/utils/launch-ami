@@ -1,20 +1,94 @@
 #!/usr/bin/env ruby
 
 require 'aws-sdk-ec2' # v3
+require 'slop'
 
-INSTANCE_TYPE = ENV.fetch('INSTANCE_TYPE', 'm7i-flex.large')
+options = {}
+usage = Slop::Options.new do |opts|
+  opts.banner = "Usage: #{$0} [--instance-type TYPE] [--ami-name NAME]"
+  opts.string '--instance-type', 'Instance type'
+  opts.string '--ami-name', 'AMI name or prefix', required: true
+  opts.bool '-h', '--help', 'Show help'
+end
 
-def launch_ami(ami_id, subnet_id, security_group_id, user_data_script)
+begin
+  options = usage.parse(ARGV).to_hash
+rescue Slop::Error => e
+  puts "Error: #{e.message}"
+  puts
+  puts usage
+  exit 1
+end
+
+if options[:help]
+  puts usage
+  exit 0
+end
+
+USER_DATA_SCRIPT = <<EOF
+#!/bin/bash
+set -ex
+
+mkdir -p /root/.ssh
+chmod 0700 /root/.ssh
+curl --retry 3 --connect-timeout 5 -L https://github.com/crohr.keys -o /root/.ssh/authorized_keys
+chmod 0600 /root/.ssh/authorized_keys
+systemctl enable ssh || true
+systemctl start ssh || true
+EOF
+
+def find_latest_ami(options)
   ec2 = Aws::EC2::Client.new
+  name_prefix = options[:ami_name]
+  images = ec2.describe_images({
+    filters: [
+      { name: "name", values: ["#{name_prefix}*"] },
+      { name: "state", values: ["available"] }
+    ]
+  }).images
+
+  fail "No AMIs found matching prefix: #{name_prefix}" if images.empty?
+  
+  latest = images.sort_by { |img| img.creation_date }.last
+  puts "Found AMI: #{latest.name} (#{latest.image_id})"
+  [latest.image_id, latest.architecture]
+end
+
+def launch_ami(options)
+  ami_id, architecture = find_latest_ami(options)
+  instance_type = case architecture
+                 when "arm64"
+                   options[:instance_type] || "m7g.large"
+                 when "x86_64"
+                   options[:instance_type] || "m7a.large"
+                 end
+
+  puts "Launching instance with AMI ID: #{ami_id.inspect} and instance type: #{instance_type.inspect}"
+  ec2 = Aws::EC2::Client.new
+
+  # Find subnet with test=true tag
+  subnet = ec2.describe_subnets(
+    filters: [{ name: 'tag:test', values: ['true'] }]
+  ).subnets.first
+  fail "No subnet found with tag test=true" unless subnet
+  subnet_id = subnet.subnet_id
+
+  # Find security group with test=true tag
+  security_group = ec2.describe_security_groups(
+    filters: [{ name: 'tag:test', values: ['true'] }]
+  ).security_groups.first
+  fail "No security group found with tag test=true" unless security_group
+  security_group_id = security_group.group_id
+
   instance_params = {
     image_id: ami_id,
-    instance_type: INSTANCE_TYPE,
+    instance_type: instance_type,
     min_count: 1,
     max_count: 1,
     subnet_id: subnet_id,
     security_group_ids: [security_group_id],
     instance_initiated_shutdown_behavior: "terminate",
-    user_data: Base64.encode64(user_data_script),
+    user_data: Base64.encode64(USER_DATA_SCRIPT),
     block_device_mappings: [
       {
         device_name: "/dev/sda1",
@@ -28,22 +102,6 @@ def launch_ami(ami_id, subnet_id, security_group_id, user_data_script)
     tag_specifications: [{
       resource_type: "instance",
       tags: [
-        {
-          key: "runs-on-service-enabled",
-          value: "false"
-        },
-        {
-          key: "runs-on-bucket-cache",
-          value: "dummy"
-        },
-        {
-          key: "runs-on-version",
-          value: "dummy"
-        },
-        {
-          key: "runs-on-role-id",
-          value: "dummy"
-        },
         { key: "application", value: "RunsOn" }
       ]
     }]
@@ -57,25 +115,10 @@ def launch_ami(ami_id, subnet_id, security_group_id, user_data_script)
   instance = ec2.describe_instances(instance_ids: [instance.instance_id]).reservations.first.instances.first
 
   puts "Instance Public IP: #{instance.public_ip_address}"
+  puts "ssh root@#{instance.public_ip_address}"
+  sleep 12
+  exec("ssh root@#{instance.public_ip_address}")
 end
 
-subnet_id = ENV.fetch("SUBNET_ID")
-ami_id = ENV.fetch("AMI_ID", ARGV[0])
-security_group_id = ENV.fetch("SECURITY_GROUP_ID")
-user_data = <<EOF
-#!/bin/bash
-set -ex
-
-mkdir -p /root/.ssh
-chmod 0700 /root/.ssh
-curl --retry 3 --connect-timeout 5 -L https://github.com/crohr.keys -o /root/.ssh/authorized_keys
-chmod 0600 /root/.ssh/authorized_keys
-systemctl enable ssh || true
-systemctl start ssh || true
-EOF
-
-# Example usage
-launch_ami(ami_id, subnet_id, security_group_id, user_data)
-
-
-
+# Launch instance
+launch_ami(options)
