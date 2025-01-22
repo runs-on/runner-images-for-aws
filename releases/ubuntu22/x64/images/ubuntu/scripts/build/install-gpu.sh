@@ -2,9 +2,6 @@
 
 set -eo pipefail
 
-# Source the helpers for use with the script
-source $HELPER_SCRIPTS/install.sh
-
 . /etc/os-release
 
 DIST_SLUG=""
