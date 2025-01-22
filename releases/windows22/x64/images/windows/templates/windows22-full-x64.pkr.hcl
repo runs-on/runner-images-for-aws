@@ -37,6 +37,11 @@ variable "imagedata_file" {
   default = "C:\\imagedata.json"
 }
 
+variable "temp_dir" {
+  type    = string
+  default = "C:\\temp-to-delete"
+}
+
 variable "install_password" {
   type      = string
   default   = "P4ssw0rd@1234"
@@ -106,8 +111,10 @@ source "amazon-ebs" "build_ebs" {
   # make AMIs publicly accessible
   ami_groups                                = ["all"]
   ebs_optimized                             = true
-  spot_instance_types                       = ["m7a.xlarge", "c7a.xlarge", "m7i-flex.xlarge"]
-  spot_price                                = "1.00"
+  # spot_instance_types                       = ["m7a.xlarge", "c7a.xlarge", "m7i-flex.xlarge"]
+  # spot_instance_types                       = ["m5zn.metal", "z1d.metal", "c5n.metal"]
+  spot_instance_types                       = ["c6a.metal", "m6a.metal", "c6i.metal", "m6i.metal", "c7i.metal-24xl", "m7i.metal-24xl"]
+  spot_price                                = "auto"
   region                                    = "${var.region}"
   // ssh_username                              = "${var.install_user}"
   // ssh_password                              = "${var.install_password}"
@@ -115,38 +122,91 @@ source "amazon-ebs" "build_ebs" {
   associate_public_ip_address               = "true"
   force_deregister                          = "true"
   force_delete_snapshot                     = "true"
-  communicator                             = "winrm"
+
+#   communicator = "ssh"
+# #   # ssh_clear_authorized_keys = true
+#   # ssh_interface = "session_manager"
+#   # iam_instance_profile = "SSMInstanceProfile"
+#   ssh_username = "Administrator"
+#   ssh_timeout = "5m"
+#   ssh_file_transfer_method = "sftp"
+
+#   user_data = <<EOF
+# <powershell>
+# Write-Host 'Installing and starting sshd'
+# Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+# Set-Service -Name sshd -StartupType Automatic
+
+# New-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name DefaultShell -Value (Get-Command powershell.exe).Path -PropertyType String -Force
+
+# Write-Host 'Setting up SSH authorized keys'
+
+# $adminKeysPath = "$env:ProgramData\ssh\administrators_authorized_keys"
+# $myKey = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDnf5c32Tui8Y1zbs0boVeRQrd5U+X9MPdbBuFdBr21TCnJ5LC4uQDKHW0C/rUval2E+pp6Z3M6LX9BlVDz+ESfZgBWDr5UtpvS4MM8PsYPOK2qzBBGNeqNY9ATTEYK6OyqT4XFOLpoYimY3z5X5gzSfGHRbkwEIRvHEbi+jy9b36XdGYpnD/06GaylAJjcppC5AlkIPwlKiDjhGZOO+Frc5ysz1/lcXc9sVp7NHxJ465I0CsggSUA5ixqUjREa5SUxB9W0iQTsY+6ncznqTByb5QyZ3/cuIBtKvwCx6TFFCENUjGIhxK7mu3ENGINzUkvkk+U7wMoWAgKdzHyFhOUx"
+
+# Add-Content -Force -Path $adminKeysPath -Value ((New-Object System.Net.WebClient).DownloadString('http://169.254.169.254/latest/meta-data/public-keys/0/openssh-key'))
+# Add-Content -Force -Path $adminKeysPath -Value "$myKey"
+# icacls.exe $adminKeysPath /inheritance:r /grant Administrators:F /grant SYSTEM:F
+
+# Start-Service sshd
+# </powershell>
+# <persist>true</persist>
+# EOF
+
+  communicator                           = "winrm"
   winrm_insecure                         = "true"
   winrm_use_ssl                          = "true"
-  winrm_username                         = "${var.install_user}"
-  winrm_password                         = "${var.install_password}"
+  # winrm_username                         = "${var.install_user}"
+  # winrm_password                         = "${var.install_password}"
+  winrm_username                         = "Administrator"
+  # winrm_password                         = "${var.install_password}"
+
+  # https://learn.microsoft.com/en-us/windows/win32/winrm/installation-and-configuration-for-windows-remote-management
   user_data = <<EOF
 <powershell>
-# Create a user account to interact with WinRM
-$Username = "${var.install_user}"
-$Password = "${var.install_password}"
-$group = "Administrators"
-# Creating new local user
-& NET USER $Username $Password /add /y /expires:never
-# Adding local user to group
-& NET LOCALGROUP $group $Username /add
-# Ensuring password never expires
-& WMIC USERACCOUNT WHERE "Name='$Username'" SET PasswordExpires=FALSE
-# Enable WinRM Basic auth
-winrm set winrm/config/service/auth '@{Basic="true"}'
-# Create a self-signed cert
-$Cert = New-SelfSignedCertificate -CertstoreLocation Cert:\LocalMachine\My -DnsName "parsec-aws"
-# Enable PSRemoting
+
+# Create user and add to administrators
+# $Username = "${var.install_user}"
+# $Password = "${var.install_password}"
+# $SecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+# $UserAccount = New-LocalUser -Name $Username -Password $SecurePassword -PasswordNeverExpires
+# Add-LocalGroupMember -Group "Administrators" -Member $Username
+
+# Configure WinRM
 Enable-PSRemoting -SkipNetworkProfileCheck -Force
-# Disable HTTP Listener
-Get-ChildItem WSMan:\Localhost\listener | Where -Property Keys -eq "Transport=HTTP" | Remove-Item -Recurse
-# Enable HTTPS listener with certificate
+winrm set winrm/config/service/auth '@{Basic="true"}'
+Set-Service -Name WinRM -StartupType Automatic
+
+# Create and configure certificate
+$Cert = New-SelfSignedCertificate -CertstoreLocation Cert:\LocalMachine\My -DnsName "parsec-aws"
+
+# Remove HTTP listener and add HTTPS
+Get-ChildItem WSMan:\Localhost\Listener | Where-Object Keys -eq "Transport=HTTP" | Remove-Item -Recurse
 New-Item -Path WSMan:\LocalHost\Listener -Transport HTTPS -Address * -CertificateThumbPrint $Cert.Thumbprint -Force
-# Open firewall for HTTPS WinRM traffic
+
+# Configure firewall
 New-NetFirewallRule -DisplayName "Windows Remote Management (HTTPS-In)" -Name "Windows Remote Management (HTTPS-In)" -Profile Any -LocalPort 5986 -Protocol TCP
+
+# Install sshd
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Set-Service -Name sshd -StartupType Manual
+New-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name DefaultShell -Value (Get-Command powershell.exe).Path -PropertyType String -Force
+
+# Used to connect to the instance
+$adminKeysPath = "$env:ProgramData\ssh\administrators_authorized_keys"
+$myKey = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDnf5c32Tui8Y1zbs0boVeRQrd5U+X9MPdbBuFdBr21TCnJ5LC4uQDKHW0C/rUval2E+pp6Z3M6LX9BlVDz+ESfZgBWDr5UtpvS4MM8PsYPOK2qzBBGNeqNY9ATTEYK6OyqT4XFOLpoYimY3z5X5gzSfGHRbkwEIRvHEbi+jy9b36XdGYpnD/06GaylAJjcppC5AlkIPwlKiDjhGZOO+Frc5ysz1/lcXc9sVp7NHxJ465I0CsggSUA5ixqUjREa5SUxB9W0iQTsY+6ncznqTByb5QyZ3/cuIBtKvwCx6TFFCENUjGIhxK7mu3ENGINzUkvkk+U7wMoWAgKdzHyFhOUx"
+
+Add-Content -Force -Path $adminKeysPath -Value ((New-Object System.Net.WebClient).DownloadString('http://169.254.169.254/latest/meta-data/public-keys/0/openssh-key'))
+Add-Content -Force -Path $adminKeysPath -Value "$myKey"
+icacls.exe $adminKeysPath /inheritance:r /grant Administrators:F /grant SYSTEM:F
+
+Start-Service sshd
+
+# Resize-Partition -DriveLetter C -Size $(Get-PartitionSupportedSize -DriveLetter C).SizeMax
 </powershell>
-<persist>true</persist>
+<persist>false</persist>
 EOF
+
 //   user_data = <<EOF
 // <powershell>
 // Set-ExecutionPolicy Unrestricted -Force
@@ -218,17 +278,52 @@ EOF
 build {
   sources = ["source.amazon-ebs.build_ebs"]
 
+  # provisioner "powershell" {
+  #   inline = [
+  #     "$partition = Get-Partition -DriveLetter C",
+  #     "Write-Host 'Current partition size: ' $partition.Size",
+  #     "$size = Get-PartitionSupportedSize -DriveLetter C", 
+  #     "Write-Host 'Max supported size: ' $size.SizeMax",
+  #     "Resize-Partition -DriveLetter C -Size $size.SizeMax"
+  #   ]
+  # }
+
   provisioner "powershell" {
-    inline = ["New-Item -Path ${var.image_folder} -ItemType Directory -Force"]
+    inline = [
+      "New-Item -Path ${var.image_folder} -ItemType Directory -Force",
+      "New-Item -Path ${var.image_folder}\\assets -ItemType Directory -Force",
+      "New-Item -Path ${var.image_folder}\\scripts -ItemType Directory -Force",
+      "New-Item -Path ${var.image_folder}\\toolsets -ItemType Directory -Force",
+      "New-Item -Path ${var.temp_dir} -ItemType Directory -Force"
+    ]
+  }
+
+  # provisioner "file" {
+  #   destination = "${var.image_folder}\\"
+  #   sources     = [
+  #     "${path.root}/../assets",
+  #     "${path.root}/../scripts",
+  #     "${path.root}/../toolsets"
+  #   ]
+  # }
+
+  provisioner "file" {
+    destination = "${var.image_folder}\\"
+    source      = "${path.root}/../assets"
+  }
+
+  provisioner "file" {
+    destination = "${var.image_folder}\\scripts\\"
+    sources     = [
+      "${path.root}/../scripts/docs-gen",
+      "${path.root}/../scripts/helpers",
+      "${path.root}/../scripts/tests"
+    ]
   }
 
   provisioner "file" {
     destination = "${var.image_folder}\\"
-    sources     = [
-      "${path.root}/../assets",
-      "${path.root}/../scripts",
-      "${path.root}/../toolsets"
-    ]
+    source      = "${path.root}/../toolsets"
   }
 
   // provisioner "file" {
@@ -251,12 +346,10 @@ build {
     ]
   }
 
-  provisioner "windows-shell" {
+  provisioner "powershell" {
     inline = [
       "net user ${var.install_user} ${var.install_password} /add /passwordchg:no /passwordreq:yes /active:yes /Y",
-      "net localgroup Administrators ${var.install_user} /add",
-      "winrm set winrm/config/service/auth @{Basic=\"true\"}",
-      "winrm get winrm/config/service/auth"
+      "net localgroup Administrators ${var.install_user} /add", 
     ]
   }
 
@@ -270,8 +363,15 @@ build {
     inline            = ["bcdedit.exe /set TESTSIGNING ON"]
   }
 
+  # provisioner "windows-restart" {
+  #   pause_before    = "10s"
+  #   restart_timeout = "20m"
+  #   restart_command       = "powershell \"& {(Get-WmiObject win32_operatingsystem).LastBootUpTime > C:\\ProgramData\\lastboot.txt; Restart-Computer -force}\""
+  #   restart_check_command = "powershell -command \"& {if ((get-content C:\\ProgramData\\lastboot.txt) -eq (Get-WmiObject win32_operatingsystem).LastBootUpTime) {Write-Output 'Sleeping for 600 seconds to wait for reboot'; start-sleep 600} else {Write-Output 'Reboot complete'}}\""
+  # }
+
   provisioner "powershell" {
-    environment_vars = ["IMAGE_VERSION=${var.image_version}", "IMAGE_OS=${var.image_os}", "AGENT_TOOLSDIRECTORY=${var.agent_tools_directory}", "IMAGEDATA_FILE=${var.imagedata_file}", "IMAGE_FOLDER=${var.image_folder}"]
+    environment_vars = ["IMAGE_VERSION=${var.image_version}", "IMAGE_OS=${var.image_os}", "AGENT_TOOLSDIRECTORY=${var.agent_tools_directory}", "IMAGEDATA_FILE=${var.imagedata_file}", "IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
     execution_policy = "unrestricted"
     scripts          = [
       "${path.root}/../scripts/build/Configure-WindowsDefender.ps1",
@@ -287,17 +387,19 @@ build {
   }
 
   provisioner "windows-restart" {
-    check_registry        = true
-    restart_check_command = "powershell -command \"& {while ( (Get-WindowsOptionalFeature -Online -FeatureName Containers -ErrorAction SilentlyContinue).State -ne 'Enabled' ) { Start-Sleep 30; Write-Output 'InProgress' }}\""
-    restart_timeout       = "10m"
+    # check_registry        = true
+    # restart_check_command = "powershell -command \"& {while ( (Get-WindowsOptionalFeature -Online -FeatureName Containers -ErrorAction SilentlyContinue).State -ne 'Enabled' ) { Start-Sleep 30; Write-Output 'InProgress' }}\""
+    restart_timeout       = "20m"
+    restart_command       = "powershell \"& {(Get-WmiObject win32_operatingsystem).LastBootUpTime > C:\\ProgramData\\lastboot.txt; Restart-Computer -force}\""
+    restart_check_command = "powershell -command \"& {if ((get-content C:\\ProgramData\\lastboot.txt) -eq (Get-WmiObject win32_operatingsystem).LastBootUpTime) {Write-Output 'Sleeping for 600 seconds to wait for reboot'; start-sleep 600} else {Write-Output 'Reboot complete'}}\""
   }
 
-  provisioner "powershell" {
-    inline = ["Set-Service -Name wlansvc -StartupType Manual", "if ($(Get-Service -Name wlansvc).Status -eq 'Running') { Stop-Service -Name wlansvc}"]
-  }
+  # provisioner "powershell" {
+  #   inline = ["Set-Service -Name wlansvc -StartupType Manual", "if ($(Get-Service -Name wlansvc).Status -eq 'Running') { Stop-Service -Name wlansvc}"]
+  # }
 
   provisioner "powershell" {
-    environment_vars = ["IMAGE_FOLDER=${var.image_folder}"]
+    environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
     scripts          = [
       "${path.root}/../scripts/build/Install-Docker.ps1",
       "${path.root}/../scripts/build/Install-DockerWinCred.ps1",
@@ -316,7 +418,7 @@ build {
   provisioner "powershell" {
     elevated_password = "${var.install_password}"
     elevated_user     = "${var.install_user}"
-    environment_vars  = ["IMAGE_FOLDER=${var.image_folder}"]
+    environment_vars  = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
     scripts           = [
       "${path.root}/../scripts/build/Install-VisualStudio.ps1",
       "${path.root}/../scripts/build/Install-KubernetesTools.ps1"
@@ -331,7 +433,7 @@ build {
 
   provisioner "powershell" {
     pause_before     = "2m0s"
-    environment_vars = ["IMAGE_FOLDER=${var.image_folder}"]
+    environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
     scripts          = [
       "${path.root}/../scripts/build/Install-Wix.ps1",
       "${path.root}/../scripts/build/Install-WDK.ps1",
@@ -347,7 +449,7 @@ build {
 
   provisioner "powershell" {
     execution_policy = "remotesigned"
-    environment_vars = ["IMAGE_FOLDER=${var.image_folder}"]
+    environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
     scripts          = ["${path.root}/../scripts/build/Install-ServiceFabricSDK.ps1"]
   }
 
@@ -360,53 +462,53 @@ build {
   }
 
   provisioner "powershell" {
-    environment_vars = ["IMAGE_FOLDER=${var.image_folder}"]
+    environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
     scripts          = [
       "${path.root}/../scripts/build/Install-ActionsCache.ps1",
-      // "${path.root}/../scripts/build/Install-Ruby.ps1",
-      // "${path.root}/../scripts/build/Install-PyPy.ps1",
+      "${path.root}/../scripts/build/Install-Ruby.ps1",
+      "${path.root}/../scripts/build/Install-PyPy.ps1",
       "${path.root}/../scripts/build/Install-Toolset.ps1",
       "${path.root}/../scripts/build/Configure-Toolset.ps1",
       "${path.root}/../scripts/build/Install-NodeJS.ps1",
-      // "${path.root}/../scripts/build/Install-AndroidSDK.ps1",
-      // "${path.root}/../scripts/build/Install-PowershellAzModules.ps1",
+      "${path.root}/../scripts/build/Install-AndroidSDK.ps1",
+      "${path.root}/../scripts/build/Install-PowershellAzModules.ps1",
       "${path.root}/../scripts/build/Install-Pipx.ps1",
       "${path.root}/../scripts/build/Install-Git.ps1",
       "${path.root}/../scripts/build/Install-GitHub-CLI.ps1",
-      // "${path.root}/../scripts/build/Install-PHP.ps1",
-      // "${path.root}/../scripts/build/Install-Rust.ps1",
-      // "${path.root}/../scripts/build/Install-Sbt.ps1",
+      "${path.root}/../scripts/build/Install-PHP.ps1",
+      "${path.root}/../scripts/build/Install-Rust.ps1",
+      "${path.root}/../scripts/build/Install-Sbt.ps1",
       "${path.root}/../scripts/build/Install-Chrome.ps1",
-      // "${path.root}/../scripts/build/Install-EdgeDriver.ps1",
-      // "${path.root}/../scripts/build/Install-Firefox.ps1",
+      "${path.root}/../scripts/build/Install-EdgeDriver.ps1",
+      "${path.root}/../scripts/build/Install-Firefox.ps1",
       "${path.root}/../scripts/build/Install-Selenium.ps1",
       "${path.root}/../scripts/build/Install-IEWebDriver.ps1",
-      // "${path.root}/../scripts/build/Install-Apache.ps1",
-      // "${path.root}/../scripts/build/Install-Nginx.ps1",
+      "${path.root}/../scripts/build/Install-Apache.ps1",
+      "${path.root}/../scripts/build/Install-Nginx.ps1",
       "${path.root}/../scripts/build/Install-Msys2.ps1",
       "${path.root}/../scripts/build/Install-WinAppDriver.ps1",
-      // "${path.root}/../scripts/build/Install-R.ps1",
-      // "${path.root}/../scripts/build/Install-AWSTools.ps1",
+      "${path.root}/../scripts/build/Install-R.ps1",
+      "${path.root}/../scripts/build/Install-AWSTools.ps1",
       "${path.root}/../scripts/build/Install-DACFx.ps1",
-      // "${path.root}/../scripts/build/Install-MysqlCli.ps1",
+      "${path.root}/../scripts/build/Install-MysqlCli.ps1",
       "${path.root}/../scripts/build/Install-SQLPowerShellTools.ps1",
       "${path.root}/../scripts/build/Install-SQLOLEDBDriver.ps1",
       "${path.root}/../scripts/build/Install-DotnetSDK.ps1",
       "${path.root}/../scripts/build/Install-Mingw64.ps1",
-      // "${path.root}/../scripts/build/Install-Haskell.ps1",
+      "${path.root}/../scripts/build/Install-Haskell.ps1",
       "${path.root}/../scripts/build/Install-Stack.ps1",
-      // "${path.root}/../scripts/build/Install-Miniconda.ps1",
+      "${path.root}/../scripts/build/Install-Miniconda.ps1",
       "${path.root}/../scripts/build/Install-AzureCosmosDbEmulator.ps1",
-      // "${path.root}/../scripts/build/Install-Mercurial.ps1",
+      "${path.root}/../scripts/build/Install-Mercurial.ps1",
       "${path.root}/../scripts/build/Install-Zstd.ps1",
       "${path.root}/../scripts/build/Install-NSIS.ps1",
       "${path.root}/../scripts/build/Install-Vcpkg.ps1",
-      // "${path.root}/../scripts/build/Install-PostgreSQL.ps1",
-      // "${path.root}/../scripts/build/Install-Bazel.ps1",
+      "${path.root}/../scripts/build/Install-PostgreSQL.ps1",
+      "${path.root}/../scripts/build/Install-Bazel.ps1",
       "${path.root}/../scripts/build/Install-AliyunCli.ps1",
       "${path.root}/../scripts/build/Install-RootCA.ps1",
-      // "${path.root}/../scripts/build/Install-MongoDB.ps1",
-      // "${path.root}/../scripts/build/Install-CodeQLBundle.ps1",
+      "${path.root}/../scripts/build/Install-MongoDB.ps1",
+      "${path.root}/../scripts/build/Install-CodeQLBundle.ps1",
       "${path.root}/../scripts/build/Configure-Diagnostics.ps1"
     ]
   }
@@ -414,7 +516,7 @@ build {
   provisioner "powershell" {
     elevated_password = "${var.install_password}"
     elevated_user     = "${var.install_user}"
-    environment_vars  = ["IMAGE_FOLDER=${var.image_folder}"]
+    environment_vars  = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
     scripts           = [
       "${path.root}/../scripts/build/Install-WindowsUpdates.ps1",
       "${path.root}/../scripts/build/Configure-DynamicPort.ps1",
@@ -433,10 +535,11 @@ build {
 
   provisioner "powershell" {
     pause_before     = "2m0s"
-    environment_vars = ["IMAGE_FOLDER=${var.image_folder}"]
+    environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
     scripts          = [
       "${path.root}/../scripts/build/Install-WindowsUpdatesAfterReboot.ps1",
-      // "${path.root}/../scripts/tests/RunAll-Tests.ps1"
+      "${path.root}/../scripts/build/Invoke-Cleanup.ps1",
+      # "${path.root}/../scripts/tests/RunAll-Tests.ps1"
     ]
   }
 

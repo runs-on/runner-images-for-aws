@@ -2,6 +2,10 @@
 
 set -eo pipefail
 
+gnu_sed() {
+  $(which gsed || which sed) "$@"
+}
+
 RELEASE_DIR="$1"
 
 if [ -z "$RELEASE_DIR" ]; then
@@ -13,6 +17,11 @@ release_dir="$RELEASE_DIR"
 build_dir="$release_dir/images/windows/scripts/build"
 toolsets_dir="$release_dir/images/windows/toolsets"
 TOOLSET_PATH="$toolsets_dir/toolset-2022.json"
+
+
+gnu_sed -i "s|Resize-Partition.*|# removed: Resize-Partition|" $build_dir/Configure-BaseImage.ps1
+
+# cat patches/windows/files/boot-config.ps1 >> $build_dir/Configure-System.ps1
 
 # custom stuff
 # mkdir -p $release_dir/images/windows/custom

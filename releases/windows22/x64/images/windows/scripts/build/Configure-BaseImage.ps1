@@ -75,5 +75,5 @@ Set-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem' -Name
 # Expand disk size of OS drive
 $driveLetter = "C"
 $size = Get-PartitionSupportedSize -DriveLetter $driveLetter
-Resize-Partition -DriveLetter $driveLetter -Size $size.SizeMax
+# removed: Resize-Partition
 Get-Volume | Select-Object DriveLetter, SizeRemaining, Size | Sort-Object DriveLetter
