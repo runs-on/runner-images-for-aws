@@ -42,7 +42,7 @@ jobs:
       - ami=${{ inputs.ami_id }}
       - extras=${{ inputs.extras }}
     env:
-      FILENAME: random-file-${{ inputs.index }}
+      FILENAME: random-file-${{ inputs.ami_id }}-${{ inputs.index }}
     steps:
       - name: Logs
         run: sudo cat /var/log/cloud-init-output.log
@@ -101,12 +101,12 @@ jobs:
       - run: echo hello > path/to/artifact/world.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: my-artifact-${{ inputs.index }}
+          name: my-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
           path: path/to/artifact/world.txt
       - run: rm path/to/artifact/world.txt
       - uses: actions/download-artifact@v4
         with:
-          name: my-artifact-${{ inputs.index }}
+          name: my-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
           path: path/to/artifact/world.txt
 
       # Test for cache
