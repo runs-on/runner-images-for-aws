@@ -40,10 +40,19 @@ release_dir = "releases/#{dist}/#{arch}"
 fail "Skipping #{release_dir}, not found" unless Dir.exist?(release_dir)
 
 ami_name = [options[:image_prefix], image['id'], options[:image_version]].join('-')
-packer_template = "#{release_dir}/images/#{dist.sub(/\d+$/, '')}/templates/#{image['id']}.pkr.hcl"
+packer_template_relative_path = "#{dist.sub(/\d+$/, '')}/templates/#{image['id']}.pkr.hcl"
+packer_template_path = "#{release_dir}/images/#{packer_template_relative_path}"
+
+# Copy template to destination
+FileUtils.cp("patches/#{packer_template_relative_path}", packer_template_path)
+
+at_exit do
+  FileUtils.rm_rf(packer_template_path)
+end
+
 packer_init_cmd = [
   "packer", "init",
-  packer_template
+  packer_template_path
 ]
 packer_build_cmd = [
   "packer", "build",
@@ -56,7 +65,7 @@ packer_build_cmd = [
   "-var", "source_ami_name=#{image['source_ami_name']}",
   "-var", "source_ami_owner=#{image['source_ami_owner']}",
   "-var", "volume_size=#{image['volume_size']}",
-  packer_template
+  packer_template_path
 ].compact
 
 puts "Running Packer init command: #{packer_init_cmd.join(' ')}"

@@ -61,6 +61,3 @@ if false; then
 
   yq -oj -i 'del(.azureModules[])' $TOOLSET_PATH
 fi
-
-# finally, copy over the packer template
-cp patches/windows/templates/windows22-full-x64.pkr.hcl "$release_dir/images/windows/templates/"

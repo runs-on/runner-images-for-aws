@@ -69,7 +69,3 @@ yq -oj -i 'del(.azureModules[])' $TOOLSET_PATH
 # https://github.com/actions/runner-images/issues/2388
 # might need to add symlinks if causing issues, but let's see
 gnu_sed -i 's|# Download and unpack Chromium|invoke_tests "Browsers" "Chrome" && exit 0|' $release_dir/images/ubuntu/scripts/build/install-google-chrome.sh
-
-# finally, copy over the packer template
-cp patches/ubuntu/templates/ubuntu22-full-x64.pkr.hcl "$release_dir/images/ubuntu/templates/"
-cp patches/ubuntu/templates/ubuntu22-gpu-x64.pkr.hcl "$release_dir/images/ubuntu/templates/"
