@@ -101,12 +101,12 @@ jobs:
       - run: echo hello > path/to/artifact/world.txt
       - uses: actions/upload-artifact@v4
         with:
-          name: my-artifact
+          name: my-artifact-${{ inputs.index }}
           path: path/to/artifact/world.txt
       - run: rm path/to/artifact/world.txt
       - uses: actions/download-artifact@v4
         with:
-          name: my-artifact
+          name: my-artifact-${{ inputs.index }}
           path: path/to/artifact/world.txt
 
       # Test for cache
