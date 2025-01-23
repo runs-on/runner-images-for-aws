@@ -71,3 +71,7 @@ rm -rf /root/.sbt
 # reset root files to blank state
 cp /etc/skel/.bashrc /root/
 cp /etc/skel/.profile /root/
+
+apt autoremove --purge snapd -y
+apt-mark hold snapd
+rm -rf /var/cache/snapd/
