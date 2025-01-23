@@ -72,7 +72,7 @@ jobs:
       instance_family: "g4dn"
 
   release:
-    if: success() || needs.test-gpu.result == 'skipped'
+    if: ${{ !failure() && !cancelled() }}
     needs:
       - build
       - test-gpu
