@@ -9,6 +9,8 @@ echo "Defaults env_keep += \"DEBIAN_FRONTEND\"" >> /etc/sudoers
 
 # add git-crypt
 apt-get install -y git-crypt
+# add ncdu
+apt-get install -y ncdu
 
 # add kvm virt, only available on metal instances
 apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virtinst
@@ -52,8 +54,9 @@ rm -f /home/ubuntu/minikube-linux-arm64
 rm -rf /usr/share/doc
 rm -rf /usr/share/man
 rm -rf /usr/share/icons
-# remove linux kernel source code
-rm -rf /usr/src/linux-*
+
+# Make sure to keep linux kernel source code, useful for compiling modules etc.
+# rm -rf /usr/src/linux-*
 
 rm -rf /usr/local/n
 rm -rf /usr/local/doc
@@ -74,4 +77,4 @@ cp /etc/skel/.profile /root/
 
 apt autoremove --purge snapd -y
 apt-mark hold snapd
-rm -rf /var/cache/snapd/
+rm -rf /var/cache/snapd/ /root/snap
