@@ -14,7 +14,6 @@ variable "ami_name" {
 
 variable "ami_description" {
   type    = string
-  default = "${env("AMI_DESCRIPTION")}"
 }
 
 variable "ami_regions" {

@@ -64,9 +64,10 @@ packer_build_cmd = [
   "-var", "image_version=#{options[:image_version]}",
   "-var", "subnet_id=#{options[:subnet_id]}",
   "-var", "region=#{options[:region]}",
-  "-var", "source_ami_name=#{image['source_ami_name']}",
-  "-var", "source_ami_owner=#{image['source_ami_owner']}",
-  "-var", "volume_size=#{image['volume_size']}",
+  "-var", "source_ami_name=#{image.fetch('source_ami_name')}",
+  "-var", "source_ami_owner=#{image.fetch('source_ami_owner')}",
+  "-var", "volume_size=#{image.fetch('volume_size')}",
+  "-var", "ami_description=#{image.fetch('description')}",
   packer_template_path
 ].compact
 
