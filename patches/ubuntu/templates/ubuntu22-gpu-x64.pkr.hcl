@@ -137,6 +137,7 @@ source "amazon-ebs" "build_ebs" {
     user_data = <<EOF
 #!/bin/bash
 systemctl start ssh
+systemctl enable ssh
 EOF
 }
 
@@ -146,5 +147,18 @@ build {
   provisioner "shell" {
     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     scripts          = ["${path.root}/../scripts/build/install-gpu.sh"]
+  }
+
+  provisioner "shell" {
+    execute_command   = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    expect_disconnect = true
+    inline            = ["echo 'Reboot VM'", "sudo reboot"]
+  }
+
+  provisioner "shell" {
+    execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    pause_before        = "1m0s"
+    scripts             = ["${path.root}/../scripts/build/cleanup.sh", "${path.root}/../custom/files/after-reboot.sh"]
+    start_retry_timeout = "10m"
   }
 }
