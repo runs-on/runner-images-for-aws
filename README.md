@@ -1,15 +1,24 @@
-# GitHub Action runner images for AWS
+# GitHub Actions runner images for AWS
 
-GitHub Action Runner images for AWS, to be used with [RunsOn](https://runs-on.com/?ref=runner-images-for-aws), or for your own usage.
+GitHub Actions Runner images for AWS, to be used with [RunsOn](https://runs-on.com/?ref=runner-images-for-aws), or for your own usage.
 
 Official images are replicated and published every 15 days.
 
 ## Supported images
 
+### Base images compatible with managed GitHub runners
+
 * `ubuntu22-full-x64`
 * `ubuntu22-full-arm64`
 * `ubuntu24-full-x64`
 * `ubuntu24-full-arm64`
+
+### GPU-optimized images
+
+Those use the above images as base, and include latest NVidia GPU drivers, cuda toolkit, and container toolkit.
+
+* `ubuntu22-gpu-x64`
+* `ubuntu24-gpu-x64`
 
 ## Supported regions
 
