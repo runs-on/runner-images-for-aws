@@ -7,6 +7,8 @@ usermod -aG sudo runner
 echo "%sudo   ALL=(ALL:ALL) NOPASSWD:ALL" >> /etc/sudoers
 echo "Defaults env_keep += \"DEBIAN_FRONTEND\"" >> /etc/sudoers
 
+# add bc, probably installed by PHP script originally
+apt-get install -y bc
 # add git-crypt
 apt-get install -y git-crypt
 # add ncdu
