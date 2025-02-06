@@ -35,6 +35,6 @@ Describe "Java" {
 
         $outputLines = (& $env:comspec /c "`"$javaPath`" -version 2>&1") -as [string[]]
         $LASTEXITCODE | Should -Be 0
-        $outputLines[0] | Should -Match $outputPattern
+        $outputLines | Where-Object { $_ -match "openjdk version" } | Select-Object -First 1 | Should -Match $outputPattern
     }
 }
