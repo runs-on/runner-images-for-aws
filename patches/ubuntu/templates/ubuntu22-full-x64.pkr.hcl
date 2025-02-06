@@ -318,8 +318,7 @@ build {
       // for some reason doesn't end up in the correct folder, so removing
       // "${path.root}/../scripts/build/install-bazel.sh",
       "${path.root}/../scripts/build/install-oras-cli.sh",
-      // action is better for that
-      // "${path.root}/../scripts/build/install-php.sh",
+      "${path.root}/../scripts/build/install-php.sh",
       "${path.root}/../scripts/build/install-postgresql.sh",
       "${path.root}/../scripts/build/install-ruby.sh",
       "${path.root}/../scripts/build/install-rlang.sh",
