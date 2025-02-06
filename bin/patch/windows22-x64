@@ -13,13 +13,16 @@ if [ -z "$RELEASE_DIR" ]; then
   exit 1
 fi
 
+set -x
 release_dir="$RELEASE_DIR"
 build_dir="$release_dir/images/windows/scripts/build"
+tests_dir="$release_dir/images/windows/scripts/tests"
 toolsets_dir="$release_dir/images/windows/toolsets"
 TOOLSET_PATH="$toolsets_dir/toolset-2022.json"
 
 
 gnu_sed -i "s|Resize-Partition.*|# removed: Resize-Partition|" $build_dir/Configure-BaseImage.ps1
+gnu_sed -i 's/$outputLines\[0\].*/$outputLines | Where-Object { $_ -match "openjdk version" } | Select-Object -First 1 | Should -Match $outputPattern/' $tests_dir/Java.Tests.ps1
 
 # cat patches/windows/files/boot-config.ps1 >> $build_dir/Configure-System.ps1
 
