@@ -6,3 +6,4 @@ ec2-boot-bench
 .trash
 *.pem
 /releases/**/*.hcl
+/integrations
