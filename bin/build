@@ -47,8 +47,16 @@ packer_template_path = "#{release_dir}/images/#{packer_template_relative_path}"
 # Copy template to destination
 FileUtils.cp("patches/#{packer_template_relative_path}", packer_template_path)
 
+FileUtils.rm_rf("integrations") && Dir.mkdir("integrations")
+{
+  "runs-on/runner-images-for-stepsecurity" => "integrations/stepsecurity"
+}.each do |repo, path|
+  system("git clone git@github.com:#{repo}.git #{path}")
+end
+
 at_exit do
   FileUtils.rm_rf(packer_template_path)
+  FileUtils.rm_rf("integrations")
 end
 
 packer_init_cmd = [
@@ -72,11 +80,11 @@ packer_build_cmd = [
 ].compact
 
 puts "Running Packer init command: #{packer_init_cmd.join(' ')}"
-system({ "PACKER_LOG" => "1" }, *packer_init_cmd) or fail("Packer init failed")
+system({ "PACKER_LOG" => "0" }, *packer_init_cmd) or fail("Packer init failed")
 
 puts "Running Packer build command: #{packer_build_cmd.join(' ')}"
 
-unless system(*packer_build_cmd)
+unless system({ "PROJECT_ROOT" => File.expand_path("..", __dir__) }, *packer_build_cmd)
   # Cleanup any dangling EC2 instances
   ec2_client = Aws::EC2::Client.new(region: 'us-east-1')
   instances = ec2_client.describe_instances(

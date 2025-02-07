@@ -1,0 +1,24 @@
+name: StepSecurity images
+
+on:
+  workflow_dispatch:
+    inputs:
+      images:
+        type: string
+        required: true
+        description: 'Distribution(s) to build'
+        default: '["ubuntu22-stepsecurity-x64", "ubuntu24-stepsecurity-x64"]'
+  schedule:
+    - cron: '0 20 */15 * *'
+
+jobs:
+  build-test-release:
+    name: Build/Test/Release ${{ matrix.image_id }}
+    strategy:
+      fail-fast: false
+      matrix:
+        image_id: ${{ fromJSON(github.event.inputs.images || '["ubuntu22-stepsecurity-x64", "ubuntu24-stepsecurity-x64"]') }}
+    uses: ./.github/workflows/build-test-release.yml
+    secrets: inherit
+    with:
+      image_id: ${{ matrix.image_id }}
