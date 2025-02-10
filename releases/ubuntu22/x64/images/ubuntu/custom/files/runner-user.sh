@@ -1,6 +1,10 @@
 #!/bin/bash
 set -ex
 
+# make sure we have the latest packages
+apt-get update
+apt-get upgrade -y
+
 echo "Setting up runner user..."
 adduser --shell /bin/bash --disabled-password --gecos "" --uid 1001 runner
 usermod -aG sudo runner
