@@ -88,6 +88,9 @@ def launch_ami(options)
     subnet_id: subnet_id,
     security_group_ids: [security_group_id],
     instance_initiated_shutdown_behavior: "terminate",
+    iam_instance_profile: {
+      name: "SSMInstanceProfile"
+    },
     user_data: Base64.encode64(USER_DATA_SCRIPT),
     block_device_mappings: [
       {
