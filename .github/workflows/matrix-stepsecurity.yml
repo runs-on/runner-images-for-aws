@@ -8,11 +8,15 @@ on:
         required: true
         description: 'Distribution(s) to build'
         default: '["ubuntu22-stepsecurity-x64", "ubuntu24-stepsecurity-x64"]'
-  schedule:
-    - cron: '0 20 */15 * *'
+  workflow_run:
+    workflows: ['Linux images']
+    branches: [main]
+    types:
+      - completed
 
 jobs:
   build-test-release:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
     name: Build/Test/Release ${{ matrix.image_id }}
     strategy:
       fail-fast: false
