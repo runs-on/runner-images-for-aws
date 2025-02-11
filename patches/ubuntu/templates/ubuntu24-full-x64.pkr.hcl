@@ -125,8 +125,6 @@ source "amazon-ebs" "build_ebs" {
     volume_type = "${var.volume_type}"
     volume_size = "${var.volume_size}"
     delete_on_termination = "true"
-    iops = 3000
-    throughput = 750
     encrypted = "false"
   }
 
