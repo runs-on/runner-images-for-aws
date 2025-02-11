@@ -123,6 +123,8 @@ jobs:
         with:
           path: ${{ env.FILENAME }}
           key: github-${{github.run_id}}-actions-cache-${{ env.FILENAME }}
+      # actions/cache backend seems to be eventually consistent only
+      - run: sleep 2
       - name: Restore from cache (actions/cache)
         uses: actions/cache/restore@v4
         with:
