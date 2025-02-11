@@ -113,7 +113,7 @@ jobs:
       - name: Generate file
         run: |
           echo "Generating random file..."
-          dd if=/dev/urandom of=${{ env.FILENAME }} bs=1M count=1024
+          dd if=/dev/urandom of=${{ env.FILENAME }} bs=1M count=256
           ls -lh ${{ env.FILENAME }}
       - name: Calculate MD5
         id: md5
