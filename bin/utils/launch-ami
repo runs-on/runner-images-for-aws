@@ -8,6 +8,7 @@ usage = Slop::Options.new do |opts|
   opts.banner = "Usage: #{$0} [--instance-type TYPE] [--ami-name NAME]"
   opts.string '--instance-type', 'Instance type'
   opts.string '--ami-name', 'AMI name or prefix', required: true
+  opts.bool '-s', '--shutdown', 'Shutdown instance after 10 minutes', default: true
   opts.bool '-h', '--help', 'Show help'
 end
 
@@ -36,6 +37,15 @@ chmod 0600 /root/.ssh/authorized_keys
 systemctl enable ssh || true
 systemctl start ssh || true
 EOF
+
+AUTO_SHUTDOWN_SCRIPT = <<EOF
+sleep 600
+shutdown -h now
+EOF
+
+if options[:shutdown]
+  USER_DATA_SCRIPT.concat(AUTO_SHUTDOWN_SCRIPT)
+end
 
 def find_latest_ami(options)
   ec2 = Aws::EC2::Client.new
