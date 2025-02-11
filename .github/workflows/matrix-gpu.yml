@@ -8,14 +8,15 @@ on:
         required: true
         description: 'Distribution(s) to build'
         default: '["ubuntu22-gpu-x64", "ubuntu24-gpu-x64"]'
-  # doesn't work because release is created by github actions, which does not trigger a new event
-  release:
-    types: [published]
-  schedule:
-    - cron: '0 16 */15 * *'
+  workflow_run:
+    workflows: ['Linux images']
+    branches: [main]
+    types:
+      - completed
 
 jobs:
   build-test-release:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
     name: Build/Test/Release ${{ matrix.image_id }}
     strategy:
       fail-fast: false
