@@ -38,6 +38,7 @@ jobs:
       - runs-on=${{ github.run_id }}
       - family=${{ inputs.instance_family || 'm7' }}
       - cpu=2+4
+      - disk=large
       - ami=${{ inputs.ami_id }}
       - extras=${{ inputs.extras }}
     env:
