@@ -105,6 +105,7 @@ source "amazon-ebs" "build_ebs" {
   }
 
   temporary_security_group_source_public_ip = true
+  shutdown_behavior                         = "terminate"
   ami_name                                  = "${var.ami_name}"
   ami_description                           = "${var.ami_description}"
   ami_virtualization_type                   = "hvm"
@@ -157,6 +158,13 @@ Add-Content -Force -Path $adminKeysPath -Value ""
 
 icacls.exe $adminKeysPath /inheritance:r /grant Administrators:F /grant SYSTEM:F
 Start-Service sshd
+
+# Create shutdown task that runs after 3 hours
+$action = New-ScheduledTaskAction -Execute 'shutdown.exe' -Argument '/s /f /t 0'
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval (New-TimeSpan -Hours 3)
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -DontStopOnIdleEnd
+Register-ScheduledTask -TaskName "ShutdownAfter3Hours" -Action $action -Trigger $trigger -Settings $settings -User "System" -RunLevel Highest -Force
+
 </powershell>
 <persist>false</persist>
 EOF
@@ -171,8 +179,6 @@ EOF
     volume_type = "${var.volume_type}"
     volume_size = "${var.volume_size}"
     delete_on_termination = "true"
-    iops = 3000
-    throughput = 750
     encrypted = "false"
   }
 
@@ -330,7 +336,7 @@ build {
     elevated_user     = "${var.install_user}"
     environment_vars  = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
     scripts           = [
-      "${path.root}/../scripts/build/Install-VisualStudio.ps1",
+      # "${path.root}/../scripts/build/Install-VisualStudio.ps1",
       "${path.root}/../scripts/build/Install-KubernetesTools.ps1"
     ]
     valid_exit_codes  = [0, 3010]
@@ -386,7 +392,7 @@ build {
       "${path.root}/../scripts/build/Install-Git.ps1",
       "${path.root}/../scripts/build/Install-GitHub-CLI.ps1",
       # "${path.root}/../scripts/build/Install-PHP.ps1",
-      "${path.root}/../scripts/build/Install-Rust.ps1",
+      # "${path.root}/../scripts/build/Install-Rust.ps1",
       "${path.root}/../scripts/build/Install-Sbt.ps1",
       # "${path.root}/../scripts/build/Install-Chrome.ps1",
       # "${path.root}/../scripts/build/Install-EdgeDriver.ps1",
@@ -418,7 +424,7 @@ build {
       "${path.root}/../scripts/build/Install-AliyunCli.ps1",
       "${path.root}/../scripts/build/Install-RootCA.ps1",
       # "${path.root}/../scripts/build/Install-MongoDB.ps1",
-      "${path.root}/../scripts/build/Install-CodeQLBundle.ps1",
+      # "${path.root}/../scripts/build/Install-CodeQLBundle.ps1",
       "${path.root}/../scripts/build/Configure-Diagnostics.ps1"
     ]
   }
