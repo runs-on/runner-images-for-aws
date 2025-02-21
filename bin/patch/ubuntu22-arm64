@@ -2,6 +2,10 @@
 
 set -eo pipefail
 
+gnu_sed() {
+  $(which gsed || which sed) "$@"
+}
+
 RELEASE_DIR="$1"
 
 if [ -z "$RELEASE_DIR" ]; then
@@ -22,25 +26,25 @@ cp patches/ubuntu/build/install-powershell.sh "$release_dir/images/ubuntu/script
 # custom stuff
 mkdir -p $custom_dir
 cp -r patches/ubuntu/files $custom_dir/
-sed -i 's|amd64|arm64|g' $custom_dir/files/*.sh
+gnu_sed -i 's|amd64|arm64|g' $custom_dir/files/*.sh
 
 # fix other build scripts inplace
-sed -i 's|awscli-exe-linux-x86_64.zip|awscli-exe-linux-aarch64.zip|g' $build_dir/*.sh
-sed -i 's|aws-sam-cli-linux-x86_64.zip|aws-sam-cli-linux-arm64.zip|g' $build_dir/*.sh
+gnu_sed -i 's|awscli-exe-linux-x86_64.zip|awscli-exe-linux-aarch64.zip|g' $build_dir/*.sh
+gnu_sed -i 's|aws-sam-cli-linux-x86_64.zip|aws-sam-cli-linux-arm64.zip|g' $build_dir/*.sh
 # typo on purpose, matches Linux and linux
-sed -i 's|inux-x86_64|inux-aarch64|g' $build_dir/*.sh $toolsets_dir/*.json
-sed -i 's|linux-amd64|linux-arm64|g' $build_dir/*.sh $toolsets_dir/*.json
-sed -i 's|linux_amd64|linux_arm64|g' $build_dir/*.sh
-sed -i 's|jdk-amd64|jdk-arm64|g' $build_dir/install-java-tools.sh
-sed -i 's|X64|ARM64|g' $build_dir/install-java-tools.sh
-sed -i 's|x64|arm64|g' $build_dir/install-java-tools.sh
-sed -i 's|_X64|_ARM64|g' $tests_dir/Java.Tests.ps1
-sed -i 's|linux-x64|linux-arm64|g' $build_dir/*.sh
-sed -i 's|ubuntu_64bit|ubuntu_arm64|g' $build_dir/*.sh
-sed -i 's|arch=amd64 |arch=amd64,arm64 |g' $build_dir/*.sh
-sed -i 's|contains(\\"amd64\\")|contains(\\"arm64\\")|g' $build_dir/*.sh
-sed -i 's|x86_64-linux|aarch64-linux|g' $build_dir/*.sh
-sed -i 's|arch=="amd64"|arch=="arm64"|g' $build_dir/*.sh
+gnu_sed -i 's|inux-x86_64|inux-aarch64|g' $build_dir/*.sh $toolsets_dir/*.json
+gnu_sed -i 's|linux-amd64|linux-arm64|g' $build_dir/*.sh $toolsets_dir/*.json
+gnu_sed -i 's|linux_amd64|linux_arm64|g' $build_dir/*.sh
+gnu_sed -i 's|jdk-amd64|jdk-arm64|g' $build_dir/install-java-tools.sh
+gnu_sed -i 's|X64|ARM64|g' $build_dir/install-java-tools.sh
+gnu_sed -i 's|x64|arm64|g' $build_dir/install-java-tools.sh
+gnu_sed -i 's|_X64|_ARM64|g' $tests_dir/Java.Tests.ps1
+gnu_sed -i 's|linux-x64|linux-arm64|g' $build_dir/*.sh
+gnu_sed -i 's|ubuntu_64bit|ubuntu_arm64|g' $build_dir/*.sh
+gnu_sed -i 's|arch=amd64 |arch=amd64,arm64 |g' $build_dir/*.sh
+gnu_sed -i 's|contains(\\"amd64\\")|contains(\\"arm64\\")|g' $build_dir/*.sh
+gnu_sed -i 's|x86_64-linux|aarch64-linux|g' $build_dir/*.sh
+gnu_sed -i 's|arch=="amd64"|arch=="arm64"|g' $build_dir/*.sh
 
 # Save ~3.2GB by removing default docker images
 yq -oj -i '.docker.images = []' $TOOLSET_PATH
@@ -81,4 +85,4 @@ yq -oj -i 'del(.azureModules[])' $TOOLSET_PATH
 # Remove chromium since chrome already installed. 500MB saved
 # https://github.com/actions/runner-images/issues/2388
 # might need to add symlinks if causing issues, but let's see
-sed -i 's|# Download and unpack Chromium|invoke_tests "Browsers" "Chrome" && exit 0|' $release_dir/images/ubuntu/scripts/build/install-google-chrome.sh
+gnu_sed -i 's|# Download and unpack Chromium|invoke_tests "Browsers" "Chrome" && exit 0|' $release_dir/images/ubuntu/scripts/build/install-google-chrome.sh
