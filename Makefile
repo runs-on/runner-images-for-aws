@@ -1,5 +1,5 @@
 IMAGE_IDS := $(shell yq e '.images[].id' config.yml)
-.PHONY: sync $(addprefix sync-,$(IMAGE_IDS)) $(addprefix build-,$(IMAGE_IDS))
+.PHONY: $(addprefix sync-,$(IMAGE_IDS)) $(addprefix build-,$(IMAGE_IDS))
 
 SHELL:=/bin/bash
 export AMI_PREFIX=runs-on-dev
@@ -22,6 +22,7 @@ endef
 $(foreach id,$(IMAGE_IDS),$(eval $(call sync_template,$(id))))
 $(foreach id,$(IMAGE_IDS),$(eval $(call build_template,$(id))))
 $(foreach id,$(IMAGE_IDS),$(eval $(call debug_template,$(id))))
+
 cleanup-dev:
 	env $(shell cat .env) AMI_PREFIX=runs-on-dev bundle exec bin/utils/cleanup-amis
 
