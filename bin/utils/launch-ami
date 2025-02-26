@@ -5,15 +5,16 @@ require 'slop'
 
 options = {}
 usage = Slop::Options.new do |opts|
-  opts.banner = "Usage: #{$0} [--instance-type TYPE] [--ami-name NAME]"
+  opts.banner = "Usage: #{$0} AMI_NAME_OR_ID [--instance-type TYPE]"
   opts.string '--instance-type', 'Instance type'
-  opts.string '--ami-name', 'AMI name or prefix', required: true
   opts.bool '-s', '--shutdown', 'Shutdown instance after 10 minutes', default: true
   opts.bool '-h', '--help', 'Show help'
 end
 
 begin
+  ami_name_or_id = ARGV.shift # Get the first argument as AMI name or ID
   options = usage.parse(ARGV).to_hash
+  options[:ami_name_or_id] = ami_name_or_id # Assign it to options
 rescue Slop::Error => e
   puts "Error: #{e.message}"
   puts
@@ -49,15 +50,18 @@ end
 
 def find_latest_ami(options)
   ec2 = Aws::EC2::Client.new
-  name_prefix = options[:ami_name]
-  images = ec2.describe_images({
-    filters: [
-      { name: "name", values: ["#{name_prefix}*"] },
-      { name: "state", values: ["available"] }
-    ]
-  }).images
+  ami_name_or_id = options[:ami_name_or_id]
+  filters = [
+    { name: "state", values: ["available"] }
+  ]
+  if ami_name_or_id.start_with?("ami-")
+    filters << { name: "image-id", values: [ami_name_or_id] }
+  else
+    filters << { name: "name", values: ["#{ami_name_or_id}*"] }
+  end
+  images = ec2.describe_images(filters: filters).images
 
-  fail "No AMIs found matching prefix: #{name_prefix}" if images.empty?
+  fail "No AMIs found matching prefix: #{ami_name_or_id}" if images.empty?
   
   latest = images.sort_by { |img| img.creation_date }.last
   puts "Found AMI: #{latest.name} (#{latest.image_id})"
