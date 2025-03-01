@@ -69,7 +69,9 @@
       "google;google_play_services"
     ],
     "addon_list": [],
-    "additional_tools": [],
+    "additional_tools": [
+      "cmake;3.31.5"
+    ],
     "ndk": {
       "default": "27",
       "versions": [

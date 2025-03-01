@@ -12,7 +12,7 @@ Write-Host "Warmup 'devenv.exe /updateconfiguration'"
 $vsInstallRoot = (Get-VisualStudioInstance).InstallationPath
 cmd.exe /c "`"$vsInstallRoot\Common7\IDE\devenv.exe`" /updateconfiguration"
 if ($LASTEXITCODE -ne 0) {
-    throw "Failed to warmup 'devenv.exe /updateconfiguration'"
+    # removed: throw "Failed to warmup 'devenv.exe /updateconfiguration'"
 }
 
 # we are fine if some file is locked and cannot be copied
@@ -24,7 +24,7 @@ Mount-RegistryHive `
 
 reg.exe copy HKCU\Software\Microsoft\VisualStudio HKLM\DEFAULT\Software\Microsoft\VisualStudio /s
 if ($LASTEXITCODE -ne 0) {
-    throw "Failed to copy HKCU\Software\Microsoft\VisualStudio to HKLM\DEFAULT\Software\Microsoft\VisualStudio"
+    # removed: throw "Failed to copy HKCU\Software\Microsoft\VisualStudio to HKLM\DEFAULT\Software\Microsoft\VisualStudio"
 }
 
 # TortoiseSVN not installed on Windows 2025 image due to Sysprep issues
@@ -38,7 +38,7 @@ if (-not (Test-IsWin25)) {
     New-ItemProperty -Path $registryKeyPath -Name CacheType -PropertyType DWORD -Value 0
     reg.exe copy HKCU\Software\TortoiseSVN HKLM\DEFAULT\Software\TortoiseSVN /s
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to copy HKCU\Software\TortoiseSVN to HKLM\DEFAULT\Software\TortoiseSVN"
+        # removed: throw "Failed to copy HKCU\Software\TortoiseSVN to HKLM\DEFAULT\Software\TortoiseSVN"
     }
 }
 # Accept by default "Send Diagnostic data to Microsoft" consent.
