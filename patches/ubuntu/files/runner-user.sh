@@ -33,7 +33,7 @@ rm -rf /opt/runner-cache
 # test presence of run.sh
 test -s /home/runner/run.sh
 # warmup runner
-/home/runner/bin/Runner.Listener warmup
+/home/runner/bin/Runner.Listener warmup && rm -rf /home/runner/_diag
 
 # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/set-time.html
 echo 'server 169.254.169.123 prefer iburst minpoll 4 maxpoll 4' >  /etc/chrony/chrony.conf
