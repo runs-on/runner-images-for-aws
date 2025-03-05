@@ -7,13 +7,13 @@ options = {}
 usage = Slop::Options.new do |opts|
   opts.banner = "Usage: #{$0} AMI_NAME_OR_ID [--instance-type TYPE]"
   opts.string '--instance-type', 'Instance type'
-  opts.bool '-s', '--shutdown', 'Shutdown instance after 10 minutes', default: true
+  opts.bool '-s', '--shutdown', 'Shutdown instance after 10 minutes (default: true)', default: true
   opts.bool '-h', '--help', 'Show help'
 end
 
 begin
-  ami_name_or_id = ARGV.shift # Get the first argument as AMI name or ID
   options = usage.parse(ARGV).to_hash
+  ami_name_or_id = ARGV.shift # Get the first argument as AMI name or ID
   options[:ami_name_or_id] = ami_name_or_id # Assign it to options
 rescue Slop::Error => e
   puts "Error: #{e.message}"
