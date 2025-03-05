@@ -69,8 +69,16 @@ jobs:
         run: env | sort
       - name: show HOME
         run: ls -al $HOME
-      - name: rustup
-        run: rustup --version
+      - name: Check rust version on runs on default
+        shell: bash
+        run: |
+          rustup update
+          rustup show
+          whereis rustc
+          whereis cargo
+          echo $PATH
+          rustc --version
+          cargo --version
       - name: Ensure NVIDIA drivers are ok
         if: contains(inputs.instance_family, 'g4dn')
         run: |
