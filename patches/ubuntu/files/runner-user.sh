@@ -73,12 +73,18 @@ rm -rf /var/lib/gems/**/doc ; rm -rf /var/lib/gems/**/cache ; rm -rf /usr/share/
 rm -rf /usr/local/share/vcpkg/.git
 rm -rf /var/lib/ubuntu-advantage
 
-rm -rf /etc/skel/.rustup
-rm -rf /etc/skel/.cargo
-rm -rf /etc/skel/.dotnet
-rm -rf /etc/skel/.nvm
+# Starting 2025-03, upstream finally fixed the duplication and added symlinks instead of copying the entire directories
+# rm -rf /etc/skel/.rustup
+# rm -rf /etc/skel/.cargo
+# rm -rf /etc/skel/.dotnet
+# rm -rf /etc/skel/.nvm
 
 rm -rf /root/.sbt
+rm -rf /root/.rustup
+rm -rf /root/.cargo
+rm -rf /root/.dotnet
+rm -rf /root/.nvm
+
 # reset root files to blank state
 cp /etc/skel/.bashrc /root/
 cp /etc/skel/.profile /root/
