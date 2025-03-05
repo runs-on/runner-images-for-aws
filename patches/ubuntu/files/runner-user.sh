@@ -28,7 +28,6 @@ archive_name=$(ls /opt/runner-cache)
 archive_path="/opt/runner-cache/$archive_name"
 echo "Installing runner from $archive_path"
 tar xzf "$archive_path" -C /home/runner
-chown -R runner:runner /home/runner
 rm -rf /opt/runner-cache
 # test presence of run.sh
 test -s /home/runner/run.sh
@@ -73,17 +72,13 @@ rm -rf /var/lib/gems/**/doc ; rm -rf /var/lib/gems/**/cache ; rm -rf /usr/share/
 rm -rf /usr/local/share/vcpkg/.git
 rm -rf /var/lib/ubuntu-advantage
 
-# Starting 2025-03, upstream finally fixed the duplication and added symlinks instead of copying the entire directories
-# rm -rf /etc/skel/.rustup
-# rm -rf /etc/skel/.cargo
-# rm -rf /etc/skel/.dotnet
-# rm -rf /etc/skel/.nvm
-
-rm -rf /root/.sbt
-rm -rf /root/.rustup
-rm -rf /root/.cargo
-rm -rf /root/.dotnet
-rm -rf /root/.nvm
+# Those dirs end up being duplicated between /etc/skel and /home/runner, just move them over
+for dir in .sbt .cargo .rustup .nvm .dotnet; do
+  if [ -d "/etc/skel/$dir" ]; then
+    rm -rf /home/runner/$dir && mv /etc/skel/$dir /home/runner/
+  fi
+  rm -rf /root/$dir
+done
 
 # reset root files to blank state
 cp /etc/skel/.bashrc /root/
@@ -92,3 +87,6 @@ cp /etc/skel/.profile /root/
 apt autoremove --purge snapd -y
 apt-mark hold snapd
 rm -rf /var/cache/snapd/ /root/snap
+
+# make sure runner user owns everything in their home directory
+chown -R runner:runner /home/runner
