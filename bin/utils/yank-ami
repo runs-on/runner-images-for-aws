@@ -1,0 +1,116 @@
+#!/usr/bin/env ruby
+require 'aws-sdk-ec2'
+require 'terminal-table'
+require 'slop'
+require 'yaml'
+
+REGIONS = YAML.load_file(File.expand_path("../../config.yml", __dir__)).fetch("regions")
+
+options = {}
+usage = Slop::Options.new do |opts|
+  opts.banner = "Usage: #{$0} AMI_NAME [--force] [--help]"
+  opts.bool '-f', '--force', 'Do not ask for confirmation'
+  opts.bool '-h', '--help', 'Show help'
+end
+
+begin
+  ami_name = ARGV.shift # Get the first argument as AMI name
+  options = usage.parse(ARGV).to_hash
+  options[:ami_name] = ami_name # Assign it to options
+rescue Slop::Error => e
+  puts "Error: #{e.message}"
+  puts
+  puts usage
+  exit 1
+end
+
+if options[:help] || options[:ami_name].nil?
+  puts usage
+  exit 0
+end
+
+force = options[:force]
+images_to_remove = []
+
+class Image < Struct.new(:ami, :region)
+end
+
+REGIONS.each_with_index do |region, index|
+  3.times { puts "" } unless index == 0
+
+  ec2 = Aws::EC2::Client.new(region: region)
+
+  # Get AMI with the specified name
+  resp = ec2.describe_images({
+    filters: [
+      {
+        name: "name",
+        values: [options[:ami_name]],
+      },
+    ],
+  })
+
+  if resp.images.empty?
+    puts "No AMI found with name #{options[:ami_name]} in region #{region}"
+    next
+  end
+
+  puts "## Found AMI in #{region}"
+  table = Terminal::Table.new do |t|
+    t.headings = ['AMI ID', 'Created at', 'Name']
+    resp.images.each do |ami|
+      t << [ami.image_id, ami.creation_date, ami.name]
+      images_to_remove << Image.new(ami, region)
+    end
+  end
+
+  puts table
+end
+
+if images_to_remove.empty?
+  puts "No images to remove"
+  exit 0
+end
+
+puts ""
+puts "Found #{images_to_remove.count} images to remove"
+puts ""
+
+table = Terminal::Table.new do |t|
+  t.headings = ['Region', 'AMI ID', 'Created at', 'Name']
+  images_to_remove.each do |image|
+    t << [image.region, image.ami.image_id, image.ami.creation_date, image.ami.name]
+  end
+end
+puts table
+puts ""
+
+# Ask for confirmation before removal
+reply = if force
+  "y"
+else
+  print "Are you sure you want to deregister the above AMIs and delete their associated snapshots? (y/n) "
+  $stdin.gets.chomp
+end
+
+if reply.downcase == 'y'
+  images_to_remove.each do |image|
+    ec2 = Aws::EC2::Client.new(region: image.region)
+
+    puts "Deregistering AMI #{image.ami.image_id} in region #{image.region}..."
+    sleep 2
+
+    # Deregister the AMI
+    ec2.deregister_image({image_id: image.ami.image_id})
+
+    # Get the snapshot associated with the AMI
+    snapshot_id = image.ami.block_device_mappings[0].ebs.snapshot_id
+
+    # Delete the snapshot
+    puts "Deleting snapshot #{snapshot_id} in region #{image.region}..."
+    ec2.delete_snapshot({snapshot_id: snapshot_id})
+  end
+  puts "Done!"
+else
+  puts "Skipping AMI removal"
+end
