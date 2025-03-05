@@ -69,7 +69,7 @@ jobs:
         run: env | sort
       - name: show HOME
         run: ls -al $HOME
-      - name: Check rust version on runs on default
+      - name: Check rust install
         shell: bash
         run: |
           rustup update
