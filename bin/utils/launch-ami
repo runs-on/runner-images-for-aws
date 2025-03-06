@@ -7,7 +7,7 @@ options = {}
 usage = Slop::Options.new do |opts|
   opts.banner = "Usage: #{$0} AMI_NAME_OR_ID [--instance-type TYPE]"
   opts.string '--instance-type', 'Instance type'
-  opts.bool '-s', '--shutdown', 'Shutdown instance after 10 minutes (default: true)', default: true
+  opts.integer '--shutdown', 'Shutdown instance after specified minutes (0 to disable, default: 15)', default: 15
   opts.bool '-h', '--help', 'Show help'
 end
 
@@ -27,7 +27,7 @@ if options[:help]
   exit 0
 end
 
-USER_DATA_SCRIPT = <<EOF
+LINUX_USER_DATA_SCRIPT = <<EOF
 #!/bin/bash
 set -ex
 
@@ -39,13 +39,46 @@ systemctl enable ssh || true
 systemctl start ssh || true
 EOF
 
-AUTO_SHUTDOWN_SCRIPT = <<EOF
-sleep 600
-shutdown -h now
+WINDOWS_USER_DATA_SCRIPT = <<EOF
+<powershell>
+# Enable OpenSSH Server
+Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+Set-Service -Name sshd -StartupType 'Automatic'
+Start-Service sshd
+
+# Configure SSH
+$sshdir = "C:\\ProgramData\\ssh"
+if (-not (Test-Path "$sshdir\\administrators_authorized_keys")) {
+    New-Item -Path "$sshdir\\administrators_authorized_keys" -Force
+}
+
+# Download SSH key
+$keyUrl = "https://github.com/crohr.keys"
+$webClient = New-Object System.Net.WebClient
+$webClient.DownloadFile($keyUrl, "$sshdir\\administrators_authorized_keys")
+
+# Set proper permissions on the key file
+icacls "$sshdir\\administrators_authorized_keys" /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
+
+# Restart the service to apply changes
+Restart-Service sshd
+</powershell>
 EOF
 
-if options[:shutdown]
-  USER_DATA_SCRIPT.concat(AUTO_SHUTDOWN_SCRIPT)
+def auto_shutdown_linux(minutes)
+  <<EOF
+sleep #{minutes * 60}
+shutdown -h now
+EOF
+end
+
+def auto_shutdown_windows(minutes)
+  <<EOF
+<powershell>
+Start-Sleep -Seconds #{minutes * 60}
+Stop-Computer -Force
+</powershell>
+EOF
 end
 
 def find_latest_ami(options)
@@ -65,19 +98,33 @@ def find_latest_ami(options)
   
   latest = images.sort_by { |img| img.creation_date }.last
   puts "Found AMI: #{latest.name} (#{latest.image_id})"
-  [latest.image_id, latest.architecture]
+  [latest.image_id, latest.architecture, latest.platform, latest.block_device_mappings]
 end
 
 def launch_ami(options)
-  ami_id, architecture = find_latest_ami(options)
-  instance_type = case architecture
-                 when "arm64"
-                   options[:instance_type] || "m7g.large"
-                 when "x86_64"
-                   options[:instance_type] || "m7a.large"
-                 end
+  ami_id, architecture, platform, block_device_mappings = find_latest_ami(options)
+  is_windows = platform == "windows"
 
-  puts "Launching instance with AMI ID: #{ami_id.inspect} and instance type: #{instance_type.inspect}"
+  user_data_script = is_windows ? WINDOWS_USER_DATA_SCRIPT : LINUX_USER_DATA_SCRIPT
+  
+  shutdown_minutes = options[:shutdown]
+  if shutdown_minutes > 0
+    if is_windows
+      user_data_script += auto_shutdown_windows(shutdown_minutes)
+    else
+      user_data_script += auto_shutdown_linux(shutdown_minutes)
+    end
+  end
+  
+  instance_type = if options[:instance_type]
+                    options[:instance_type]
+                  elsif architecture == "arm64"
+                    "m7g.large"
+                  elsif architecture == "x86_64"
+                    "m7a.large"
+                  end
+
+  puts "Launching #{is_windows ? 'Windows' : 'Linux'} instance with AMI ID: #{ami_id.inspect} and instance type: #{instance_type.inspect}"
   ec2 = Aws::EC2::Client.new
 
   # Find subnet with test=true tag
@@ -94,6 +141,10 @@ def launch_ami(options)
   fail "No security group found with tag test=true" unless security_group
   security_group_id = security_group.group_id
 
+  # Get volume size from AMI block device mappings
+  root_device = block_device_mappings.find { |bdm| bdm.device_name == "/dev/sda1" }
+  volume_size = root_device&.ebs&.volume_size || (is_windows ? 120 : 40)
+
   instance_params = {
     image_id: ami_id,
     instance_type: instance_type,
@@ -105,13 +156,13 @@ def launch_ami(options)
     iam_instance_profile: {
       name: "SSMInstanceProfile"
     },
-    user_data: Base64.encode64(USER_DATA_SCRIPT),
+    user_data: Base64.encode64(user_data_script),
     block_device_mappings: [
       {
         device_name: "/dev/sda1",
         ebs: {
           volume_type: "gp3",
-          volume_size: 60,
+          volume_size: volume_size,
           delete_on_termination: true
         }
       }
@@ -132,9 +183,16 @@ def launch_ami(options)
   instance = ec2.describe_instances(instance_ids: [instance.instance_id]).reservations.first.instances.first
 
   puts "Instance Public IP: #{instance.public_ip_address}"
-  puts "ssh root@#{instance.public_ip_address}"
-  sleep 12
-  exec("ssh root@#{instance.public_ip_address}")
+  
+  username = is_windows ? "Administrator" : "root"
+  puts "ssh #{username}@#{instance.public_ip_address}"
+  
+  # Give the instance a bit more time to initialize SSH, especially for Windows
+  wait_time = is_windows ? 60 : 12
+  puts "Waiting #{wait_time} seconds for SSH to be ready..."
+  sleep wait_time
+  
+  exec("ssh #{username}@#{instance.public_ip_address}")
 end
 
 # Launch instance
