@@ -97,6 +97,17 @@ def copy_ami_to_regions(ami_id_or_name, regions, force = false)
       }
     })
     puts "Launch permissions for AMI #{image_id} updated to public"
+
+    # Make the underlying snapshot public too
+    snapshot_id = ec2.describe_images(image_ids: [image_id]).images.first.block_device_mappings.first.ebs.snapshot_id
+    ec2.modify_snapshot_attribute({
+      snapshot_id: snapshot_id,
+      attribute: "createVolumePermission",
+      operation_type: "add",
+      group_names: ["all"]
+    })
+    puts "Snapshot #{snapshot_id} for AMI #{image_id} updated to public"
+
     # to avoid throttling
     sleep 2
   end
