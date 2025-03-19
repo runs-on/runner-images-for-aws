@@ -96,7 +96,7 @@ source "amazon-ebs" "build_ebs" {
   # make AMIs publicly accessible
   ami_groups                                = ["all"]
   ebs_optimized                             = true
-  spot_instance_types                       = ["c7g.xlarge", "m7g.xlarge", "c7g.2xlarge", "m7g.2xlarge"]
+  spot_instance_types                       = ["r7g.large", "c7g.xlarge", "m7g.xlarge", "c7g.2xlarge", "m7g.2xlarge"]
   spot_price                                = "1.00"
   region                                    = "${var.region}"
   ssh_username                              = "ubuntu"
@@ -260,8 +260,7 @@ build {
     environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}", "DEBIAN_FRONTEND=noninteractive"]
     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     scripts          = [
-      // disabled for now
-      // "${path.root}/../scripts/build/install-actions-cache.sh",
+      "${path.root}/../scripts/build/install-actions-cache.sh",
       "${path.root}/../scripts/build/install-runner-package.sh",
       "${path.root}/../scripts/build/install-apt-common.sh",
       "${path.root}/../scripts/build/install-aws-tools.sh",
@@ -283,6 +282,9 @@ build {
       "${path.root}/../scripts/build/configure-dpkg.sh",
       "${path.root}/../scripts/build/install-yq.sh",
       // "${path.root}/../scripts/build/install-android-sdk.sh",
+      # hard to install on arm64 for now
+      # "${path.root}/../scripts/build/install-pypy.sh",
+      "${path.root}/../scripts/build/install-python.sh",
       "${path.root}/../scripts/build/install-zstd.sh"
     ]
   }
@@ -293,11 +295,11 @@ build {
     scripts          = ["${path.root}/../scripts/build/install-docker.sh"]
   }
 
-  // provisioner "shell" {
-  //   environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
-  //   execute_command  = "sudo sh -c '{{ .Vars }} pwsh -f {{ .Path }}'"
-  //   scripts          = ["${path.root}/../scripts/build/Install-Toolset.ps1", "${path.root}/../scripts/build/Configure-Toolset.ps1"]
-  // }
+  # provisioner "shell" {
+  #   environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
+  #   execute_command  = "sudo sh -c '{{ .Vars }} pwsh -f {{ .Path }}'"
+  #   scripts          = ["${path.root}/../scripts/build/Install-Toolset.ps1", "${path.root}/../scripts/build/Configure-Toolset.ps1"]
+  # }
 
   // provisioner "shell" {
   //   environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]

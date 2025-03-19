@@ -106,7 +106,7 @@ source "amazon-ebs" "build_ebs" {
   # make AMIs publicly accessible
   ami_groups                                = ["all"]
   ebs_optimized                             = true
-  spot_instance_types                       = ["m7g.xlarge", "c7g.xlarge"]
+  spot_instance_types                       = ["r7g.large", "m7g.xlarge", "c7g.xlarge"]
   spot_price                                = "1.00"
   region                                    = "${var.region}"
   ssh_username                              = "ubuntu"
@@ -271,7 +271,7 @@ provisioner "shell" {
     environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}", "DEBIAN_FRONTEND=noninteractive"]
     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     scripts          = [
-      // "${path.root}/../scripts/build/install-actions-cache.sh",
+      "${path.root}/../scripts/build/install-actions-cache.sh",
       "${path.root}/../scripts/build/install-runner-package.sh",
       "${path.root}/../scripts/build/install-apt-common.sh",
       # "${path.root}/../scripts/build/install-azcopy.sh",
@@ -310,8 +310,9 @@ provisioner "shell" {
       "${path.root}/../scripts/build/configure-dpkg.sh",
       "${path.root}/../scripts/build/install-yq.sh",
       // "${path.root}/../scripts/build/install-android-sdk.sh",
+      # hard to install on arm64 for now
       # "${path.root}/../scripts/build/install-pypy.sh",
-      # "${path.root}/../scripts/build/install-python.sh",
+      "${path.root}/../scripts/build/install-python.sh",
       "${path.root}/../scripts/build/install-zstd.sh"
     ]
   }
