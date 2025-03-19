@@ -25,7 +25,7 @@ images:
     description: RunsOn Ubuntu22 arm64
 
   - id: ubuntu22-gpu-x64
-    volume_size: 30
+    volume_size: 50
     source_ami_name: runs-on-dev-ubuntu22-full-x64-*
     source_ami_owner: 135269210855
     description: RunsOn Ubuntu22 GPU optimized x64
@@ -44,7 +44,7 @@ images:
     description: RunsOn Ubuntu24 arm64
 
   - id: ubuntu24-gpu-x64
-    volume_size: 30
+    volume_size: 50
     source_ami_name: runs-on-dev-ubuntu24-full-x64-*
     source_ami_owner: 135269210855
     description: RunsOn Ubuntu24 GPU optimized x64

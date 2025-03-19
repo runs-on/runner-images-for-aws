@@ -7,6 +7,11 @@ packer {
   }
 }
 
+variable "helper_script_folder" {
+  type    = string
+  default = "/imagegeneration/helpers"
+}
+
 variable "ami_name" {
   type    = string
 }
@@ -136,9 +141,11 @@ build {
   sources = ["source.amazon-ebs.build_ebs"]
 
   provisioner "shell" {
+    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}","DEBIAN_FRONTEND=noninteractive"]
     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     scripts          = ["${path.root}/../scripts/build/install-gpu.sh"]
   }
+
   provisioner "shell" {
     execute_command   = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     expect_disconnect = true
