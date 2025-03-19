@@ -51,10 +51,10 @@ yq -oj -i '.docker.images = []' $TOOLSET_PATH
 
 # Use official runners for CodeQL
 yq -oj -i 'del(.toolcache[] | select(.name == "CodeQL"))' $TOOLSET_PATH
-
-# only keep 4 last python version
-yq -oj -i 'eval(.toolcache[] | select(.name == "Python") | .versions |= [.[-4],.[-3],.[-2],.[-1]])' $TOOLSET_PATH
-# yq -oj -i 'eval(.toolcache[] | select(.name == "Python") | .versions |= [.[-1]])' $TOOLSET_PATH
+# only keep last python version
+yq -oj -i 'eval(.toolcache[] | select(.name == "Python") | .versions |= [.[-1]])' $TOOLSET_PATH
+# only keep last node version in toolcache
+yq -oj -i 'eval(.toolcache[] | select(.name == "node") | .versions |= [.[-1]])' $TOOLSET_PATH
 # only keep one last pypy version
 yq -oj -i 'eval(.toolcache[] | select(.name == "PyPy") | .versions |= [.[-1]])' $TOOLSET_PATH
 # only keep one last go version
