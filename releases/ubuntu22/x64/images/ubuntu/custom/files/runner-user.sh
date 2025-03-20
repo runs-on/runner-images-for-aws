@@ -23,6 +23,13 @@ apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils v
 modprobe kvm
 usermod -aG kvm runner
 
+# https://github.com/runs-on/runs-on/issues/261 for apptainer
+# install uidmap and squashfs-tools
+add-apt-repository universe
+apt-get update -qq
+apt-get install -y uidmap squashfs-tools
+add-apt-repository -r universe
+
 # install archive from cache
 archive_name=$(ls /opt/runner-cache)
 archive_path="/opt/runner-cache/$archive_name"
@@ -71,6 +78,22 @@ rm -rf /usr/local/doc
 rm -rf /var/lib/gems/**/doc ; rm -rf /var/lib/gems/**/cache ; rm -rf /usr/share/ri
 rm -rf /usr/local/share/vcpkg/.git
 rm -rf /var/lib/ubuntu-advantage
+
+# Remove test folders from cached python versions, they take up a lot of space
+for dir in /opt/hostedtoolcache/Python/**/**/lib/python*/test; do
+  echo "Removing $dir"
+  rm -rf "$dir"
+done
+
+for dir in /opt/hostedtoolcache/go/**/**/test; do
+  echo "Removing $dir"
+  rm -rf "$dir"
+done
+
+for dir in /opt/hostedtoolcache/PyPy/**/**/lib/pypy*/test; do
+  echo "Removing $dir"
+  rm -rf "$dir"
+done
 
 # Those dirs end up being duplicated between /etc/skel and /home/runner, just move them over
 for dir in .sbt .cargo .rustup .nvm .dotnet; do
