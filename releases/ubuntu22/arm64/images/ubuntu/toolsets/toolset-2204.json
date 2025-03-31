@@ -277,9 +277,6 @@
       "command": "yarn"
     }
   ],
-  "mongodb": {
-    "version": "5.0"
-  },
   "postgresql": {
     "version": "14"
   },
