@@ -66,10 +66,32 @@ Restart-Service sshd
 </powershell>
 EOF
 
+# use systemd timer instead of sleeping so that cloud-init finishes
 def auto_shutdown_linux(minutes)
   <<EOF
-sleep #{minutes * 60}
-shutdown -h now
+cat > /etc/systemd/system/auto-shutdown.service <<'EOT'
+[Unit]
+Description=Auto shutdown after #{minutes} minutes
+
+[Service]
+Type=oneshot
+ExecStart=/sbin/shutdown -h now
+EOT
+
+cat > /etc/systemd/system/auto-shutdown.timer <<'EOT'
+[Unit]
+Description=Schedule auto shutdown
+
+[Timer]
+OnActiveSec=#{minutes}m
+Unit=auto-shutdown.service
+
+[Install]
+WantedBy=timers.target
+EOT
+
+systemctl enable auto-shutdown.timer
+systemctl start auto-shutdown.timer
 EOF
 end
 
