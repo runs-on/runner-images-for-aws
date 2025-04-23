@@ -62,6 +62,14 @@ systemctl disable mono-xsp4.service || true
 systemctl disable containerd.service docker.service
 systemctl disable apport.service logrotate.service grub-common.service keyboard-setup.service systemd-update-utmp.service systemd-fsck-root.service systemd-tmpfiles-setup.service apparmor.service e2scrub_reap.service || true
 systemctl disable ufw.service snapd.service snap.lxd.activate.service snapd.apparmor.service ec2-instance-connect.service snap.amazon-ssm-agent.amazon-ssm-agent.service cron.service || true
+# Disable firmware update services, not needed for one-shot runners
+systemctl disable fwupd.service fwupd-refresh.service || true
+
+# disable all podman services
+find /lib/systemd/system -name 'podman*' -type f -exec systemctl disable {} \;
+
+# disable all php services
+find /lib/systemd/system -name 'php*' -type f -exec systemctl disable {} \;
 
 # cleanup
 rm -f /home/ubuntu/minikube-linux-arm64
