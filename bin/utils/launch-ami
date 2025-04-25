@@ -29,40 +29,10 @@ if options[:help]
 end
 
 LINUX_USER_DATA_SCRIPT = <<EOF
-#!/bin/bash
-set -ex
-
-mkdir -p /root/.ssh
-chmod 0700 /root/.ssh
-curl --retry 3 --connect-timeout 5 -L https://github.com/crohr.keys -o /root/.ssh/authorized_keys
-chmod 0600 /root/.ssh/authorized_keys
-systemctl enable ssh || true
-systemctl start ssh || true
 EOF
 
 WINDOWS_USER_DATA_SCRIPT = <<EOF
 <powershell>
-# Enable OpenSSH Server
-Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
-Set-Service -Name sshd -StartupType 'Automatic'
-Start-Service sshd
-
-# Configure SSH
-$sshdir = "C:\\ProgramData\\ssh"
-if (-not (Test-Path "$sshdir\\administrators_authorized_keys")) {
-    New-Item -Path "$sshdir\\administrators_authorized_keys" -Force
-}
-
-# Download SSH key
-$keyUrl = "https://github.com/crohr.keys"
-$webClient = New-Object System.Net.WebClient
-$webClient.DownloadFile($keyUrl, "$sshdir\\administrators_authorized_keys")
-
-# Set proper permissions on the key file
-icacls "$sshdir\\administrators_authorized_keys" /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
-
-# Restart the service to apply changes
-Restart-Service sshd
 </powershell>
 EOF
 
@@ -213,14 +183,19 @@ def launch_ami(options)
   puts "Instance Public IP: #{instance.public_ip_address}"
   
   username = is_windows ? "Administrator" : "root"
-  puts "ssh #{username}@#{instance.public_ip_address}"
+  cmd = if is_windows
+    %{aws ssm start-session --target #{instance.instance_id} --document-name AWS-StartInteractiveCommand --parameters command="powershell"}
+  else
+    %{aws ssm start-session --target #{instance.instance_id} --document-name AWS-StartInteractiveCommand --parameters command="bash"}
+  end
+  puts cmd
   
   # Give the instance a bit more time to initialize SSH, especially for Windows
   wait_time = is_windows ? 60 : 12
-  puts "Waiting #{wait_time} seconds for SSH to be ready..."
+  puts "Waiting #{wait_time} seconds for SSM to be ready..."
   sleep wait_time
   
-  exec("ssh #{username}@#{instance.public_ip_address}")
+  exec(cmd)
 end
 
 # Launch instance
