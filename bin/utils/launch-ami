@@ -28,33 +28,41 @@ if options[:help]
   exit 0
 end
 
-LINUX_USER_DATA_SCRIPT = <<EOF
-EOF
+def user_data_linux(shutdown_minutes:)
+  script = "#!/bin/bash -e\n"
+  if shutdown_minutes > 0
+    script += auto_shutdown_linux(shutdown_minutes)
+  end
+  script
+end
 
-WINDOWS_USER_DATA_SCRIPT = <<EOF
-<powershell>
-</powershell>
+def user_data_windows(shutdown_minutes:)
+  script = "<powershell>\n"
+  if shutdown_minutes > 0
+    script += <<EOF
+$trigger = New-JobTrigger -Once -At (Get-Date).AddMinutes(#{shutdown_minutes})
+Register-ScheduledJob -Name "ShutdownComputer" -Trigger $trigger -ScriptBlock { Stop-Computer -Force }
 EOF
+  end
+  script += "</powershell>"
+  script
+end
+
+def user_data(platform:, shutdown_minutes:)
+  if platform == "windows"
+    user_data_windows(shutdown_minutes: shutdown_minutes)
+  else
+    user_data_linux(shutdown_minutes: shutdown_minutes)
+  end
+end
 
 # use systemd timer instead of sleeping so that cloud-init finishes
 def auto_shutdown_linux(minutes)
   <<EOF
-cat > /etc/systemd/system/auto-shutdown.service <<'EOT'
-[Unit]
-Description=Auto shutdown after #{minutes} minutes
-
-[Service]
-Type=oneshot
-ExecStart=/sbin/shutdown -h now
-EOT
-
 cat > /etc/systemd/system/auto-shutdown.timer <<'EOT'
-[Unit]
-Description=Schedule auto shutdown
-
 [Timer]
 OnActiveSec=#{minutes}m
-Unit=auto-shutdown.service
+Unit=shutdown.target
 
 [Install]
 WantedBy=timers.target
@@ -62,15 +70,6 @@ EOT
 
 systemctl enable auto-shutdown.timer
 systemctl start auto-shutdown.timer
-EOF
-end
-
-def auto_shutdown_windows(minutes)
-  <<EOF
-<powershell>
-Start-Sleep -Seconds #{minutes * 60}
-Stop-Computer -Force
-</powershell>
 EOF
 end
 
@@ -97,18 +96,11 @@ end
 def launch_ami(options)
   ami_id, architecture, platform, block_device_mappings = find_latest_ami(options)
   is_windows = platform == "windows"
-
-  user_data_script = is_windows ? WINDOWS_USER_DATA_SCRIPT : LINUX_USER_DATA_SCRIPT
-  
   shutdown_minutes = options[:shutdown]
-  if shutdown_minutes > 0
-    if is_windows
-      user_data_script += auto_shutdown_windows(shutdown_minutes)
-    else
-      user_data_script += auto_shutdown_linux(shutdown_minutes)
-    end
-  end
-  
+
+  user_data_script = user_data(platform: platform, shutdown_minutes: shutdown_minutes)
+  puts "User data:\n#{user_data_script}"
+
   instance_type = if options[:instance_type]
                     options[:instance_type]
                   elsif architecture == "arm64"
