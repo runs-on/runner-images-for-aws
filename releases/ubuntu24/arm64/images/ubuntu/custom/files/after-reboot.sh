@@ -6,6 +6,7 @@ tune2fs -c 0 $(cat /proc/self/mounts | grep " / " | cut -f 1 -d " ")
 
 rm -rf /var/lib/apt/lists
 rm -rf /var/lib/cloud/instances/*
+rm /var/lib/cloud/instance
 
 # ensure no ssh keys are present
 rm -f /home/ubuntu/.ssh/authorized_keys /root/.ssh/authorized_keys
