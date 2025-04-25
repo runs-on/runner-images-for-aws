@@ -56,7 +56,6 @@ systemctl disable console-setup.service hibinit-agent.service grub-initrd-fallba
 systemctl disable snapd.seeded.service snapd.autoimport.service snapd.core-fixup.service snapd.recovery-chooser-trigger.service snapd.system-shutdown.service
 # only on ubuntu 22.04
 systemctl disable update-notifier-download.service plymouth-quit.service plymouth-quit-wait.service || true
-systemctl disable cloud-final.service
 systemctl disable libvirt-guests.service libvirtd.service systemd-machined.service || true
 systemctl disable mono-xsp4.service || true
 systemctl disable containerd.service docker.service
