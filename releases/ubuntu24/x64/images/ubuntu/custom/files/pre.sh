@@ -26,11 +26,12 @@ rm -f amazon-ssm-agent.deb
 # avoid nvme0n1: Process '/usr/bin/unshare -m /usr/bin/snap auto-import --mount=/dev/nvme0n1' failed with exit code 1.
 snap set system experimental.hotplug=false
 
-# save ~1s on cloud-init
+# saves ~1s on cloud-init (`cloud-init analyze blame`)
 arch=$(dpkg --print-architecture)
 codename=$(lsb_release --codename -s)
 sed -i 's|release = util.lsb_release()\["codename"\].*|release = "'$codename'"|w /dev/stdout' /usr/lib/python3/dist-packages/cloudinit/config/cc_apt_configure.py | grep $codename
-sed -i 's|arch = util.get_dpkg_architecture().*|arch = "'$arch'"|w /dev/stdout' /usr/lib/python3/dist-packages/cloudinit/config/cc_apt_configure.py | grep $arch
+sed -i 's|util.get_dpkg_architecture()|"'$arch'"|w /dev/stdout' /usr/lib/python3/dist-packages/cloudinit/config/cc_apt_configure.py | grep $arch
+sed -i 's|util.get_dpkg_architecture()|"'$arch'"|w /dev/stdout' /usr/lib/python3/dist-packages/cloudinit/distros/debian.py | grep $arch
 
 cat > /etc/cloud/cloud.cfg.d/01_runs_on.cfg <<EOF
 ssh_quiet_keygen: true
