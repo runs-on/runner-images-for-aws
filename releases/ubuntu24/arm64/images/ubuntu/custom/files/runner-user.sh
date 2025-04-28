@@ -38,25 +38,9 @@ tar xzf "$archive_path" -C /home/runner
 rm -rf /opt/runner-cache
 # test presence of run.sh
 test -s /home/runner/run.sh
-chown -R runner:runner /home/runner
 
-cat > /etc/systemd/system/runs-on-warmup.service <<EOF
-[Unit]
-Description=RunsOn warmup
-After=local-fs.target
-Wants=local-fs.target
-
-[Service]
-Type=oneshot
-User=root
-ExecStart=/usr/bin/vmtouch -t /home/runner/bin/ /usr/local/bin/runs-on-bootstrap
-RemainAfterExit=yes
-
-[Install]
-WantedBy=local-fs.target
-EOF
-systemctl enable runs-on-warmup.service
-systemctl start runs-on-warmup.service
+# warmup runner
+/home/runner/bin/Runner.Listener warmup && rm -rf /home/runner/_diag
 
 # install RunsOn bootstrap binary
 BOOTSTRAP_BIN=/usr/local/bin/runs-on-bootstrap
