@@ -27,7 +27,7 @@ usermod -aG kvm runner
 # install uidmap and squashfs-tools
 add-apt-repository universe
 apt-get update -qq
-apt-get install -y uidmap squashfs-tools
+apt-get install -y uidmap squashfs-tools vmtouch
 add-apt-repository -r universe
 
 # install archive from cache
@@ -38,8 +38,32 @@ tar xzf "$archive_path" -C /home/runner
 rm -rf /opt/runner-cache
 # test presence of run.sh
 test -s /home/runner/run.sh
-# warmup runner
-/home/runner/bin/Runner.Listener warmup && rm -rf /home/runner/_diag
+chown -R runner:runner /home/runner
+
+cat > /etc/systemd/system/runs-on-warmup.service <<EOF
+[Unit]
+Description=RunsOn warmup
+After=local-fs.target
+Wants=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/vmtouch -t /home/runner/bin/ /usr/local/bin/runs-on-bootstrap
+RemainAfterExit=yes
+
+[Install]
+WantedBy=local-fs.target
+EOF
+systemctl enable runs-on-warmup.service
+systemctl start runs-on-warmup.service
+
+# install RunsOn bootstrap binary
+BOOTSTRAP_BIN=/usr/local/bin/runs-on-bootstrap
+BOOTSTRAP_VERSION=v0.1.9
+curl -L --connect-time 3 --max-time 15 --retry 5 -s https://github.com/runs-on/bootstrap/releases/download/${BOOTSTRAP_VERSION}/bootstrap-${BOOTSTRAP_VERSION}-linux-$(uname -i) -o $BOOTSTRAP_BIN
+chmod +x $BOOTSTRAP_BIN
+$BOOTSTRAP_BIN -h
 
 # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/set-time.html
 echo 'server 169.254.169.123 prefer iburst minpoll 4 maxpoll 4' >  /etc/chrony/chrony.conf
@@ -63,6 +87,8 @@ systemctl disable apport.service logrotate.service grub-common.service keyboard-
 systemctl disable ufw.service snapd.service snap.lxd.activate.service snapd.apparmor.service ec2-instance-connect.service snap.amazon-ssm-agent.amazon-ssm-agent.service cron.service || true
 # Disable firmware update services, not needed for one-shot runners
 systemctl disable fwupd.service fwupd-refresh.service || true
+# Disable dpkg-db-backup service, not needed for one-shot runners
+systemctl disable dpkg-db-backup.service || true
 
 # disable all podman services
 find /lib/systemd/system -name 'podman*' -type f -exec systemctl disable {} \;

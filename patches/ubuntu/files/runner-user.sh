@@ -27,7 +27,7 @@ usermod -aG kvm runner
 # install uidmap and squashfs-tools
 add-apt-repository universe
 apt-get update -qq
-apt-get install -y uidmap squashfs-tools
+apt-get install -y uidmap squashfs-tools vmtouch
 add-apt-repository -r universe
 
 # install archive from cache
@@ -38,6 +38,7 @@ tar xzf "$archive_path" -C /home/runner
 rm -rf /opt/runner-cache
 # test presence of run.sh
 test -s /home/runner/run.sh
+
 # warmup runner
 /home/runner/bin/Runner.Listener warmup && rm -rf /home/runner/_diag
 
@@ -70,6 +71,8 @@ systemctl disable apport.service logrotate.service grub-common.service keyboard-
 systemctl disable ufw.service snapd.service snap.lxd.activate.service snapd.apparmor.service ec2-instance-connect.service snap.amazon-ssm-agent.amazon-ssm-agent.service cron.service || true
 # Disable firmware update services, not needed for one-shot runners
 systemctl disable fwupd.service fwupd-refresh.service || true
+# Disable dpkg-db-backup service, not needed for one-shot runners
+systemctl disable dpkg-db-backup.service || true
 
 # disable all podman services
 find /lib/systemd/system -name 'podman*' -type f -exec systemctl disable {} \;
