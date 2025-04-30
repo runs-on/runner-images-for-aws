@@ -27,7 +27,7 @@ usermod -aG kvm runner
 # install uidmap and squashfs-tools
 add-apt-repository universe
 apt-get update -qq
-apt-get install -y uidmap squashfs-tools vmtouch
+apt-get install -y uidmap squashfs-tools
 add-apt-repository -r universe
 
 # install archive from cache
@@ -72,7 +72,9 @@ systemctl disable ufw.service snapd.service snap.lxd.activate.service snapd.appa
 # Disable firmware update services, not needed for one-shot runners
 systemctl disable fwupd.service fwupd-refresh.service || true
 # Disable dpkg-db-backup service, not needed for one-shot runners
-systemctl disable dpkg-db-backup.service || true
+systemctl disable dpkg-db-backup.service dpkg-db-backup.timer || true
+# Can spawn every 24h, not needed for one-shot runners
+systemctl disable apt-news.service esm-cache.service || true
 
 # disable all podman services
 find /lib/systemd/system -name 'podman*' -type f -exec systemctl disable {} \;
