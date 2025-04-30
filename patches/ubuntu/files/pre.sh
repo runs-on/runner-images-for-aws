@@ -17,6 +17,11 @@ dpkg -i -E ./amazon-cloudwatch-agent.deb
 systemctl disable amazon-cloudwatch-agent
 rm -f ./amazon-cloudwatch-agent.deb
 
+cat >> /opt/aws/amazon-cloudwatch-agent/etc/common-config.toml <<EOF
+[agent]
+auto_update = false
+EOF
+
 # https://docs.aws.amazon.com/systems-manager/latest/userguide/agent-install-ubuntu-64-deb.html
 wget https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/debian_amd64/amazon-ssm-agent.deb
 dpkg -i amazon-ssm-agent.deb
