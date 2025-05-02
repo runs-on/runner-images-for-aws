@@ -178,7 +178,7 @@ def launch_ami(options)
   cmd = if is_windows
     %{aws ssm start-session --target #{instance.instance_id} --document-name AWS-StartInteractiveCommand --parameters command="powershell"}
   else
-    %{aws ssm start-session --target #{instance.instance_id} --document-name AWS-StartInteractiveCommand --parameters command="bash"}
+    %{aws ssm start-session --target #{instance.instance_id} --document-name AWS-StartInteractiveCommand --parameters command="sudo -s bash"}
   end
   puts cmd
   
