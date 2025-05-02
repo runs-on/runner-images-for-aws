@@ -44,7 +44,7 @@ test -s /home/runner/run.sh
 
 # install RunsOn bootstrap binary
 BOOTSTRAP_BIN=/usr/local/bin/runs-on-bootstrap
-BOOTSTRAP_VERSION=v0.1.9
+BOOTSTRAP_VERSION=v0.1.12
 curl -L --connect-time 3 --max-time 15 --retry 5 -s https://github.com/runs-on/bootstrap/releases/download/${BOOTSTRAP_VERSION}/bootstrap-${BOOTSTRAP_VERSION}-linux-$(uname -i) -o $BOOTSTRAP_BIN
 chmod +x $BOOTSTRAP_BIN
 $BOOTSTRAP_BIN -h
