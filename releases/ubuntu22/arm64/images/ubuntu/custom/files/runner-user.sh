@@ -42,13 +42,6 @@ test -s /home/runner/run.sh
 # warmup runner
 /home/runner/bin/Runner.Listener warmup && rm -rf /home/runner/_diag
 
-# install RunsOn bootstrap binary
-BOOTSTRAP_BIN=/usr/local/bin/runs-on-bootstrap
-BOOTSTRAP_VERSION=v0.1.9
-curl -L --connect-time 3 --max-time 15 --retry 5 -s https://github.com/runs-on/bootstrap/releases/download/${BOOTSTRAP_VERSION}/bootstrap-${BOOTSTRAP_VERSION}-linux-$(uname -i) -o $BOOTSTRAP_BIN
-chmod +x $BOOTSTRAP_BIN
-$BOOTSTRAP_BIN -h
-
 # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/set-time.html
 echo 'server 169.254.169.123 prefer iburst minpoll 4 maxpoll 4' >  /etc/chrony/chrony.conf
 
