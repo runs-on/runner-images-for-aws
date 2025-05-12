@@ -23,6 +23,9 @@ $(foreach id,$(IMAGE_IDS),$(eval $(call sync_template,$(id))))
 $(foreach id,$(IMAGE_IDS),$(eval $(call build_template,$(id))))
 $(foreach id,$(IMAGE_IDS),$(eval $(call debug_template,$(id))))
 
+reset:
+	git reset releases && git checkout releases
+
 cleanup-dev:
 	env $(shell cat .env) AMI_PREFIX=runs-on-dev bundle exec bin/utils/cleanup-amis
 
@@ -34,3 +37,16 @@ setup-roles:
 	aws iam attach-role-policy --role-name SSMInstanceProfile --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
 	aws iam create-instance-profile --instance-profile-name SSMInstanceProfile
 	aws iam add-role-to-instance-profile --instance-profile-name SSMInstanceProfile --role-name SSMInstanceProfile
+
+efs-utils: dist/efs-utils/amazon-efs-utils-*_amd64.deb dist/efs-utils/amazon-efs-utils-*_arm64.deb
+	AWS_PROFILE=runs-on-releaser aws s3 sync dist/efs-utils s3://runs-on/tools/efs-utils
+
+dist/efs-utils/amazon-efs-utils-*_amd64.deb:	
+	rm -f dist/efs-utils/*_amd64.deb
+	mkdir -p dist/efs-utils
+	./scripts/efs-utils.sh ubuntu:22.04 amd64;
+
+dist/efs-utils/amazon-efs-utils-*_arm64.deb:
+	rm -f dist/efs-utils/*_arm64.deb
+	mkdir -p dist/efs-utils
+	./scripts/efs-utils.sh ubuntu:22.04 arm64;

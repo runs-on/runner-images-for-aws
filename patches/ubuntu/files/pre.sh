@@ -36,6 +36,11 @@ dpkg -i amazon-ssm-agent.deb
 systemctl enable amazon-ssm-agent
 rm -f amazon-ssm-agent.deb
 
+apt-get update -qq
+wget https://runs-on.s3.eu-west-1.amazonaws.com/tools/efs-utils/amazon-efs-utils-2.3.0-1_amd64.deb
+apt-get install -y ./amazon-efs-utils-2.3.0-1_amd64.deb
+rm -f amazon-efs-utils-2.3.0-1_amd64.deb
+
 # avoid nvme0n1: Process '/usr/bin/unshare -m /usr/bin/snap auto-import --mount=/dev/nvme0n1' failed with exit code 1.
 snap set system experimental.hotplug=false
 

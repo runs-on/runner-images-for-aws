@@ -7,3 +7,4 @@ ec2-boot-bench
 *.pem
 /releases/**/*.hcl
 /integrations
+/dist
