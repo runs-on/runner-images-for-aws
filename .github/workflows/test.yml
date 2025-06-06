@@ -35,12 +35,7 @@ on:
 jobs:
   test:
     name: Test${{ inputs.index || '1' }}
-    runs-on:
-      - runs-on
-      - family=${{ inputs.instance_family || 'm7' }}
-      - cpu=2+4
-      - ami=${{ inputs.ami_id }}
-      - extras=${{ inputs.extras }}
+    runs-on: runs-on=${{ github.run_id }}-${{ inputs.index }}/family=${{ inputs.instance_family || 'm7' }}/cpu=2+4/ami=${{ inputs.ami_id }}/extras=${{ inputs.extras }}
     env:
       FILENAME: random-file-${{ inputs.ami_id }}-${{github.run_id}}-${{github.run_attempt }}-${{ inputs.index }}
     steps:
