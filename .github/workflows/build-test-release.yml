@@ -48,7 +48,7 @@ jobs:
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 3
-      extras: "s3cache"
+      extras: "s3-cache"
 
   test-extras2:
     needs:
@@ -58,7 +58,7 @@ jobs:
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 4
-      extras: "s3cache"
+      extras: "s3-cache"
 
   test-gpu:
     if: contains(inputs.image_id, 'gpu-x64')
