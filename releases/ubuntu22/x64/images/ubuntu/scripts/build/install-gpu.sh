@@ -63,3 +63,6 @@ nvidia-ctk runtime configure --runtime=docker
 # Restart the Docker daemon
 systemctl restart docker
 docker info
+
+# Disable nvidia-persistenced service
+systemctl disable nvidia-persistenced

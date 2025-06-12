@@ -33,9 +33,9 @@
       "arch": "x64",
       "platform": "linux",
       "versions": [
-        "1.23.*"
+        "1.24.*"
       ],
-      "default": "1.23.*"
+      "default": "1.24.*"
     },
     {
       "name": "Ruby",
@@ -52,7 +52,7 @@
     "versions": [
       "17"
     ],
-    "maven": "3.9.9"
+    "maven": "3.9.10"
   },
   "android": {
     "cmdline-tools": "commandlinetools-linux-11076708_latest.zip",
