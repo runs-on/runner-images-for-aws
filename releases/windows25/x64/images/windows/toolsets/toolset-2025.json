@@ -137,7 +137,7 @@
         "subversion" : "17",
         "edition" : "Enterprise",
         "channel": "release",
-        "installChannel": "624045707_-738089513",
+        "installChannel": "",
         "workloads": [
             "Component.Dotfuscator",
             "Component.Linux.CMake",
@@ -293,7 +293,7 @@
             },
             {
                 "name": "strawberryperl" ,
-                "args": [ "--version", "5.40.0.1" ]
+                "args": [ "--version", "5.40.2.2" ]
             },
             { "name": "imagemagick" },
             { "name": "ninja" }
@@ -329,7 +329,7 @@
         }
     },
     "openssl": {
-        "version": "3.4.1",
+        "version": "3.5.1",
         "pinnedDetails": {
             "link": "https://github.com/actions/runner-images-internal/pull/6702",
             "reason": "Meaningful reason must be added at next update.",
