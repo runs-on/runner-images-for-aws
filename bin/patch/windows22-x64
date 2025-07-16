@@ -19,6 +19,20 @@ tests_dir="$release_dir/images/windows/scripts/tests"
 toolsets_dir="$release_dir/images/windows/toolsets"
 TOOLSET_PATH="$toolsets_dir/toolset-2022.json"
 
+for file in patches/windows/files/patch-*.ps1; do
+  if [ -f "$file" ]; then
+    base_name=$(basename "$file" | sed 's/^patch-//')
+    target_file="$build_dir/$base_name"
+    if [ -f "$target_file" ]; then
+      echo "Appending $file to $target_file"
+      cat "$file" >> "$target_file"
+    else
+      echo "Error: Target file $target_file not found for patch $file"
+      exit 1
+    fi
+  fi
+done
+
 gnu_sed -i "s|Resize-Partition.*|# removed: Resize-Partition|" $build_dir/Configure-BaseImage.ps1
 gnu_sed -i 's/$outputLines\[0\].*/$outputLines | Where-Object { $_ -match "openjdk version" } | Select-Object -First 1 | Should -Match $outputPattern/' $tests_dir/Java.Tests.ps1
 
@@ -28,6 +42,9 @@ gnu_sed -i 's|throw "Failed to copy HKCU|# removed: throw "Failed to copy HKCU|'
 # allow clobber for powershell modules already installed
 gnu_sed -i 's|Install-Module -Name|Install-Module -AllowClobber -Name|' $build_dir/Install-PowerShellModules.ps1
 
+
+gnu_sed -i 's|Invoke-PesterTests.*|# removed: Invoke-PesterTests|' $build_dir/*.ps1
+
 # cat patches/windows/files/boot-config.ps1 >> $build_dir/Configure-System.ps1
 
 # custom stuff
@@ -35,6 +52,10 @@ gnu_sed -i 's|Install-Module -Name|Install-Module -AllowClobber -Name|' $build_d
 # cp -r patches/windows/files $release_dir/images/windows/custom/
 
 # Save ~3.2GB by removing default docker images
+
+yq -oj -i 'eval(del(.windowsFeatures[] | select(.name == "Hyper-V")))' $TOOLSET_PATH
+yq -oj -i 'eval(del(.windowsFeatures[] | select(.name == "HypervisorPlatform")))' $TOOLSET_PATH
+yq -oj -i 'eval(del(.windowsFeatures[] | select(.name == "Hyper-V-PowerShell")))' $TOOLSET_PATH
 
 if false; then
   yq -oj -i '.docker.images = []' $TOOLSET_PATH

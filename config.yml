@@ -70,7 +70,7 @@ images:
   
   # Windows25
   - id: windows25-full-x64
-    volume_size: 120
+    volume_size: 80
     source_ami_name: Windows_Server-2025-English-Full-Base-*
     source_ami_owner: 801119661308
     description: RunsOn Windows2025 x64
