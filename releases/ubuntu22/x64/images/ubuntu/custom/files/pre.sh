@@ -70,7 +70,7 @@ cloud_init_modules:
 cloud_config_modules:
   - ssh
   - apt_configure
-  - scripts_user
+  - [scripts_user, always]
 
 # The modules that run in the 'final' stage. Keep at least one so that `cloud-init status` does not return error
 cloud_final_modules:
