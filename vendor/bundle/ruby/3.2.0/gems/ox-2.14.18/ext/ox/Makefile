@@ -88,10 +88,10 @@ CCDLFLAGS = -fPIC
 CFLAGS   = $(CCDLFLAGS) $(cflags)  -fPIC $(ARCH_FLAG)
 INCFLAGS = -I. -I$(arch_hdrdir) -I$(hdrdir)/ruby/backward -I$(hdrdir) -I$(srcdir)
 DEFS     = 
-CPPFLAGS = -DHAVE_RB_EXT_RACTOR_SAFE -DHAVE_PTHREAD_MUTEX_INIT -DHAVE_RB_ENC_INTERNED_STR -DHAVE_INDEX -DHAVE_RUBY_ST_H -DHAVE_SYS_UIO_H -DHAVE_STRUCT_TM_TM_GMTOFF -DHAVE_ST_TM_GMTOFF -I/opt/hostedtoolcache/Ruby/3.2.2/x64/include -DENABLE_PATH_CHECK=0 $(DEFS) $(cppflags) -DRUBY_TYPE=ruby -DRUBY_RUBY -DRUBY_VERSION=3.2.2 -DRUBY_VERSION_MAJOR=3 -DRUBY_VERSION_MINOR=2 -DRUBY_VERSION_MICRO=2 -Wall
+CPPFLAGS = -DHAVE_RB_EXT_RACTOR_SAFE -DHAVE_PTHREAD_MUTEX_INIT -DHAVE_RB_ENC_INTERNED_STR -DHAVE_INDEX -DHAVE_RUBY_ST_H -DHAVE_SYS_UIO_H -DHAVE_STRUCT_TM_TM_GMTOFF -DHAVE_ST_TM_GMTOFF -DENABLE_PATH_CHECK=0 $(DEFS) $(cppflags) -DRUBY_TYPE=ruby -DRUBY_RUBY -DRUBY_VERSION=3.2.2 -DRUBY_VERSION_MAJOR=3 -DRUBY_VERSION_MINOR=2 -DRUBY_VERSION_MICRO=2 -Wall
 CXXFLAGS = $(CCDLFLAGS)  $(ARCH_FLAG)
-ldflags  = -L. -L/opt/hostedtoolcache/Ruby/3.2.2/x64/lib  -fstack-protector-strong -rdynamic -Wl,-export-dynamic -Wl,--no-as-needed
-dldflags = -L/opt/hostedtoolcache/Ruby/3.2.2/x64/lib  -Wl,--compress-debug-sections=zlib 
+ldflags  = -L. -fstack-protector-strong -rdynamic -Wl,-export-dynamic -Wl,--no-as-needed
+dldflags = -Wl,--compress-debug-sections=zlib 
 ARCH_FLAG = 
 DLDFLAGS = $(ldflags) $(dldflags) $(ARCH_FLAG)
 LDSHARED = $(CC) -shared

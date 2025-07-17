@@ -11,12 +11,60 @@ checking for struct tm.tm_gmtoff... yes
 creating Makefile
 
 current directory: /home/runner/work/runner-images-for-aws/runner-images-for-aws/vendor/bundle/ruby/3.2.0/gems/ox-2.14.18/ext/ox
-make DESTDIR\= sitearchdir\=./.gem.20240329-1850-y8kw5t sitelibdir\=./.gem.20240329-1850-y8kw5t clean
+make DESTDIR\= sitearchdir\=./.gem.20250717-2091-faa5lz sitelibdir\=./.gem.20250717-2091-faa5lz clean
 
 current directory: /home/runner/work/runner-images-for-aws/runner-images-for-aws/vendor/bundle/ruby/3.2.0/gems/ox-2.14.18/ext/ox
-make DESTDIR\= sitearchdir\=./.gem.20240329-1850-y8kw5t sitelibdir\=./.gem.20240329-1850-y8kw5t
+make DESTDIR\= sitearchdir\=./.gem.20250717-2091-faa5lz sitelibdir\=./.gem.20250717-2091-faa5lz
 compiling base64.c
 compiling builder.c
+In file included from builder.c:11:
+In function ‘buf_append_string’,
+    inlined from ‘buf_append_string’ at buf.h:75:20,
+    inlined from ‘append_string’ at builder.c:134:21:
+buf.h:89:37: warning: ‘write’ reading 16384 or more bytes from a region of size 256 [-Wstringop-overread]
+   89 |                 if (slen != (size_t)write(buf->fd, s, slen)) {
+      |                                     ^~~~~~~~~~~~~~~~~~~~~~~
+builder.c: In function ‘append_string’:
+builder.c:125:16: note: source object ‘buf’ of size 256
+  125 |         char   buf[256];
+      |                ^~~
+In file included from /opt/hostedtoolcache/Ruby/3.2.2/x64/include/ruby-3.2.0/ruby/defines.h:59,
+                 from /opt/hostedtoolcache/Ruby/3.2.2/x64/include/ruby-3.2.0/ruby/ruby.h:25,
+                 from /opt/hostedtoolcache/Ruby/3.2.2/x64/include/ruby-3.2.0/ruby.h:38,
+                 from buf.h:34:
+/usr/include/unistd.h:378:16: note: in a call to function ‘write’ declared with attribute ‘access (read_only, 2, 3)’
+  378 | extern ssize_t write (int __fd, const void *__buf, size_t __n) __wur
+      |                ^~~~~
+In function ‘buf_append_string’,
+    inlined from ‘buf_append_string’ at buf.h:75:20,
+    inlined from ‘append_string’ at builder.c:149:21:
+buf.h:89:37: warning: ‘write’ reading 16384 or more bytes from a region of size 256 [-Wstringop-overread]
+   89 |                 if (slen != (size_t)write(buf->fd, s, slen)) {
+      |                                     ^~~~~~~~~~~~~~~~~~~~~~~
+builder.c: In function ‘append_string’:
+builder.c:125:16: note: source object ‘buf’ of size 256
+  125 |         char   buf[256];
+      |                ^~~
+/usr/include/unistd.h:378:16: note: in a call to function ‘write’ declared with attribute ‘access (read_only, 2, 3)’
+  378 | extern ssize_t write (int __fd, const void *__buf, size_t __n) __wur
+      |                ^~~~~
+In function ‘buf_append_string’,
+    inlined from ‘buf_append_string’ at buf.h:75:20,
+    inlined from ‘append_string’ at builder.c:168:13:
+buf.h:89:37: warning: ‘write’ reading 16384 or more bytes from a region of size 256 [-Wstringop-overread]
+   89 |                 if (slen != (size_t)write(buf->fd, s, slen)) {
+      |                                     ^~~~~~~~~~~~~~~~~~~~~~~
+builder.c: In function ‘append_string’:
+builder.c:125:16: note: source object ‘buf’ of size 256
+  125 |         char   buf[256];
+      |                ^~~
+/usr/include/unistd.h:378:16: note: in a call to function ‘write’ declared with attribute ‘access (read_only, 2, 3)’
+  378 | extern ssize_t write (int __fd, const void *__buf, size_t __n) __wur
+      |                ^~~~~
+At top level:
+cc1: note: unrecognized command-line option ‘-Wno-self-assign’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-parentheses-equality’ may have been intended to silence earlier diagnostics
+cc1: note: unrecognized command-line option ‘-Wno-constant-logical-operand’ may have been intended to silence earlier diagnostics
 compiling cache.c
 compiling cache8.c
 compiling dump.c
@@ -28,7 +76,7 @@ intern.c: In function ‘ox_hash_init’:
 intern.c:70:6: warning: old-style function definition [-Wold-style-definition]
    70 | void ox_hash_init() {
       |      ^~~~~~~~~~~~
-intern.c: At top level:
+At top level:
 cc1: note: unrecognized command-line option ‘-Wno-self-assign’ may have been intended to silence earlier diagnostics
 cc1: note: unrecognized command-line option ‘-Wno-parentheses-equality’ may have been intended to silence earlier diagnostics
 cc1: note: unrecognized command-line option ‘-Wno-constant-logical-operand’ may have been intended to silence earlier diagnostics
@@ -37,7 +85,7 @@ obj_load.c: In function ‘circ_array_new’:
 obj_load.c:237:18: warning: old-style function definition [-Wold-style-definition]
   237 | static CircArray circ_array_new() {
       |                  ^~~~~~~~~~~~~~
-obj_load.c: At top level:
+At top level:
 cc1: note: unrecognized command-line option ‘-Wno-self-assign’ may have been intended to silence earlier diagnostics
 cc1: note: unrecognized command-line option ‘-Wno-parentheses-equality’ may have been intended to silence earlier diagnostics
 cc1: note: unrecognized command-line option ‘-Wno-constant-logical-operand’ may have been intended to silence earlier diagnostics
@@ -46,7 +94,7 @@ ox.c: In function ‘Init_ox’:
 ox.c:1366:6: warning: old-style function definition [-Wold-style-definition]
  1366 | void Init_ox() {
       |      ^~~~~~~
-ox.c: At top level:
+At top level:
 cc1: note: unrecognized command-line option ‘-Wno-self-assign’ may have been intended to silence earlier diagnostics
 cc1: note: unrecognized command-line option ‘-Wno-parentheses-equality’ may have been intended to silence earlier diagnostics
 cc1: note: unrecognized command-line option ‘-Wno-constant-logical-operand’ may have been intended to silence earlier diagnostics
@@ -57,29 +105,19 @@ sax_as.c: In function ‘ox_sax_define’:
 sax_as.c:231:6: warning: old-style function definition [-Wold-style-definition]
   231 | void ox_sax_define() {
       |      ^~~~~~~~~~~~~
-sax_as.c: At top level:
+At top level:
 cc1: note: unrecognized command-line option ‘-Wno-self-assign’ may have been intended to silence earlier diagnostics
 cc1: note: unrecognized command-line option ‘-Wno-parentheses-equality’ may have been intended to silence earlier diagnostics
 cc1: note: unrecognized command-line option ‘-Wno-constant-logical-operand’ may have been intended to silence earlier diagnostics
 compiling sax_buf.c
-In file included from /usr/include/string.h:535,
-                 from /opt/hostedtoolcache/Ruby/3.2.2/x64/include/ruby-3.2.0/ruby/defines.h:39,
-                 from /opt/hostedtoolcache/Ruby/3.2.2/x64/include/ruby-3.2.0/ruby/ruby.h:25,
-                 from /opt/hostedtoolcache/Ruby/3.2.2/x64/include/ruby-3.2.0/ruby.h:38,
-                 from ox.h:18,
-                 from sax_buf.c:17:
-In function ‘strncpy’,
-    inlined from ‘read_from_str’ at sax_buf.c:201:5:
-/usr/include/x86_64-linux-gnu/bits/string_fortified.h:95:10: warning: ‘__builtin_strncpy’ specified bound depends on the length of the source argument [-Wstringop-truncation]
-   95 |   return __builtin___strncpy_chk (__dest, __src, __len,
-      |          ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   96 |                                   __glibc_objsize (__dest));
-      |                                   ~~~~~~~~~~~~~~~~~~~~~~~~~
 sax_buf.c: In function ‘read_from_str’:
+sax_buf.c:201:5: warning: ‘__builtin_strncpy’ specified bound depends on the length of the source argument [-Wstringop-truncation]
+  201 |     strncpy(buf->tail, buf->in.str, cnt);
+      |     ^
 sax_buf.c:197:11: note: length computed here
   197 |     cnt = strlen(buf->in.str) + 1;
       |           ^~~~~~~~~~~~~~~~~~~
-sax_buf.c: At top level:
+At top level:
 cc1: note: unrecognized command-line option ‘-Wno-self-assign’ may have been intended to silence earlier diagnostics
 cc1: note: unrecognized command-line option ‘-Wno-parentheses-equality’ may have been intended to silence earlier diagnostics
 cc1: note: unrecognized command-line option ‘-Wno-constant-logical-operand’ may have been intended to silence earlier diagnostics
@@ -88,7 +126,7 @@ sax_hint.c: In function ‘ox_hints_html’:
 sax_hint.c:156:7: warning: old-style function definition [-Wold-style-definition]
   156 | Hints ox_hints_html() {
       |       ^~~~~~~~~~~~~
-sax_hint.c: At top level:
+At top level:
 cc1: note: unrecognized command-line option ‘-Wno-self-assign’ may have been intended to silence earlier diagnostics
 cc1: note: unrecognized command-line option ‘-Wno-parentheses-equality’ may have been intended to silence earlier diagnostics
 cc1: note: unrecognized command-line option ‘-Wno-constant-logical-operand’ may have been intended to silence earlier diagnostics
@@ -98,15 +136,15 @@ special.c: In function ‘cache_init’:
 special.c:370:13: warning: old-style function definition [-Wold-style-definition]
   370 | static void cache_init() {
       |             ^~~~~~~~~~
-special.c: At top level:
+At top level:
 cc1: note: unrecognized command-line option ‘-Wno-self-assign’ may have been intended to silence earlier diagnostics
 cc1: note: unrecognized command-line option ‘-Wno-parentheses-equality’ may have been intended to silence earlier diagnostics
 cc1: note: unrecognized command-line option ‘-Wno-constant-logical-operand’ may have been intended to silence earlier diagnostics
 linking shared-object ox.so
 
 current directory: /home/runner/work/runner-images-for-aws/runner-images-for-aws/vendor/bundle/ruby/3.2.0/gems/ox-2.14.18/ext/ox
-make DESTDIR\= sitearchdir\=./.gem.20240329-1850-y8kw5t sitelibdir\=./.gem.20240329-1850-y8kw5t install
-/usr/bin/install -c -m 0755 ox.so ./.gem.20240329-1850-y8kw5t
+make DESTDIR\= sitearchdir\=./.gem.20250717-2091-faa5lz sitelibdir\=./.gem.20250717-2091-faa5lz install
+/usr/bin/install -c -m 0755 ox.so ./.gem.20250717-2091-faa5lz
 
 current directory: /home/runner/work/runner-images-for-aws/runner-images-for-aws/vendor/bundle/ruby/3.2.0/gems/ox-2.14.18/ext/ox
-make DESTDIR\= sitearchdir\=./.gem.20240329-1850-y8kw5t sitelibdir\=./.gem.20240329-1850-y8kw5t clean
+make DESTDIR\= sitearchdir\=./.gem.20250717-2091-faa5lz sitelibdir\=./.gem.20250717-2091-faa5lz clean
