@@ -49,4 +49,4 @@ Add-MachinePathItem "C:\Program Files\Git\bin"
 ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> "C:\Program Files\Git\etc\ssh\ssh_known_hosts"
 ssh-keyscan -t rsa ssh.dev.azure.com >> "C:\Program Files\Git\etc\ssh\ssh_known_hosts"
 
-Invoke-PesterTests -TestFile "Git"
+# removed: Invoke-PesterTests

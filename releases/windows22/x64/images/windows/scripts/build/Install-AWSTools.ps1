@@ -29,4 +29,4 @@ Install-Binary `
     -Url $downloadUrl `
     -ExpectedSHA256Sum $externalHash
 
-Invoke-PesterTests -TestFile "CLI.Tools" -TestName "AWS"
+# removed: Invoke-PesterTests

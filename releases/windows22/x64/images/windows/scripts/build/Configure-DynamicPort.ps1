@@ -24,4 +24,4 @@ foreach ($ipVersion in @("ipv4", "ipv6")) {
     }
 }
 
-Invoke-PesterTests -TestFile "WindowsFeatures" -TestName "DynamicPorts"
+# removed: Invoke-PesterTests

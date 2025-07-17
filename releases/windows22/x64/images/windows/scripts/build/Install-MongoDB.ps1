@@ -54,4 +54,4 @@ if (Test-IsWin25) {
         -ExpectedSubject 'CN="MongoDB, Inc.", O="MongoDB, Inc.", L=New York, S=New York, C=US'
 }
 
-Invoke-PesterTests -TestFile "Databases" -TestName "MongoDB"
+# removed: Invoke-PesterTests

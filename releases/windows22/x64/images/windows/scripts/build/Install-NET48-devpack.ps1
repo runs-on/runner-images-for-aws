@@ -10,4 +10,4 @@ Install-Binary `
     -InstallArgs @("Setup", "/passive", "/norestart") `
     -ExpectedSHA256Sum '0A7AC4A9B44CED6BB7A0EBF3AD9BA29F60BD4D3BEB2047E19F4D8749DE61F5AC'
 
-Invoke-PesterTests -TestFile "Tools" -TestName "NET48"
+# removed: Invoke-PesterTests

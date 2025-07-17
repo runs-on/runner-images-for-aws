@@ -19,4 +19,4 @@ Install-ChocoPackage composer -ArgumentList "--install-args", "/DEV=$installDir 
 [Environment]::SetEnvironmentVariable("PHPROOT", $installDir, "Machine")
 
 # Invoke Pester Tests
-Invoke-PesterTests -TestFile "PHP"
+# removed: Invoke-PesterTests

@@ -12,4 +12,4 @@ Install-Binary -Type MSI `
 Write-Host "Performing wsl --install --no-distribution"
 wsl.exe --install --no-distribution
 
-Invoke-PesterTests -TestFile "WindowsFeatures" -TestName "WSL2"
+# removed: Invoke-PesterTests

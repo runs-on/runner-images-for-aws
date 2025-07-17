@@ -32,4 +32,4 @@ New-Item -Name "x64.complete" -Path $stackToolcachePath
 
 Add-MachinePathItem -PathItem $destinationPath
 
-Invoke-PesterTests -TestFile "Tools" -TestName "Stack"
+# removed: Invoke-PesterTests

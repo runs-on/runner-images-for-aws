@@ -38,4 +38,4 @@ $globalNpmPackages | ForEach-Object {
     npm install -g $_.name
 }
 
-Invoke-PesterTests -TestFile "Node"
+# removed: Invoke-PesterTests

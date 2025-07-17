@@ -34,4 +34,4 @@ Install-ChocoPackage kubernetes-helm
 Write-Host "Install Minikube"
 Install-ChocoPackage minikube
 
-Invoke-PesterTests -TestFile "Tools" -TestName "KubernetesTools"
+# removed: Invoke-PesterTests

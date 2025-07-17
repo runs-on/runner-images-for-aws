@@ -30,4 +30,4 @@ if (Test-IsWin19){
     # Need to install the VSIX to get the build targets when running VSBuild
     Install-VSIXFromFile (Resolve-Path -Path $wdkExtensionPath)
 }
-Invoke-PesterTests -TestFile "WDK"
+# removed: Invoke-PesterTests

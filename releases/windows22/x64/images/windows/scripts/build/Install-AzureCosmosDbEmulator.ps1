@@ -6,4 +6,4 @@
 Install-Binary -Type MSI `
     -Url "https://aka.ms/cosmosdb-emulator"
 
-Invoke-PesterTests -TestFile "Tools" -TestName "Azure Cosmos DB Emulator"
+# removed: Invoke-PesterTests

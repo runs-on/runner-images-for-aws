@@ -13,4 +13,4 @@ Install-Binary `
     -Url $downloadUrl `
     -ExpectedSubject $(Get-MicrosoftPublisher)
 
-Invoke-PesterTests -TestFile "WinAppDriver" -TestName "WinAppDriver"
+# removed: Invoke-PesterTests

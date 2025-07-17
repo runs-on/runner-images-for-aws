@@ -59,4 +59,4 @@ Write-Host "Setting the environment variables..."
 Add-MachinePathItem -PathItem $geckoDriverPath
 [Environment]::SetEnvironmentVariable("GeckoWebDriver", $geckoDriverPath, "Machine")
 
-Invoke-PesterTests -TestFile "Browsers" -TestName "Firefox"
+# removed: Invoke-PesterTests

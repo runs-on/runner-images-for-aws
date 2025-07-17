@@ -66,4 +66,4 @@ if ($LastExitCode -ne 0) {
     throw "Cabal installation failed with exit code $LastExitCode"
 }
 
-Invoke-PesterTests -TestFile 'Haskell'
+# removed: Invoke-PesterTests

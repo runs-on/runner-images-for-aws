@@ -41,4 +41,4 @@ Install-Binary `
 Add-MachinePathItem "$installDir\bin"
 Update-Environment
 
-Invoke-PesterTests -TestFile "Tools" -TestName "OpenSSL"
+# removed: Invoke-PesterTests

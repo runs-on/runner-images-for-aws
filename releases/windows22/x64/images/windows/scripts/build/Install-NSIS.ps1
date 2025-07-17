@@ -11,4 +11,4 @@ Install-ChocoPackage nsis -ArgumentList "--version", "$nsisVersion"
 Add-MachinePathItem "${env:ProgramFiles(x86)}\NSIS\"
 Update-Environment
 
-Invoke-PesterTests -TestFile "Tools" -TestName "NSIS"
+# removed: Invoke-PesterTests

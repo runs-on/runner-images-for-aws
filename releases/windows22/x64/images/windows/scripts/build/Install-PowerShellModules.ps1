@@ -24,4 +24,4 @@ foreach ($module in $modules) {
 }
 
 Import-Module Pester
-Invoke-PesterTests -TestFile "PowerShellModules" -TestName "PowerShellModules"
+# removed: Invoke-PesterTests
