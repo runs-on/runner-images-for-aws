@@ -44,6 +44,9 @@ ami_name = [options[:image_prefix], image['id'], options[:image_version]].join('
 packer_template_relative_path = "#{dist.sub(/\d+$/, '')}/templates/#{image['id']}.pkr.hcl"
 packer_template_path = "#{release_dir}/images/#{packer_template_relative_path}"
 
+# Ensure template directory exists
+FileUtils.mkdir_p(File.dirname(packer_template_path))
+
 # Copy template to destination
 FileUtils.cp("patches/#{packer_template_relative_path}", packer_template_path)
 
