@@ -48,44 +48,54 @@ gnu_sed -i 's|Invoke-PesterTests.*|# removed: Invoke-PesterTests|' $build_dir/*.
 # cat patches/windows/files/boot-config.ps1 >> $build_dir/Configure-System.ps1
 
 # custom stuff
-# mkdir -p $release_dir/images/windows/custom
-# cp -r patches/windows/files $release_dir/images/windows/custom/
-
-# Save ~3.2GB by removing default docker images
+rm -rf $release_dir/images/windows/custom
+mkdir -p $release_dir/images/windows/custom
+cp -r patches/windows/custom $release_dir/images/windows/
 
 yq -oj -i 'eval(del(.windowsFeatures[] | select(.name == "Hyper-V")))' $TOOLSET_PATH
 yq -oj -i 'eval(del(.windowsFeatures[] | select(.name == "HypervisorPlatform")))' $TOOLSET_PATH
 yq -oj -i 'eval(del(.windowsFeatures[] | select(.name == "Hyper-V-PowerShell")))' $TOOLSET_PATH
 
-if false; then
-  yq -oj -i '.docker.images = []' $TOOLSET_PATH
+yq -oj -i '.docker.images = []' $TOOLSET_PATH
 
-  # Use official runners for CodeQL
-  yq -oj -i 'del(.toolcache[] | select(.name == "CodeQL"))' $TOOLSET_PATH
+# ruby
+yq -oj -i 'eval(.toolcache[] | select(.name == "Ruby") | .versions |= [.[-1]])' $TOOLSET_PATH
+yq -oj -i 'eval(.toolcache[] | select(.name == "Ruby") | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
 
-  # only keep 4 last python version
-  yq -oj -i 'eval(.toolcache[] | select(.name == "Python") | .versions |= [.[-4],.[-3],.[-2],.[-1]])' $TOOLSET_PATH
-  # yq -oj -i 'eval(.toolcache[] | select(.name == "Python") | .versions |= [.[-1]])' $TOOLSET_PATH
 
-  # only keep one last pypy version
-  yq -oj -i 'eval(.toolcache[] | select(.name == "PyPy") | .versions |= [.[-1]])' $TOOLSET_PATH
-  # only keep one last go version
-  yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .versions |= [.[-1]])' $TOOLSET_PATH
-  yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
+# python (incorrectly duplicated in original toolset file)
+yq -oj -i 'eval(.toolcache[] | select(.name == "Python" and has("default")) | .versions |= [.[-1]])' $TOOLSET_PATH
+yq -oj -i 'eval(.toolcache[] | select(.name == "Python" and has("default")) | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
 
-  # only keep latest dotnet version
-  yq -oj -i 'eval(.dotnet | .aptPackages |= [.[-1]])' $TOOLSET_PATH
-  yq -oj -i 'eval(.dotnet | .versions |= [.[-1]])' $TOOLSET_PATH
-  # remove PSScriptAnalyzer
-  yq -oj -i 'eval(del(.powershellModules[] | select(.name == "PSScriptAnalyzer")))' $TOOLSET_PATH
+# only keep one last pypy version
+yq -oj -i 'eval(.toolcache[] | select(.name == "PyPy") | .versions |= [.[-1]])' $TOOLSET_PATH
 
-  # only keep the default java version (use action to install additional, adds 5s)
-  yq -oj -i 'eval(.java | .versions |= [(parent | .default)])' $TOOLSET_PATH
-  # only keep the default android ndk version
-  yq -oj -i 'eval(.android.ndk | .versions |= [(parent | .default)])' $TOOLSET_PATH
+# only keep one last go version
+yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .versions |= [.[-1]])' $TOOLSET_PATH
+yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
 
-  # only keep yarn
-  yq -oj -i 'del(.node_modules[] | (select(.name != "yarn" and .name != "typescript")))' $TOOLSET_PATH
+# only keep latest dotnet version
+yq -oj -i 'eval(.dotnet | .versions |= [.[-1]])' $TOOLSET_PATH
 
-  yq -oj -i 'del(.azureModules[])' $TOOLSET_PATH
-fi
+
+
+
+# remove PSScriptAnalyzer
+# yq -oj -i 'eval(del(.powershellModules[] | select(.name == "PSScriptAnalyzer")))' $TOOLSET_PATH
+
+# only keep the default java version (use action to install additional, adds 5s)
+yq -oj -i 'eval(.java | .versions |= [(parent | .default)])' $TOOLSET_PATH
+
+# only keep the default android ndk version
+yq -oj -i 'eval(.android.ndk | .versions |= [(parent | .default)])' $TOOLSET_PATH
+
+# only keep yarn
+yq -oj -i 'del(.npm.global_packages[] | (select(.name != "yarn" and .name != "typescript")))' $TOOLSET_PATH
+
+# if using AWS, might not need azure modules, we'll see
+yq -oj -i 'del(.azureModules[])' $TOOLSET_PATH
+
+# remove julia and others from choco (large disk space)
+yq -oj -i 'del(.choco.common_packages[] | select(.name == "julia"))' $TOOLSET_PATH
+yq -oj -i 'del(.choco.common_packages[] | select(.name == "pulumi"))' $TOOLSET_PATH
+yq -oj -i 'del(.choco.common_packages[] | select(.name == "strawberryperl"))' $TOOLSET_PATH

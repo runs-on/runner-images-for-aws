@@ -15,7 +15,7 @@ end
 def request_quota_increase_for_region(region)
   client = Aws::ServiceQuotas::Client.new(region: region)
   
-  quota_value = 50
+  quota_value = 60
   quota_code = 'L-0E3CBAB9'
   params = {
     service_code: 'ec2',

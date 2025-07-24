@@ -417,9 +417,9 @@ build {
       # "${path.root}/../scripts/build/Install-AzureCosmosDbEmulator.ps1",
       # "${path.root}/../scripts/build/Install-Mercurial.ps1",
       "${path.root}/../scripts/build/Install-Zstd.ps1",
-      "${path.root}/../scripts/build/Install-NSIS.ps1",
+      # "${path.root}/../scripts/build/Install-NSIS.ps1",
       "${path.root}/../scripts/build/Install-Vcpkg.ps1",
-      "${path.root}/../scripts/build/Install-PostgreSQL.ps1",
+      # "${path.root}/../scripts/build/Install-PostgreSQL.ps1",
       # "${path.root}/../scripts/build/Install-Bazel.ps1",
       # "${path.root}/../scripts/build/Install-AliyunCli.ps1",
       "${path.root}/../scripts/build/Install-RootCA.ps1",
@@ -439,7 +439,7 @@ build {
       "${path.root}/../scripts/build/Configure-GDIProcessHandleQuota.ps1",
       "${path.root}/../scripts/build/Configure-Shell.ps1",
       "${path.root}/../scripts/build/Configure-DeveloperMode.ps1",
-      "${path.root}/../scripts/build/Install-LLVM.ps1"
+      # "${path.root}/../scripts/build/Install-LLVM.ps1"
     ]
   }
 
@@ -494,15 +494,92 @@ build {
     skip_clean       = true
   }
 
+  # added: disable page file (1GiB)
+  provisioner "powershell" {
+    inline = [
+      "Write-Host 'Disabling page file...'",
+      "Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management' -Name PagingFiles -Value @() -Force"
+    ]
+  }
+
   provisioner "windows-restart" {
     restart_timeout = "20m"
   }
 
+  # Modify the unattend.xml file before sysprep
   provisioner "powershell" {
     inline = [
-      "if( Test-Path $env:SystemRoot\\System32\\Sysprep\\unattend.xml ){ rm $env:SystemRoot\\System32\\Sysprep\\unattend.xml -Force}",
-      "& $env:SystemRoot\\System32\\Sysprep\\Sysprep.exe /oobe /generalize /mode:vm /quiet /quit",
-      "while($true) { $imageState = Get-ItemProperty HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup\\State | Select ImageState; if($imageState.ImageState -ne 'IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE') { Write-Output $imageState.ImageState; Start-Sleep -s 10 } else { break } }"
+      "Write-Output 'Modifying unattend.xml file...'",
+      "$xmlPath = 'C:\\ProgramData\\Amazon\\EC2Launch\\sysprep\\unattend.xml'",
+      "if (Test-Path $xmlPath) {",
+      "    # Read the XML content as text",
+      "    $content = Get-Content $xmlPath -Raw",
+      "    # Set PersistAllDeviceInstalls to false",
+      "    if ($content -match '<PersistAllDeviceInstalls>true</PersistAllDeviceInstalls>') {",
+      "        $content = $content -replace '<PersistAllDeviceInstalls>true</PersistAllDeviceInstalls>', '<PersistAllDeviceInstalls>false</PersistAllDeviceInstalls>'",
+      "        Write-Output 'Set PersistAllDeviceInstalls to false'",
+      "    }",
+      # "    # Remove the entire RunSynchronous section",
+      # "    $pattern = '<RunSynchronous>[\\s\\S]*?</RunSynchronous>'",
+      # "    if ($content -match $pattern) {",
+      # "        $content = $content -replace $pattern, ''",
+      # "        Write-Output 'Removed RunSynchronous commands'",
+      # "    }",
+      "    # Save the modified content",
+      "    $content | Set-Content -Path $xmlPath -Encoding UTF8",
+      "    Write-Output 'Successfully modified unattend.xml'",
+      "    Write-Output '--- Modified unattend.xml content ---'",
+      "    Get-Content $xmlPath | Write-Output",
+      "} else {",
+      "    Write-Error 'unattend.xml not found at expected location'",
+      "}"
+    ]
+  }
+
+  provisioner "powershell" {
+    valid_exit_codes = [0, 2]
+    inline = [
+      "Write-Output 'Removing temp directory.'",
+      "Remove-Item -Recurse -Force ${var.temp_dir}",
+      "Write-Output 'Disabling Windows Recovery Environment before Sysprep.'",
+      "reagentc /disable",
+      # "if( Test-Path $env:SystemRoot\\System32\\Sysprep\\unattend.xml ){ rm $env:SystemRoot\\System32\\Sysprep\\unattend.xml -Force}",
+      "& $env:SystemRoot\\System32\\Sysprep\\Sysprep.exe /oobe /generalize /mode:vm /quiet /quit /unattend:\"C:\\ProgramData\\Amazon\\EC2Launch\\sysprep\\unattend.xml\"",
+      "$timeout = New-TimeSpan -Minutes 15",
+      "$stopwatch = [System.Diagnostics.Stopwatch]::StartNew()",
+      "$successState = 'IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE'",
+      "$failureState = 'IMAGE_STATE_UNDEPLOYABLE'",
+      "while($stopwatch.Elapsed -lt $timeout) {",
+      "    $imageState = Get-ItemProperty HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup\\State | Select-Object -ExpandProperty ImageState -ErrorAction SilentlyContinue",
+      "    if($imageState -eq $successState) {",
+      "        Write-Output 'Sysprep completed successfully.'",
+      "        break",
+      "    }",
+      "    if($imageState -eq $failureState) {",
+      "        Write-Error 'Sysprep failed. State is UNDEPLOYABLE.'",
+      "        $pantherPath = \"$env:SystemRoot\\System32\\Sysprep\\Panther\"",
+      "        if (Test-Path $pantherPath) {",
+      "            Get-ChildItem -Path $pantherPath -Filter '*.log' -Recurse | ForEach-Object {",
+      "                Write-Output \"--- Log file: $_.FullName ---\"",
+      "                Get-Content $_.FullName | Write-Output",
+      "            }",
+      "        }",
+      "        exit 1",
+      "    }",
+      "    Write-Output \"Current ImageState: $imageState. Waiting...\"",
+      "    Start-Sleep -s 10",
+      "}",
+      "if ($stopwatch.Elapsed -ge $timeout) {",
+      "    Write-Error \"Sysprep did not complete in time. Last state: $imageState\"",
+      "    $pantherPath = \"$env:SystemRoot\\System32\\Sysprep\\Panther\"",
+      "    if (Test-Path $pantherPath) {",
+      "        Get-ChildItem -Path $pantherPath -Filter '*.log' -Recurse | ForEach-Object {",
+      "            Write-Output \"--- Log file (timeout): $_.FullName ---\"",
+      "            Get-Content $_.FullName | Write-Output",
+      "        }",
+      "    }",
+      "    exit 1",
+      "}"
     ]
   }
 
