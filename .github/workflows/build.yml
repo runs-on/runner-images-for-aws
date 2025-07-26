@@ -49,4 +49,4 @@ jobs:
           aws-region: us-east-1
       - run: bundle exec bin/build --image-id ${{ inputs.image_id }}
         id: build
-        timeout-minutes: 120
+        timeout-minutes: 180

@@ -11,6 +11,10 @@ on:
         required: false
         type: string
         default: "m7"
+      platform:
+        required: false
+        type: string
+        default: "linux"
       extras:
         required: false
         type: string
@@ -27,13 +31,76 @@ on:
         required: false
         type: string
         default: "m7"
+      platform:
+        required: false
+        type: string
+        default: "linux"
       extras:
         required: false
         type: string
         default: ""
 
 jobs:
-  test:
+  test-windows:
+    if: ${{ inputs.platform == 'windows' }}
+    name: Test${{ inputs.index || '1' }}
+    runs-on: runs-on=${{ github.run_id }}-${{ inputs.index }}/family=${{ inputs.instance_family || 'm7' }}/cpu=2+4/ami=${{ inputs.ami_id }}/extras=${{ inputs.extras }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - uses: runs-on/action@v2
+        with:
+          show-env: true
+      - name: Check env
+        run: |
+          Get-ChildItem env: | Where-Object { $_.Name -like 'RUNS_ON*' } | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }
+      - name: Check disk usage for windows
+        run: |
+          dir .
+          echo $env:USERNAME
+          echo $env:RUNS_ON_RUNNER_NAME
+          fsutil fsinfo drives
+          fsutil fsinfo statistics
+          Get-WmiObject -Class Win32_LogicalDisk -ComputerName LOCALHOST | ? {$_. DriveType -eq 3} | select DeviceID, {[int]($_.Size /1GB)}, {[int]($_.FreeSpace /1GB)}
+      - name: Users
+        run: |
+          Get-LocalUser | Format-Table -AutoSize Name,Enabled,PasswordLastSet
+      - name: Generate artifact
+        run: |
+          New-Item -Path "path/to/artifact" -ItemType Directory -Force
+          "hello world" | Out-File -FilePath "path/to/artifact/world.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: my-artifact-${{ hashFiles('path/to/artifact/world.txt') }}
+          path: path/to/artifact/world.txt
+      - name: EC2Launchv2 config
+        run: |
+          Get-Content "C:\ProgramData\Amazon\EC2Launch\config\agent-config.yml"
+      - name: Logs
+        run: |
+          dir C:\\actions-runner
+          dir C:\\actions-runner\\bin
+          dir C:\ProgramData\Amazon\EC2Launch
+          Get-ChildItem "C:\ProgramData\Amazon\EC2Launch\log" | ForEach-Object {
+            Write-Host "`nFile: $($_.Name)"
+            Write-Host "------------------------"
+            Get-Content $_.FullName
+          }
+      - name: RunsOn logs
+        run: |
+          Write-Host "`nFile: C:\runs-on\output.log"
+          Write-Host "------------------------"
+          Get-Content -Path "C:\runs-on\output.log"
+          Write-Host "`nFile: C:\runs-on\error.log"
+          Write-Host "------------------------"
+          Get-Content -Path "C:\runs-on\error.log"
+      - name: Check sysprep config
+        run: |
+          dir C:\ProgramData\Amazon\EC2Launch\config
+          Get-Content -Path C:\ProgramData\Amazon\EC2Launch\sysprep\unattend.xml
+
+  test-linux:
+    if: ${{ inputs.platform == 'linux' }}
     name: Test${{ inputs.index || '1' }}
     runs-on: runs-on=${{ github.run_id }}-${{ inputs.index }}/family=${{ inputs.instance_family || 'm7' }}/cpu=2+4/ami=${{ inputs.ami_id }}/extras=${{ inputs.extras }}
     env:
@@ -43,7 +110,7 @@ jobs:
         run: sudo cat /var/log/cloud-init-output.log
       - name: Systemctl status
         run: sudo systemctl status
-      - uses: runs-on/action@v1
+      - uses: runs-on/action@v2
         with:
           show-env: true
       - name: Disk

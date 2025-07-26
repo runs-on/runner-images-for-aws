@@ -1,4 +1,4 @@
-name: Linux images
+name: Windows images
 
 on:
   workflow_dispatch:
@@ -7,9 +7,9 @@ on:
         type: string
         required: true
         description: 'Distribution(s) to build'
-        default: '["ubuntu22-full-x64", "ubuntu22-full-arm64", "ubuntu24-full-x64", "ubuntu24-full-arm64"]'
+        default: '["windows22-full-x64"]'
   schedule:
-    - cron: '0 8 */15 * *'
+    - cron: '0 6 */15 * *'
 
 jobs:
   sync:
@@ -22,7 +22,7 @@ jobs:
     steps:
       - name: Generate release name
         id: generate-release-name
-        run: echo "release_name=linux-$(date +%Y%m%d%H%M%S)" >> $GITHUB_OUTPUT
+        run: echo "release_name=windows-$(date +%Y%m%d%H%M%S)" >> $GITHUB_OUTPUT
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
         with:
@@ -36,7 +36,7 @@ jobs:
           aws-region: us-east-1
       - name: Cleanup dev AMIs
         env:
-          AMI_PREFIX: runs-on-dev-ubuntu
+          AMI_PREFIX: runs-on-dev-windows
         run: bundle exec bin/utils/cleanup-amis --force
       - name: Synchronize with upstream repository
         run: bundle exec bin/sync
@@ -51,7 +51,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image_id: ${{ fromJSON(github.event.inputs.images || '["ubuntu22-full-x64", "ubuntu22-full-arm64", "ubuntu24-full-x64", "ubuntu24-full-arm64"]') }}
+        image_id: ${{ fromJSON(github.event.inputs.images || '["windows22-full-x64"]') }}
     uses: ./.github/workflows/build-test-release.yml
     secrets: inherit
     with:
