@@ -5,8 +5,6 @@
       "arch": "x64",
       "platform": "win32",
       "versions": [
-        "3.1",
-        "3.2",
         "3.3"
       ],
       "default": "3.3"
@@ -17,13 +15,9 @@
       "arch": "x64",
       "platform": "win32",
       "versions": [
-        "3.9.*",
-        "3.10.*",
-        "3.11.*",
-        "3.12.*",
         "3.13.*"
       ],
-      "default": "3.9.*"
+      "default": "3.13.*"
     },
     {
       "name": "Python",
@@ -43,10 +37,6 @@
       "arch": "x86",
       "platform": "win64",
       "versions": [
-        "2.7",
-        "3.7",
-        "3.8",
-        "3.9",
         "3.10"
       ]
     },
@@ -67,8 +57,6 @@
       "arch": "x64",
       "platform": "win32",
       "versions": [
-        "1.22.*",
-        "1.23.*",
         "1.24.*"
       ],
       "default": "1.24.*"
@@ -106,22 +94,11 @@
       "name": "AWSPowershell"
     }
   ],
-  "azureModules": [
-    {
-      "name": "az",
-      "versions": [
-        "12.5.0"
-      ],
-      "zip_versions": []
-    }
-  ],
+  "azureModules": [],
   "java": {
     "default": "8",
     "versions": [
-      "8",
-      "11",
-      "17",
-      "21"
+      "8"
     ]
   },
   "android": {
@@ -143,9 +120,7 @@
     "ndk": {
       "default": "27",
       "versions": [
-        "26",
-        "27",
-        "28"
+        "27"
       ]
     }
   },
@@ -294,13 +269,7 @@
     ]
   },
   "docker": {
-    "images": [
-      "mcr.microsoft.com/windows/servercore:ltsc2022",
-      "mcr.microsoft.com/windows/nanoserver:ltsc2022",
-      "mcr.microsoft.com/dotnet/framework/aspnet:4.8-windowsservercore-ltsc2022",
-      "mcr.microsoft.com/dotnet/framework/runtime:4.8-windowsservercore-ltsc2022",
-      "mcr.microsoft.com/dotnet/framework/sdk:4.8-windowsservercore-ltsc2022"
-    ],
+    "images": [],
     "components": {
       "docker": "27.5.1",
       "compose": "2.32.2"
@@ -320,22 +289,6 @@
       {
         "name": "yarn",
         "test": "yarn --version"
-      },
-      {
-        "name": "newman",
-        "test": "newman --version"
-      },
-      {
-        "name": "lerna",
-        "test": "lerna --version"
-      },
-      {
-        "name": "gulp-cli",
-        "test": "gulp --version"
-      },
-      {
-        "name": "grunt-cli",
-        "test": "grunt --version"
       }
     ]
   },
@@ -351,8 +304,6 @@
   },
   "dotnet": {
     "versions": [
-      "6.0",
-      "8.0",
       "9.0"
     ],
     "tools": [
@@ -391,27 +342,10 @@
         "name": "packer"
       },
       {
-        "name": "strawberryperl",
-        "args": [
-          "--version",
-          "5.32.1.1"
-        ]
-      },
-      {
-        "name": "pulumi"
-      },
-      {
         "name": "swig"
       },
       {
         "name": "vswhere"
-      },
-      {
-        "name": "julia",
-        "args": [
-          "--ia",
-          "/DIR=C:\\Julia"
-        ]
       },
       {
         "name": "cmake.install",
@@ -454,12 +388,7 @@
     "version": "14"
   },
   "kotlin": {
-    "version": "2.1.10",
-    "pinnedDetails": {
-      "link": "https://youtrack.jetbrains.com/issues/KT?preview=KT-76169",
-      "reason": "this was pinned due to a new version 2.1.20 released has an issue with kotlinc-js -version` and kapt -version",
-      "review-at": "2025-03-31"
-    }
+    "version": "latest"
   },
   "openssl": {
     "version": "1.1.1",
