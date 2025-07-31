@@ -5,9 +5,9 @@
       "arch": "x64",
       "platform": "win32",
       "versions": [
-        "3.3"
+        "3.4"
       ],
-      "default": "3.3"
+      "default": "3.4"
     },
     {
       "name": "Python",
