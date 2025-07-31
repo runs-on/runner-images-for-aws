@@ -8,6 +8,10 @@ on:
       image_id:
         required: true
         type: string
+      platform:
+        required: false
+        type: string
+        default: "linux"
     outputs:
       ami_name:
         description: "The name of the built AMI"
@@ -30,6 +34,7 @@ jobs:
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 1
+      platform: ${{ inputs.platform }}
 
   test2:
     needs:
@@ -39,6 +44,7 @@ jobs:
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 2
+      platform: ${{ inputs.platform }}
 
   test-extras1:
     needs:
@@ -49,6 +55,7 @@ jobs:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 3
       extras: "s3-cache"
+      platform: ${{ inputs.platform }}
 
   test-extras2:
     needs:
@@ -59,6 +66,7 @@ jobs:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 4
       extras: "s3-cache"
+      platform: ${{ inputs.platform }}
 
   test-gpu:
     if: contains(inputs.image_id, 'gpu-x64')
@@ -70,6 +78,7 @@ jobs:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 5
       instance_family: "g4dn"
+      platform: ${{ inputs.platform }}
 
   release:
     if: ${{ !failure() && !cancelled() }}
