@@ -71,7 +71,12 @@ jobs:
           "hello world" | Out-File -FilePath "path/to/artifact/world.txt"
       - uses: actions/upload-artifact@v4
         with:
-          name: my-artifact-${{ hashFiles('path/to/artifact/world.txt') }}
+          name: my-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
+          path: path/to/artifact/world.txt
+      - run: rm path/to/artifact/world.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: my-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
           path: path/to/artifact/world.txt
       - name: EC2Launchv2 config
         run: |
