@@ -83,6 +83,8 @@ sed -i 's/^#\?Storage=.*/Storage=volatile/' /etc/systemd/journald.conf
 systemctl mask systemd-journal-flush.service
 systemctl mask systemd-fsck@dev-disk-by\x2dlabel-UEFI.service
 systemctl mask rpcbind.service
+# Can trigger DNS resolution issues when service starts while cloud-init is running. Not essential for CI ephemeral runners.
+systemctl mask systemd-hostnamed.service
 
 # Change default target from graphical to multi-user
 systemctl set-default multi-user.target
