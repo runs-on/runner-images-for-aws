@@ -126,13 +126,7 @@ if reply.downcase == 'y'
       sleep 2
 
       # Deregister the AMI
-      ec2.deregister_image({image_id: image.ami.image_id})
-
-      # Get the snapshot associated with the AMI
-      snapshot_id = image.ami.block_device_mappings[0].ebs.snapshot_id
-
-      # Delete the snapshot
-      ec2.delete_snapshot({snapshot_id: snapshot_id})
+      ec2.deregister_image({image_id: image.ami.image_id}, delete_associated_snapshots: true)
     end
   end
 else

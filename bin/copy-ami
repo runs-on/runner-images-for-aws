@@ -94,16 +94,13 @@ def copy_ami_to_regions(ami_id_or_name, regions, force = false)
     ec2.wait_until(:image_available, image_ids: [image_id])
     puts "AMI #{image_id} is now available in region #{region}"
 
-    ec2.modify_image_attribute({
-      image_id: image_id,
-      launch_permission: {
-        add: [{ group: 'all' }]
-      }
-    })
-    puts "Launch permissions for AMI #{image_id} updated to public"
-
-    # Make the underlying snapshot public too
+    # Wait for the snapshot to be available
     snapshot_id = ec2.describe_images(image_ids: [image_id]).images.first.block_device_mappings.first.ebs.snapshot_id
+    puts "Waiting for snapshot #{snapshot_id} to be available..."
+    ec2.wait_until(:snapshot_completed, snapshot_ids: [snapshot_id])
+    puts "Snapshot #{snapshot_id} is now available"
+
+    # Make the underlying snapshot public
     ec2.modify_snapshot_attribute({
       snapshot_id: snapshot_id,
       attribute: "createVolumePermission",
@@ -111,6 +108,15 @@ def copy_ami_to_regions(ami_id_or_name, regions, force = false)
       group_names: ["all"]
     })
     puts "Snapshot #{snapshot_id} for AMI #{image_id} updated to public"
+
+    # Make the AMI public
+    ec2.modify_image_attribute({
+      image_id: image_id,
+      launch_permission: {
+        add: [{ group: 'all' }]
+      }
+    })
+    puts "Launch permissions for AMI #{image_id} updated to public"
 
     # to avoid throttling
     sleep 2
