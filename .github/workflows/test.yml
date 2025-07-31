@@ -50,7 +50,7 @@ jobs:
         uses: actions/checkout@v4
       - uses: runs-on/action@v2
         with:
-          show-env: true
+          show_env: true
       - name: Check env
         run: |
           Get-ChildItem env: | Where-Object { $_.Name -like 'RUNS_ON*' } | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }
@@ -112,7 +112,7 @@ jobs:
         run: sudo systemctl status
       - uses: runs-on/action@v2
         with:
-          show-env: true
+          show_env: true
       - name: Disk
         run: |
           sudo df -ah
