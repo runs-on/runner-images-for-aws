@@ -75,8 +75,6 @@ systemctl mask esm-cache.service || true
 systemctl mask \
   dev-hugepages.mount \
   dev-mqueue.mount \
-  sys-kernel-debug.mount \
-  sys-kernel-tracing.mount \
   sys-fs-fuse-connections.mount
 
 sed -i 's/^#\?Storage=.*/Storage=volatile/' /etc/systemd/journald.conf
