@@ -81,12 +81,8 @@ systemctl mask \
 
 sed -i 's/^#\?Storage=.*/Storage=volatile/' /etc/systemd/journald.conf
 systemctl mask systemd-journal-flush.service
-systemctl mask systemd-binfmt.service
 systemctl mask systemd-fsck@dev-disk-by\x2dlabel-UEFI.service
 systemctl mask rpcbind.service
-systemctl mask chrony.service
-systemctl mask systemd-hostnamed.service
-systemctl mask cron.service
 
 # Change default target from graphical to multi-user
 systemctl set-default multi-user.target
