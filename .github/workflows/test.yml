@@ -118,6 +118,7 @@ jobs:
       - uses: runs-on/action@v2
         with:
           show_env: true
+          metrics: memory,cpu
       - name: Disk
         run: |
           sudo df -ah
