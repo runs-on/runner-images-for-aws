@@ -169,8 +169,8 @@ jobs:
           context: "vote"
           push: false
           tags: test
-          cache-from: type=gha,scope=${{ runner.os }}-${{ runner.arch }}
-          cache-to: type=gha,mode=max,scope=${{ runner.os }}-${{ runner.arch }}
+          cache-from: type=gha,scope=docker-build-${{ inputs.index || '1' }}-${{ runner.os }}-${{ runner.arch }}
+          cache-to: type=gha,mode=max,scope=docker-build-${{ inputs.index || '1' }}-${{ runner.os }}-${{ runner.arch }}
 
       # Test for artifact upload and download
       - run: mkdir -p path/to/artifact
