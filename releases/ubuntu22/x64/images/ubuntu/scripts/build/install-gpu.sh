@@ -43,8 +43,8 @@ apt-get update -qq
 apt install -y --no-install-recommends cuda-drivers cuda-toolkit nvidia-container-toolkit
 
 # Update PATH and LD_LIBRARY_PATH
-path="/usr/local/cuda-12/bin"
-library_path="/usr/local/cuda-12/lib64"
+path="/usr/local/cuda-13/bin"
+library_path="/usr/local/cuda-13/lib64"
 # Ensure the paths exist
 ls -al $path
 ls -al $library_path
