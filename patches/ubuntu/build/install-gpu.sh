@@ -36,15 +36,16 @@ echo "deb [signed-by=$GPG_KEY] $REPO_URL /" > $REPO_PATH
 
 apt-get update -qq
 
+# Pin CUDA version to 12
 # cuda-toolkit vs nvidia-cuda-toolkit:
 # - cuda-toolkit is NVIDIA's official package from their repository
 # - nvidia-cuda-toolkit is Ubuntu's packaged version of CUDA toolkit (often outdated version)
 # So using cuda-toolkit here:
-apt install -y --no-install-recommends cuda-drivers cuda-toolkit nvidia-container-toolkit
+apt install -y --no-install-recommends cuda-drivers cuda-toolkit-12 nvidia-container-toolkit
 
-# Update PATH and LD_LIBRARY_PATH
-path="/usr/local/cuda-13/bin"
-library_path="/usr/local/cuda-13/lib64"
+# Update PATH and LD_LIBRARY_PATH for CUDA 12
+path="/usr/local/cuda-12/bin"
+library_path="/usr/local/cuda-12/lib64"
 # Ensure the paths exist
 ls -al $path
 ls -al $library_path
