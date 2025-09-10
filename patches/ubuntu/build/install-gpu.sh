@@ -41,7 +41,9 @@ apt-get update -qq
 # - cuda-toolkit is NVIDIA's official package from their repository
 # - nvidia-cuda-toolkit is Ubuntu's packaged version of CUDA toolkit (often outdated version)
 # So using cuda-toolkit here:
-apt install -y --no-install-recommends cuda-drivers cuda-toolkit-12 nvidia-container-toolkit
+apt install -y --no-install-recommends cuda-12-9 cuda-toolkit-12-9 nvidia-container-toolkit
+
+dpkg -l | grep -E "(nvidia-driver|cuda)" | head -10
 
 # Update PATH and LD_LIBRARY_PATH for CUDA 12
 path="/usr/local/cuda-12/bin"
