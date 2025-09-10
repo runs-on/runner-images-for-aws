@@ -88,7 +88,8 @@ source "amazon-ebs" "build_ebs" {
   # make AMIs publicly accessible
   ami_groups                                = ["all"]
   ebs_optimized                             = true
-  spot_instance_types                       = ["m7a.xlarge", "c7a.xlarge", "c7i.xlarge", "m7i.xlarge", "m7i-flex.xlarge"]
+  # spot_instance_types                       = ["m7a.xlarge", "c7a.xlarge", "c7i.xlarge", "m7i.xlarge", "m7i-flex.xlarge"]
+  spot_instance_types                       = ["g4dn.xlarge"]
   spot_price                                = "auto"
   region                                    = "${var.region}"
   ssh_username                              = "ubuntu"
@@ -156,6 +157,12 @@ build {
     execute_command   = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     expect_disconnect = true
     inline            = ["echo 'Reboot VM'", "sudo reboot"]
+  }
+
+  provisioner "shell" {
+    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}","DEBIAN_FRONTEND=noninteractive"]
+    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    scripts          = ["${path.root}/../scripts/build/install-gpu.sh"]
   }
 
   provisioner "shell" {
