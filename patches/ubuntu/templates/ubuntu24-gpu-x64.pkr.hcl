@@ -151,6 +151,13 @@ build {
     expect_disconnect = true
     inline            = ["echo 'Reboot VM'", "sudo reboot"]
   }
+
+  provisioner "shell" {
+    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}","DEBIAN_FRONTEND=noninteractive"]
+    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    scripts          = ["${path.root}/../scripts/build/install-gpu.sh"]
+  }
+
   provisioner "shell" {
     execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     pause_before        = "1m0s"

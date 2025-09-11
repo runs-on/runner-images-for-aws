@@ -21,9 +21,9 @@ if [ -f /root/cuda-installed.txt ]; then
     # Verify CUDA and driver installation
     echo "=== CUDA Installation Verification ==="
     su - runner -c "nvcc --version"
-    nvidia-smi --version
+    nvidia-smi
+    nvidia-smi --version | grep "CUDA Version: 12"
     rm /root/cuda-installed.txt
-    exit 1
 fi
 
 echo "cuda installed" > /root/cuda-installed.txt
