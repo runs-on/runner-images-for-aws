@@ -24,6 +24,7 @@ if [ -f /root/cuda-installed.txt ]; then
     nvidia-smi
     nvidia-smi | grep "CUDA Version: 12"
     rm /root/cuda-installed.txt
+    exit 0
 fi
 
 echo "cuda installed" > /root/cuda-installed.txt
