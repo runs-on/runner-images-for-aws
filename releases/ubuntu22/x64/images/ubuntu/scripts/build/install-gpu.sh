@@ -17,6 +17,17 @@ fi
 
 set -eox pipefail
 
+if [ -f /root/cuda-installed.txt ]; then
+    # Verify CUDA and driver installation
+    echo "=== CUDA Installation Verification ==="
+    su - runner -c "nvcc --version"
+    nvidia-smi --version
+    rm /root/cuda-installed.txt
+    exit 1
+fi
+
+echo "cuda installed" > /root/cuda-installed.txt
+
 # Ensure the root partition is resized
 cloud-init single --name cc_growpart
 cloud-init single --name cc_resizefs
@@ -36,15 +47,18 @@ echo "deb [signed-by=$GPG_KEY] $REPO_URL /" > $REPO_PATH
 
 apt-get update -qq
 
+# Pin CUDA version to 12
 # cuda-toolkit vs nvidia-cuda-toolkit:
 # - cuda-toolkit is NVIDIA's official package from their repository
 # - nvidia-cuda-toolkit is Ubuntu's packaged version of CUDA toolkit (often outdated version)
 # So using cuda-toolkit here:
-apt install -y --no-install-recommends cuda-drivers cuda-toolkit nvidia-container-toolkit
+apt install -y --no-install-recommends cuda-drivers-575 cuda-12-9 cuda-toolkit-12-9 nvidia-container-toolkit
 
-# Update PATH and LD_LIBRARY_PATH
-path="/usr/local/cuda-13/bin"
-library_path="/usr/local/cuda-13/lib64"
+( dpkg -l | grep -E "(nvidia-driver|cuda)" | head -10 ) || true
+
+# Update PATH and LD_LIBRARY_PATH for CUDA 12
+path="/usr/local/cuda-12/bin"
+library_path="/usr/local/cuda-12/lib64"
 # Ensure the paths exist
 ls -al $path
 ls -al $library_path
