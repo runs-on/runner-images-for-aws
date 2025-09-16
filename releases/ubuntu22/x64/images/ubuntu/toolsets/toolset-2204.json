@@ -229,9 +229,6 @@
     }
   ],
   "dotnet": {
-    "aptPackages": [
-      "dotnet-sdk-9.0"
-    ],
     "versions": [
       "9.0"
     ],
