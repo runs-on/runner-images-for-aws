@@ -1,0 +1,162 @@
+#!/usr/bin/env ruby
+require 'aws-sdk-ec2'
+require 'terminal-table'
+require 'slop'
+require 'yaml'
+require 'colorize'
+
+REGIONS = YAML.load_file(File.expand_path("../../config.yml", __dir__)).fetch("regions")
+
+options = {}
+usage = Slop::Options.new do |opts|
+  opts.banner = "Usage: #{$0} [--force] [--help]"
+  opts.bool '-f', '--force', 'Do not ask for confirmation'
+  opts.string '--region', 'Region to cleanup', default: "all"
+  opts.bool '-h', '--help', 'Show help'
+end
+
+begin
+  options = usage.parse(ARGV).to_hash
+rescue Slop::Error => e
+  puts "Error: #{e.message}"
+  puts
+  puts usage
+  exit 1
+end
+
+if options[:help]
+  puts usage
+  exit 0
+end
+
+force = options[:force]
+snapshots_to_remove = []
+
+class OrphanedSnapshot < Struct.new(:snapshot, :region)
+end
+
+def get_orphaned_snapshots(ec2, region)
+  # Get all snapshots owned by us
+  snapshots = ec2.describe_snapshots({
+    owner_ids: ['self'],
+  }).snapshots
+
+  # Get all AMIs to find which snapshots are still in use
+  amis = ec2.describe_images({
+    owners: ['self'],
+  }).images
+
+  # Extract snapshot IDs that are referenced by AMIs
+  ami_snapshot_ids = Set.new
+  amis.each do |ami|
+    ami.block_device_mappings.each do |mapping|
+      if mapping.ebs && mapping.ebs.snapshot_id
+        ami_snapshot_ids.add(mapping.ebs.snapshot_id)
+      end
+    end
+  end
+
+  # Find orphaned snapshots
+  orphaned = snapshots.reject do |snapshot|
+    ami_snapshot_ids.include?(snapshot.snapshot_id)
+  end
+
+  orphaned
+end
+
+REGIONS.each_with_index do |region, index|
+  if options[:region] != "all" && region != options[:region]
+    next
+  end
+
+  3.times { puts "" } unless index == 0
+
+  ec2 = Aws::EC2::Client.new(region: region)
+
+  puts "## Checking region: #{region}"
+
+  orphaned_snapshots = get_orphaned_snapshots(ec2, region)
+
+  if orphaned_snapshots.empty?
+    puts "No orphaned snapshots found in #{region}"
+    next
+  end
+
+  table = Terminal::Table.new do |t|
+    t.headings = ['Snapshot ID', 'Created at', 'Size (GB)', 'Description']
+    orphaned_snapshots.each do |snapshot|
+      created_at = snapshot.start_time.strftime("%Y-%m-%d %H:%M")
+      size_gb = snapshot.volume_size
+      description = snapshot.description || "N/A"
+
+      t << [snapshot.snapshot_id, created_at, size_gb, description]
+      snapshots_to_remove << OrphanedSnapshot.new(snapshot, region)
+    end
+  end
+
+  puts table
+  puts "Found #{orphaned_snapshots.count} orphaned snapshots in #{region}"
+end
+
+if snapshots_to_remove.empty?
+  puts ""
+  puts "No orphaned snapshots to remove"
+  exit 0
+end
+
+puts ""
+puts "Summary: Found #{snapshots_to_remove.count} orphaned snapshots across all regions"
+puts ""
+
+# Calculate total size and cost savings
+total_size_gb = snapshots_to_remove.sum { |s| s.snapshot.volume_size }
+estimated_monthly_cost = total_size_gb * 0.05 # Rough estimate of $0.05 per GB per month
+
+table = Terminal::Table.new do |t|
+  t.headings = ['Region', 'Snapshot ID', 'Created at', 'Size (GB)', 'Description']
+  snapshots_to_remove.each do |orphaned|
+    snapshot = orphaned.snapshot
+    created_at = snapshot.start_time.strftime("%Y-%m-%d %H:%M")
+    size_gb = snapshot.volume_size
+    description = snapshot.description || "N/A"
+
+    t << [orphaned.region, snapshot.snapshot_id, created_at, size_gb, description]
+  end
+end
+
+puts table
+puts ""
+puts "Total size: #{total_size_gb} GB"
+puts "Estimated monthly cost savings: $#{sprintf('%.2f', estimated_monthly_cost)}"
+puts ""
+
+# Ask for confirmation before removal
+reply = if force
+  "y"
+else
+  print "Are you sure you want to delete the above snapshots? This action cannot be undone! (y/n) "
+  $stdin.gets.chomp
+end
+
+if reply.downcase == 'y'
+  snapshots_to_remove.each do |orphaned|
+    ec2 = Aws::EC2::Client.new(region: orphaned.region)
+    snapshot = orphaned.snapshot
+
+    puts "Deleting snapshot #{snapshot.snapshot_id} in #{orphaned.region}..."
+
+    begin
+      ec2.delete_snapshot(snapshot_id: snapshot.snapshot_id)
+      puts "✅ Successfully deleted #{snapshot.snapshot_id}"
+    rescue Aws::EC2::Errors::ServiceError => e
+      puts "❌ Failed to delete #{snapshot.snapshot_id}: #{e.message}".colorize(:red)
+    end
+
+    sleep 1
+  end
+
+  puts ""
+  puts "Cleanup completed!"
+else
+  puts "Skipping snapshot removal"
+end

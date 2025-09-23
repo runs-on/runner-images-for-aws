@@ -3,6 +3,8 @@ require 'aws-sdk-ec2'
 require 'terminal-table'
 require 'slop'
 require 'yaml'
+require 'date'
+require 'colorize'
 
 REGIONS = YAML.load_file(File.expand_path("../../config.yml", __dir__)).fetch("regions")
 AMI_PREFIX = ENV.fetch('AMI_PREFIX', 'runs-on-dev')
@@ -39,6 +41,26 @@ keep_count = dev_prefix ? 1 : 2
 class Image < Struct.new(:ami, :region)
 end
 
+def format_last_launched(last_launched)
+  if last_launched.nil?
+    return "Never".colorize(:color => :black, :background => :yellow)
+  end
+
+  # Parse the time if it's a string
+  launch_time = last_launched.is_a?(String) ? Time.parse(last_launched) : last_launched
+
+  time_diff = Time.now - launch_time
+  months_old = time_diff / (30 * 24 * 60 * 60) # Approximate months
+
+  formatted_time = launch_time.strftime("%Y-%m-%d %H:%M")
+
+  if months_old > 3
+    formatted_time.colorize(:color => :black, :background => :yellow)
+  else
+    formatted_time
+  end
+end
+
 REGIONS.each_with_index do |region, index|
   if options[:region] != "all" && region != options[:region]
     next
@@ -70,10 +92,11 @@ REGIONS.each_with_index do |region, index|
   grouped_amis.each do |(dist, variant, arch), amis|
     puts "## #{region} #{AMI_PREFIX} #{dist} #{variant} #{arch}"
     table = Terminal::Table.new do |t|
-      t.headings = ['AMI ID', 'Created at', 'Name']
+      t.headings = ['AMI ID', 'Created at', 'Last Launched', 'Name', 'Keep?']
       amis.each_with_index do |ami, index|
         keep = skip_most_recent && index < keep_count
-        t << [ami.image_id, ami.creation_date, ami.name, keep ? "✅" : "❌"]
+        formatted_last_launched = format_last_launched(ami.last_launched_time)
+        t << [ami.image_id, ami.creation_date, formatted_last_launched, ami.name, keep ? "✅" : "❌"]
         unless keep
           images_to_remove << Image.new(ami, region)
         end
@@ -99,10 +122,11 @@ grouped_images_to_remove = images_to_remove.group_by { |image| image.ami.name.su
 end
 
 table = Terminal::Table.new do |t|
-  t.headings = ['Region', 'AMI ID', 'Created at', 'Name']
+  t.headings = ['Region', 'AMI ID', 'Created at', 'Last Launched', 'Name']
   grouped_images_to_remove.each do |(dist, variant, arch), images|
     images.each do |image|
-      t << [image.region, image.ami.image_id, image.ami.creation_date, image.ami.name]
+      formatted_last_launched = format_last_launched(image.ami.last_launched_time)
+      t << [image.region, image.ami.image_id, image.ami.creation_date, formatted_last_launched, image.ami.name]
     end
   end
 end
@@ -126,7 +150,7 @@ if reply.downcase == 'y'
       sleep 2
 
       # Deregister the AMI
-      ec2.deregister_image({image_id: image.ami.image_id}, delete_associated_snapshots: true)
+      ec2.deregister_image(image_id: image.ami.image_id, delete_associated_snapshots: true)
     end
   end
 else
