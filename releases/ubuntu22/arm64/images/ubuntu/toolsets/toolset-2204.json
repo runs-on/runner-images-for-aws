@@ -16,7 +16,7 @@
       "platform": "linux",
       "arch": "x64",
       "versions": [
-        "22.*"
+        "24.*"
       ]
     },
     {
@@ -25,9 +25,9 @@
       "arch": "x64",
       "platform": "linux",
       "versions": [
-        "1.24.*"
+        "1.25.*"
       ],
-      "default": "1.24.*"
+      "default": "1.25.*"
     },
     {
       "name": "Ruby",
@@ -150,6 +150,7 @@
       "binutils",
       "bison",
       "brotli",
+      "libnss3-tools",
       "coreutils",
       "file",
       "findutils",
