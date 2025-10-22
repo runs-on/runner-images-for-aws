@@ -248,3 +248,8 @@ jobs:
             echo "MD5 hash mismatch"
             exit 1
           fi
+      - name: Troubleshoot
+        run: |
+          echo "Checking stepsecurity agent logs (if any)"
+          cat /home/agent/agent.log || true
+          sudo journalctl -u agent.service --since "5 minutes ago" || true
