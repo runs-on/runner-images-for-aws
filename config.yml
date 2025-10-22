@@ -61,6 +61,18 @@ images:
     source_ami_owner: 135269210855
     description: RunsOn Ubuntu24 + StepSecurity arm64
 
+  - id: ubuntu22-stepsecurity-x64
+    volume_size: 30
+    source_ami_name: runs-on-dev-ubuntu22-full-x64-*
+    source_ami_owner: 135269210855
+    description: RunsOn Ubuntu22 + StepSecurity x64
+
+  - id: ubuntu22-stepsecurity-arm64
+    volume_size: 30
+    source_ami_name: runs-on-dev-ubuntu22-full-arm64-*
+    source_ami_owner: 135269210855
+    description: RunsOn Ubuntu22 + StepSecurity arm64
+
   # Windows22
   - id: windows22-full-x64
     volume_size: 80
