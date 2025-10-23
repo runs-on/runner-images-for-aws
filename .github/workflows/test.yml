@@ -251,5 +251,6 @@ jobs:
       - name: Troubleshoot
         run: |
           echo "Checking stepsecurity agent logs (if any)"
+          cat /home/agent/agent.json || true
           cat /home/agent/agent.log || true
           sudo journalctl -u agent.service --since "5 minutes ago" || true
