@@ -7,7 +7,7 @@ on:
         type: string
         required: true
         description: 'Distribution(s) to build'
-        default: '["ubuntu24-stepsecurity-x64", "ubuntu24-stepsecurity-arm64"]'
+        default: '["ubuntu24-stepsecurity-x64", "ubuntu24-stepsecurity-arm64", "ubuntu22-stepsecurity-x64", "ubuntu22-stepsecurity-arm64"]'
   workflow_run:
     workflows: ['Linux images']
     branches: [main]
