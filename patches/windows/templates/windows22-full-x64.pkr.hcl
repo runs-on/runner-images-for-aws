@@ -331,21 +331,21 @@ build {
     restart_timeout = "30m"
   }
 
-  # provisioner "powershell" {
-  #   elevated_password = "${var.install_password}"
-  #   elevated_user     = "${var.install_user}"
-  #   environment_vars  = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-  #   scripts           = [
-  #     "${path.root}/../scripts/build/Install-VisualStudio.ps1",
-  #     "${path.root}/../scripts/build/Install-KubernetesTools.ps1"
-  #   ]
-  #   valid_exit_codes  = [0, 3010]
-  # }
+  provisioner "powershell" {
+    elevated_password = "${var.install_password}"
+    elevated_user     = "${var.install_user}"
+    environment_vars  = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
+    scripts           = [
+      "${path.root}/../scripts/build/Install-VisualStudio.ps1",
+      # "${path.root}/../scripts/build/Install-KubernetesTools.ps1"
+    ]
+    valid_exit_codes  = [0, 3010]
+  }
 
-  # provisioner "windows-restart" {
-  #   check_registry  = true
-  #   restart_timeout = "20m"
-  # }
+  provisioner "windows-restart" {
+    check_registry  = true
+    restart_timeout = "20m"
+  }
 
   provisioner "powershell" {
     pause_before     = "2m0s"
@@ -459,6 +459,10 @@ build {
     ]
   }
 
+  provisioner "powershell" {
+    inline = ["Remove-Item '${var.temp_dir}' -Recurse -Force -ErrorAction SilentlyContinue"]
+  }
+
   // provisioner "powershell" {
   //   inline = ["if (-not (Test-Path ${var.image_folder}\\tests\\testResults.xml)) { throw '${var.image_folder}\\tests\\testResults.xml not found' }"]
   // }
@@ -539,8 +543,6 @@ build {
   provisioner "powershell" {
     valid_exit_codes = [0, 2]
     inline = [
-      "Write-Output 'Removing temp directory.'",
-      "Remove-Item -Recurse -Force ${var.temp_dir}",
       "Write-Output 'Disabling Windows Recovery Environment before Sysprep.'",
       "reagentc /disable",
       # "if( Test-Path $env:SystemRoot\\System32\\Sysprep\\unattend.xml ){ rm $env:SystemRoot\\System32\\Sysprep\\unattend.xml -Force}",

@@ -54,7 +54,12 @@ FileUtils.rm_rf("integrations") && Dir.mkdir("integrations")
 {
   "runs-on/runner-images-for-stepsecurity" => "integrations/stepsecurity"
 }.each do |repo, path|
-  system("git clone git@github.com:#{repo}.git #{path}")
+  if options[:debug]
+    puts "debug mode: copying local repo #{repo} to #{path}"
+    system("cp -r ~/dev/#{repo} #{path}")
+  else
+    system("git clone git@github.com:#{repo}.git #{path}")
+  end
 end
 
 at_exit do
