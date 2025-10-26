@@ -459,6 +459,10 @@ build {
     ]
   }
 
+  provisioner "powershell" {
+    inline = ["Remove-Item '${var.temp_dir}' -Recurse -Force -ErrorAction SilentlyContinue"]
+  }
+
   // provisioner "powershell" {
   //   inline = ["if (-not (Test-Path ${var.image_folder}\\tests\\testResults.xml)) { throw '${var.image_folder}\\tests\\testResults.xml not found' }"]
   // }
@@ -539,8 +543,6 @@ build {
   provisioner "powershell" {
     valid_exit_codes = [0, 2]
     inline = [
-      "Write-Output 'Removing temp directory.'",
-      "Remove-Item -Recurse -Force ${var.temp_dir}",
       "Write-Output 'Disabling Windows Recovery Environment before Sysprep.'",
       "reagentc /disable",
       # "if( Test-Path $env:SystemRoot\\System32\\Sysprep\\unattend.xml ){ rm $env:SystemRoot\\System32\\Sysprep\\unattend.xml -Force}",

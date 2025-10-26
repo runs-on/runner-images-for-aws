@@ -112,8 +112,9 @@ source "amazon-ebs" "build_ebs" {
   ami_groups                                = ["all"]
   ebs_optimized                             = true
   # spot_instance_types                       = ["c6a.metal", "m6a.metal", "c6i.metal", "m6i.metal", "c7i.metal-24xl", "m7i.metal-24xl"]
-  spot_instance_types                       = ["c6a.xlarge", "m6a.xlarge", "c6i.xlarge", "m6i.xlarge", "c7i.xlarge", "m7i.xlarge"]
-  spot_price                                = "auto"
+  # spot_instance_types                       = ["c6a.xlarge", "m6a.xlarge", "c6i.xlarge", "m6i.xlarge", "c7i.xlarge", "m7i.xlarge"]
+  # spot_price                                = "auto"
+  instance_type                             = "m7i.xlarge"
   region                                    = "${var.region}"
   subnet_id                                 = "${var.subnet_id}"
   associate_public_ip_address               = "true"
@@ -345,9 +346,9 @@ provisioner "powershell" {
     environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
     scripts          = [
       "${path.root}/../scripts/build/Install-Wix.ps1",
-      "${path.root}/../scripts/build/Install-VSExtensions.ps1",
+      # "${path.root}/../scripts/build/Install-VSExtensions.ps1",
       "${path.root}/../scripts/build/Install-AzureCli.ps1",
-      "${path.root}/../scripts/build/Install-AzureDevOpsCli.ps1",
+      # "${path.root}/../scripts/build/Install-AzureDevOpsCli.ps1",
       "${path.root}/../scripts/build/Install-ChocolateyPackages.ps1",
       "${path.root}/../scripts/build/Install-JavaTools.ps1",
       "${path.root}/../scripts/build/Install-Kotlin.ps1",
@@ -369,43 +370,43 @@ provisioner "powershell" {
     environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
     scripts          = [
       "${path.root}/../scripts/build/Install-ActionsCache.ps1",
-      "${path.root}/../scripts/build/Install-Ruby.ps1",
-      "${path.root}/../scripts/build/Install-PyPy.ps1",
+      # "${path.root}/../scripts/build/Install-Ruby.ps1",
+      # "${path.root}/../scripts/build/Install-PyPy.ps1",
       "${path.root}/../scripts/build/Install-Toolset.ps1",
       "${path.root}/../scripts/build/Configure-Toolset.ps1",
       "${path.root}/../scripts/build/Install-NodeJS.ps1",
       # "${path.root}/../scripts/build/Install-AndroidSDK.ps1",
       "${path.root}/../scripts/build/Install-PowershellAzModules.ps1",
-      "${path.root}/../scripts/build/Install-Pipx.ps1",
+      # "${path.root}/../scripts/build/Install-Pipx.ps1",
       "${path.root}/../scripts/build/Install-Git.ps1",
       "${path.root}/../scripts/build/Install-GitHub-CLI.ps1",
-      "${path.root}/../scripts/build/Install-PHP.ps1",
-      "${path.root}/../scripts/build/Install-Rust.ps1",
+      # "${path.root}/../scripts/build/Install-PHP.ps1",
+      # "${path.root}/../scripts/build/Install-Rust.ps1",
       "${path.root}/../scripts/build/Install-Sbt.ps1",
       "${path.root}/../scripts/build/Install-Chrome.ps1",
       # "${path.root}/../scripts/build/Install-EdgeDriver.ps1",
       # "${path.root}/../scripts/build/Install-Firefox.ps1",
       # "${path.root}/../scripts/build/Install-Selenium.ps1",
       # "${path.root}/../scripts/build/Install-IEWebDriver.ps1",
-      "${path.root}/../scripts/build/Install-Apache.ps1",
-      "${path.root}/../scripts/build/Install-Nginx.ps1",
+      # "${path.root}/../scripts/build/Install-Apache.ps1",
+      # "${path.root}/../scripts/build/Install-Nginx.ps1",
       "${path.root}/../scripts/build/Install-Msys2.ps1",
       "${path.root}/../scripts/build/Install-WinAppDriver.ps1",
-      "${path.root}/../scripts/build/Install-R.ps1",
+      # "${path.root}/../scripts/build/Install-R.ps1",
       "${path.root}/../scripts/build/Install-AWSTools.ps1",
-      "${path.root}/../scripts/build/Install-DACFx.ps1",
-      "${path.root}/../scripts/build/Install-MysqlCli.ps1",
+      # "${path.root}/../scripts/build/Install-DACFx.ps1",
+      # "${path.root}/../scripts/build/Install-MysqlCli.ps1",
       "${path.root}/../scripts/build/Install-SQLPowerShellTools.ps1",
-      "${path.root}/../scripts/build/Install-SQLOLEDBDriver.ps1",
+      # "${path.root}/../scripts/build/Install-SQLOLEDBDriver.ps1",
       "${path.root}/../scripts/build/Install-DotnetSDK.ps1",
       "${path.root}/../scripts/build/Install-Mingw64.ps1",
       # "${path.root}/../scripts/build/Install-Haskell.ps1",
-      "${path.root}/../scripts/build/Install-Stack.ps1",
+      # "${path.root}/../scripts/build/Install-Stack.ps1",
       # "${path.root}/../scripts/build/Install-Miniconda.ps1",
-      "${path.root}/../scripts/build/Install-AzureCosmosDbEmulator.ps1",
+      # "${path.root}/../scripts/build/Install-AzureCosmosDbEmulator.ps1",
       "${path.root}/../scripts/build/Install-Zstd.ps1",
       "${path.root}/../scripts/build/Install-Vcpkg.ps1",
-      "${path.root}/../scripts/build/Install-Bazel.ps1",
+      # "${path.root}/../scripts/build/Install-Bazel.ps1",
       "${path.root}/../scripts/build/Install-RootCA.ps1",
       # "${path.root}/../scripts/build/Install-MongoDB.ps1",
       # "${path.root}/../scripts/build/Install-CodeQLBundle.ps1",
@@ -419,12 +420,12 @@ provisioner "powershell" {
     environment_vars  = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
     scripts           = [
       "${path.root}/../scripts/build/Install-PostgreSQL.ps1",
-      "${path.root}/../scripts/build/Install-WindowsUpdates.ps1",
+      # "${path.root}/../scripts/build/Install-WindowsUpdates.ps1", # failing for KB5007651
       "${path.root}/../scripts/build/Configure-DynamicPort.ps1",
       "${path.root}/../scripts/build/Configure-GDIProcessHandleQuota.ps1",
       "${path.root}/../scripts/build/Configure-Shell.ps1",
       "${path.root}/../scripts/build/Configure-DeveloperMode.ps1",
-      "${path.root}/../scripts/build/Install-LLVM.ps1"
+      # "${path.root}/../scripts/build/Install-LLVM.ps1"
     ]
   }
 
@@ -440,8 +441,12 @@ provisioner "powershell" {
     scripts          = [
       "${path.root}/../scripts/build/Install-WindowsUpdatesAfterReboot.ps1",
       "${path.root}/../scripts/build/Invoke-Cleanup.ps1",
-      "${path.root}/../scripts/tests/RunAll-Tests.ps1"
+      # "${path.root}/../scripts/tests/RunAll-Tests.ps1"
     ]
+  }
+
+  provisioner "powershell" {
+    inline = ["Remove-Item '${var.temp_dir}' -Recurse -Force -ErrorAction SilentlyContinue"]
   }
 
   # provisioner "powershell" {
@@ -474,21 +479,29 @@ provisioner "powershell" {
     scripts          = [
       "${path.root}/../scripts/build/Install-NativeImages.ps1",
       "${path.root}/../scripts/build/Configure-System.ps1",
-      "${path.root}/../scripts/build/Configure-User.ps1"
+      "${path.root}/../scripts/build/Configure-User.ps1",
+      # "${path.root}/../scripts/build/Post-Build-Validation.ps1"
     ]
     skip_clean       = true
   }
 
-  provisioner "windows-restart" {
-    restart_timeout = "10m"
-  }
-
+  # added: disable page file (1GiB)
   provisioner "powershell" {
     inline = [
-      "if( Test-Path $env:SystemRoot\\System32\\Sysprep\\unattend.xml ){ rm $env:SystemRoot\\System32\\Sysprep\\unattend.xml -Force}",
-      "& $env:SystemRoot\\System32\\Sysprep\\Sysprep.exe /oobe /generalize /mode:vm /quiet /quit",
-      "while($true) { $imageState = Get-ItemProperty HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup\\State | Select ImageState; if($imageState.ImageState -ne 'IMAGE_STATE_GENERALIZE_RESEAL_TO_OOBE') { Write-Output $imageState.ImageState; Start-Sleep -s 10 } else { break } }"
+      "Write-Host 'Disabling page file...'",
+      "Set-ItemProperty -Path 'HKLM:\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Memory Management' -Name PagingFiles -Value @() -Force"
     ]
   }
 
+  provisioner "windows-restart" {
+    restart_timeout = "20m"
+  }
+
+  # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/sysprep-using-ec2launchv2.html
+  provisioner "powershell" {
+    inline = [
+      "Write-Host 'Sysprepping the instance...'",
+      "Start-Process -FilePath \"$env:ProgramFiles\\amazon\\ec2launch\\ec2launch.exe\" -ArgumentList 'sysprep --shutdown=true' -Wait"
+    ]
+  }
 }

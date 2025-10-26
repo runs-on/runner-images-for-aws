@@ -13,54 +13,90 @@ if [ -z "$RELEASE_DIR" ]; then
   exit 1
 fi
 
-set -x
 release_dir="$RELEASE_DIR"
 build_dir="$release_dir/images/windows/scripts/build"
 tests_dir="$release_dir/images/windows/scripts/tests"
 toolsets_dir="$release_dir/images/windows/toolsets"
 TOOLSET_PATH="$toolsets_dir/toolset-2025.json"
 
+for file in patches/windows/files/patch-*.ps1; do
+  if [ -f "$file" ]; then
+    base_name=$(basename "$file" | sed 's/^patch-//')
+    target_file="$build_dir/$base_name"
+    if [ -f "$target_file" ]; then
+      echo "Appending $file to $target_file"
+      cat "$file" >> "$target_file"
+    else
+      echo "Error: Target file $target_file not found for patch $file"
+      exit 1
+    fi
+  fi
+done
 
 gnu_sed -i "s|Resize-Partition.*|# removed: Resize-Partition|" $build_dir/Configure-BaseImage.ps1
 gnu_sed -i 's/$outputLines\[0\].*/$outputLines | Where-Object { $_ -match "openjdk version" } | Select-Object -First 1 | Should -Match $outputPattern/' $tests_dir/Java.Tests.ps1
 
+gnu_sed -i 's|throw "Failed to warmup|# removed: throw "Failed to warmup|' $build_dir/Configure-User.ps1
+gnu_sed -i 's|throw "Failed to copy HKCU|# removed: throw "Failed to copy HKCU|' $build_dir/Configure-User.ps1
+
+# allow clobber for powershell modules already installed
+gnu_sed -i 's|Install-Module -Name|Install-Module -AllowClobber -Name|' $build_dir/Install-PowerShellModules.ps1
+
+set -x
+
+gnu_sed -i 's|Invoke-PesterTests.*|# removed: Invoke-PesterTests|' $build_dir/*.ps1
+
+# linked path not available on Windows 25
+gnu_sed -i 's|New-Item -ItemType SymbolicLink.*|# RunsOn removed: &|' $build_dir/Install-Docker.ps1
+
 # cat patches/windows/files/boot-config.ps1 >> $build_dir/Configure-System.ps1
 
 # custom stuff
-# mkdir -p $release_dir/images/windows/custom
-# cp -r patches/windows/files $release_dir/images/windows/custom/
+rm -rf $release_dir/images/windows/custom
+mkdir -p $release_dir/images/windows/custom
+cp -r patches/windows/custom $release_dir/images/windows/
 
-# Save ~3.2GB by removing default docker images
+yq -oj -i 'eval(del(.windowsFeatures[] | select(.name == "Hyper-V")))' $TOOLSET_PATH
+yq -oj -i 'eval(del(.windowsFeatures[] | select(.name == "HypervisorPlatform")))' $TOOLSET_PATH
+yq -oj -i 'eval(del(.windowsFeatures[] | select(.name == "Hyper-V-PowerShell")))' $TOOLSET_PATH
 
-if false; then
-  yq -oj -i '.docker.images = []' $TOOLSET_PATH
+yq -oj -i '.docker.images = []' $TOOLSET_PATH
 
-  # Use official runners for CodeQL
-  yq -oj -i 'del(.toolcache[] | select(.name == "CodeQL"))' $TOOLSET_PATH
+# ruby
+yq -oj -i 'eval(.toolcache[] | select(.name == "Ruby") | .versions |= [.[-1]])' $TOOLSET_PATH
+yq -oj -i 'eval(.toolcache[] | select(.name == "Ruby") | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
 
-  # only keep 4 last python version
-  yq -oj -i 'eval(.toolcache[] | select(.name == "Python") | .versions |= [.[-4],.[-3],.[-2],.[-1]])' $TOOLSET_PATH
-  # yq -oj -i 'eval(.toolcache[] | select(.name == "Python") | .versions |= [.[-1]])' $TOOLSET_PATH
 
-  # only keep one last pypy version
-  yq -oj -i 'eval(.toolcache[] | select(.name == "PyPy") | .versions |= [.[-1]])' $TOOLSET_PATH
-  # only keep one last go version
-  yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .versions |= [.[-1]])' $TOOLSET_PATH
-  yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
+# python (incorrectly duplicated in original toolset file)
+yq -oj -i 'eval(.toolcache[] | select(.name == "Python" and has("default")) | .versions |= [.[-1]])' $TOOLSET_PATH
+yq -oj -i 'eval(.toolcache[] | select(.name == "Python" and has("default")) | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
 
-  # only keep latest dotnet version
-  yq -oj -i 'eval(.dotnet | .aptPackages |= [.[-1]])' $TOOLSET_PATH
-  yq -oj -i 'eval(.dotnet | .versions |= [.[-1]])' $TOOLSET_PATH
-  # remove PSScriptAnalyzer
-  yq -oj -i 'eval(del(.powershellModules[] | select(.name == "PSScriptAnalyzer")))' $TOOLSET_PATH
+# only keep one last pypy version
+yq -oj -i 'eval(.toolcache[] | select(.name == "PyPy") | .versions |= [.[-1]])' $TOOLSET_PATH
 
-  # only keep the default java version (use action to install additional, adds 5s)
-  yq -oj -i 'eval(.java | .versions |= [(parent | .default)])' $TOOLSET_PATH
-  # only keep the default android ndk version
-  yq -oj -i 'eval(.android.ndk | .versions |= [(parent | .default)])' $TOOLSET_PATH
+# only keep one last go version
+yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .versions |= [.[-1]])' $TOOLSET_PATH
+yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
 
-  # only keep yarn
-  yq -oj -i 'del(.node_modules[] | (select(.name != "yarn" and .name != "typescript")))' $TOOLSET_PATH
+# only keep latest dotnet version
+yq -oj -i 'eval(.dotnet | .versions |= [.[-1]])' $TOOLSET_PATH
 
-  yq -oj -i 'del(.azureModules[])' $TOOLSET_PATH
-fi
+# remove PSScriptAnalyzer
+# yq -oj -i 'eval(del(.powershellModules[] | select(.name == "PSScriptAnalyzer")))' $TOOLSET_PATH
+
+# only keep the default java version (use action to install additional, adds 5s)
+yq -oj -i 'eval(.java | .versions |= [(parent | .default)])' $TOOLSET_PATH
+
+# only keep the default android ndk version
+yq -oj -i 'eval(.android.ndk | .versions |= [(parent | .default)])' $TOOLSET_PATH
+
+# only keep yarn
+yq -oj -i 'del(.npm.global_packages[] | (select(.name != "yarn" and .name != "typescript")))' $TOOLSET_PATH
+
+# if using AWS, might not need azure modules, we'll see
+yq -oj -i 'del(.azureModules[])' $TOOLSET_PATH
+
+# remove julia and others from choco (large disk space)
+yq -oj -i 'del(.choco.common_packages[] | select(.name == "julia"))' $TOOLSET_PATH
+yq -oj -i 'del(.choco.common_packages[] | select(.name == "pulumi"))' $TOOLSET_PATH
+yq -oj -i 'del(.choco.common_packages[] | select(.name == "strawberryperl"))' $TOOLSET_PATH
