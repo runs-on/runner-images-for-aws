@@ -42,9 +42,8 @@ jobs:
         run: bundle exec bin/sync
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          tag_name: ''
+          tagging_message: ""
           commit_message: "Sync from upstream"
-          tagging_message: ${{ steps.generate-release-name.outputs.release_name }}
 
   build-test-release:
     name: Build/Test/Release ${{ matrix.image_id }}
@@ -52,7 +51,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image_id: ${{ fromJSON(github.event.inputs.images || '["windows22-full-x64"]') }}
+        image_id: ${{ fromJSON(github.event.inputs.images || '["windows22-full-x64", "windows25-full-x64"]') }}
     uses: ./.github/workflows/build-test-release.yml
     secrets: inherit
     with:

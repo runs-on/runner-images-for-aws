@@ -43,7 +43,7 @@ jobs:
       - uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "Sync from upstream"
-          tagging_message: ${{ steps.generate-release-name.outputs.release_name }}
+          tagging_message: ""
 
   build-test-release:
     name: Build/Test/Release ${{ matrix.image_id }}
