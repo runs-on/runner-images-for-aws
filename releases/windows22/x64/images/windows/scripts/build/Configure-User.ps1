@@ -184,5 +184,21 @@ if ($env:INSTALL_USER) {
 }
 
 if (Get-WindowsFeature -Name Windows-Defender) {
-    Uninstall-WindowsFeature -Name Windows-Defender -Remove
-} 
+    try {
+        $result = Uninstall-WindowsFeature -Name Windows-Defender -Remove
+        if ($result.Success) {
+            Write-Host "Successfully uninstalled Windows Defender."
+            if ($result.RestartNeeded -eq 'Yes') {
+                Write-Host "A restart is required to complete the removal."
+                exit 0
+            }
+        } else {
+            Write-Warning "Failed to uninstall Windows Defender."
+        }
+    } catch {
+        Write-Warning "Failed to uninstall Windows Defender. Error: $_"
+    }
+} else {
+    Write-Host "Windows Defender is not installed. Nothing to do."
+    exit 0
+}

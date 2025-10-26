@@ -15,9 +15,9 @@
       "arch": "x64",
       "platform": "win32",
       "versions": [
-        "3.13.*"
+        "3.14.*"
       ],
-      "default": "3.13.*"
+      "default": "3.14.*"
     },
     {
       "name": "Python",
