@@ -45,8 +45,6 @@ jobs:
       FILENAME: random-file-${{ inputs.ami_id }}-${{github.run_id}}-${{github.run_attempt }}-${{ inputs.index }}
     steps:
       - uses: runs-on/action@v2
-        with:
-          show_env: true
       - name: Ensure code can be checked out
         uses: actions/checkout@v4
       - name: Docker
