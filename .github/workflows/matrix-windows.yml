@@ -7,7 +7,7 @@ on:
         type: string
         required: true
         description: 'Distribution(s) to build'
-        default: '["windows22-full-x64"]'
+        default: '["windows22-full-x64", "windows25-full-x64"]'
   schedule:
     - cron: '0 6 */15 * *'
 
