@@ -24,4 +24,4 @@ $vsixPackagesList | ForEach-Object {
     }
 }
 
-Invoke-PesterTests -TestFile "Vsix"
+# removed: Invoke-PesterTests

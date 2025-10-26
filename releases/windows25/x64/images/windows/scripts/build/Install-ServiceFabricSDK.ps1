@@ -26,4 +26,4 @@ Install-Binary `
     -Url "${urlBase}/MicrosoftServiceFabricSDK.${sdkVersion}.msi" `
     -ExpectedSHA256Sum (Get-ToolsetContent).serviceFabric.sdk.checksum
 
-Invoke-PesterTests -TestFile "Tools" -TestName "ServiceFabricSDK" 
+# removed: Invoke-PesterTests

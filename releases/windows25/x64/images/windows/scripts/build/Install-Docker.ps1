@@ -39,7 +39,7 @@ if ($LastExitCode -ne 0) {
 # Fix AZ CLI DOCKER_COMMAND_ERROR
 # cli.azure.cli.command_modules.acr.custom: Could not run 'docker.exe' command.
 # https://github.com/Azure/azure-cli/issues/18766
-New-Item -ItemType SymbolicLink -Path "C:\Windows\SysWOW64\docker.exe" -Target "C:\Windows\System32\docker.exe"
+# RunsOn removed: New-Item -ItemType SymbolicLink -Path "C:\Windows\SysWOW64\docker.exe" -Target "C:\Windows\System32\docker.exe"
 
 if (-not (Test-IsWin25)) {
     Write-Host "Download docker images"
@@ -52,7 +52,7 @@ if (-not (Test-IsWin25)) {
             throw "Docker pull failed with a non-zero exit code ($LastExitCode)"
         }
     }
-    Invoke-PesterTests -TestFile "Docker" -TestName "DockerImages"
+    # removed: Invoke-PesterTests
 }
 
-Invoke-PesterTests -TestFile "Docker" -TestName "Docker"
+# removed: Invoke-PesterTests

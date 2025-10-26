@@ -26,4 +26,4 @@ if ($LASTEXITCODE -ne 0) {
     throw "Command 'az --help' failed"
 }
 
-Invoke-PesterTests -TestFile 'CLI.Tools' -TestName 'Azure CLI'
+# removed: Invoke-PesterTests

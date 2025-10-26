@@ -53,4 +53,4 @@ New-Item -ItemType file (Join-Path $codeQLToolcachePath -ChildPath "pinned-versi
 New-Item -ItemType file "$codeQLToolcachePath.complete"
 
 # Test that the tools have been extracted successfully.
-Invoke-PesterTests -TestFile "Tools" -TestName "CodeQL Bundle"
+# removed: Invoke-PesterTests

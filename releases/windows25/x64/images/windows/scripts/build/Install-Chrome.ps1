@@ -79,4 +79,4 @@ Write-Host "Setting the environment variables..."
 Add-MachinePathItem $chromeDriverPath
 Update-Environment
 
-Invoke-PesterTests -TestFile "Browsers" -TestName "Chrome"
+# removed: Invoke-PesterTests

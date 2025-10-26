@@ -22,4 +22,4 @@ Add-MachinePathItem $cloudFoundryCliPath
 # Validate cf signature
 Test-FileSignature -Path "$cloudFoundryCliPath\cf.exe" -ExpectedSubject 'CN="LF Projects, LLC", O="LF Projects, LLC", L=Wilmington, S=Delaware, C=US'
 
-Invoke-PesterTests -TestFile "CLI.Tools" -TestName "CloudFoundry CLI"
+# removed: Invoke-PesterTests

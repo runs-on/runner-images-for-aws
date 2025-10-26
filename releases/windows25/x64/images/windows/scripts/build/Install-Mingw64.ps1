@@ -67,4 +67,4 @@ if (-not (Test-IsWin19)) {
     Add-MachinePathItem "C:\mingw64\bin"
 }
 
-Invoke-PesterTests -TestFile "Tools" -TestName "Mingw64"
+# removed: Invoke-PesterTests

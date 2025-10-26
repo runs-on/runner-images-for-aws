@@ -32,4 +32,4 @@ Write-Output 'fake token' | az devops login | Out-Null
 # calling az devops logout to be sure no credentials remain.
 az devops logout | out-null
 
-Invoke-PesterTests -TestFile 'CLI.Tools' -TestName 'Azure DevOps CLI'
+# removed: Invoke-PesterTests

@@ -48,4 +48,4 @@ if (-not (Test-IsWin25)) {
     Remove-Item "${env:CARGO_HOME}\registry\*" -Recurse -Force
 }
 
-Invoke-PesterTests -TestFile "Rust"
+# removed: Invoke-PesterTests

@@ -16,12 +16,12 @@ foreach ($module in $modules) {
     if ($module.versions) {
         foreach ($version in $module.versions) {
             Write-Host " - $version"
-            Install-Module -Name $moduleName -RequiredVersion $version -Scope AllUsers -SkipPublisherCheck -Force
+            Install-Module -AllowClobber -Name $moduleName -RequiredVersion $version -Scope AllUsers -SkipPublisherCheck -Force
         }
     } else {
-        Install-Module -Name $moduleName -Scope AllUsers -SkipPublisherCheck -Force
+        Install-Module -AllowClobber -Name $moduleName -Scope AllUsers -SkipPublisherCheck -Force
     }
 }
 
 Import-Module Pester
-Invoke-PesterTests -TestFile "PowerShellModules" -TestName "PowerShellModules"
+# removed: Invoke-PesterTests

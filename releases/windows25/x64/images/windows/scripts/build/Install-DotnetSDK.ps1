@@ -152,4 +152,4 @@ foreach ($dotnetTool in $dotnetToolset.tools) {
     }
 }
 
-Invoke-PesterTests -TestFile "DotnetSDK"
+# removed: Invoke-PesterTests

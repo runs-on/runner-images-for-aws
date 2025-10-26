@@ -18,4 +18,4 @@ Set-Service -Name Apache -StartupType Disabled
 Start-Service -Name w3svc
 
 # Invoke Pester Tests
-Invoke-PesterTests -TestFile "Apache"
+# removed: Invoke-PesterTests

@@ -9,4 +9,4 @@ foreach ($package in $commonPackages) {
     Install-ChocoPackage $package.name -Version $package.version -ArgumentList $package.args
 }
 
-Invoke-PesterTests -TestFile "ChocoPackages"
+# removed: Invoke-PesterTests

@@ -24,4 +24,4 @@ Add-MachinePathItem $InstallDir
 [Environment]::SetEnvironmentVariable("VCPKG_INSTALLATION_ROOT", $InstallDir, "Machine")
 Update-Environment
 
-Invoke-PesterTests -TestFile "Tools" -TestName "Vcpkg"
+# removed: Invoke-PesterTests

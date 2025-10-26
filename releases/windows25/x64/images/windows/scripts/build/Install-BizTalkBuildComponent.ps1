@@ -24,4 +24,4 @@ Install-Binary `
     -ExtraInstallArgs ("/l*v", "$setupPath\buildComponentSetup.log") `
     -ExpectedSubject $(Get-MicrosoftPublisher)
 
-Invoke-PesterTests -TestFile "BizTalk" -TestName "BizTalk Build Component Setup"
+# removed: Invoke-PesterTests

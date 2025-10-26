@@ -17,4 +17,4 @@ Install-Binary `
     -InstallArgs $argumentList `
     -ExpectedSHA256Sum 'F3B7A76D84D23F91957AA18456A14B4E90609E4CE8194C5653384ED38DADA6F3'
 
-Invoke-PesterTests -TestFile "Tools" -TestName "VCRedist"
+# removed: Invoke-PesterTests

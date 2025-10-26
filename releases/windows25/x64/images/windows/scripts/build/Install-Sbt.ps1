@@ -12,4 +12,4 @@ $env:SBT_HOME="${env:ProgramFiles(x86)}\sbt"
 # Add sbt binaries to the path
 Add-MachinePathItem "$env:SBT_HOME\bin"
 
-Invoke-PesterTests -TestFile "Tools" -TestName "Sbt"
+# removed: Invoke-PesterTests

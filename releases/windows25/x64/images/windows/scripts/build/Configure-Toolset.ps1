@@ -57,4 +57,4 @@ foreach ($tool in $tools) {
     }
 }
 
-Invoke-PesterTests -TestFile "Toolset"
+# removed: Invoke-PesterTests

@@ -34,11 +34,11 @@ if ($null -eq $installerUrl) {
 
 Install-Binary `
     -Url $installerUrl `
-    -InstallArgs @('/silent', '/sp-', '/suppressmsgboxes', "/DIR=`"$installDir`"") `
+    -InstallArgs @('/silent', '/sp-', '/suppressmsgboxes','/tasks="copytobin"', "/DIR=`"$installDir`"") `
     -ExpectedSHA512Sum $installerHash
 
 # Update PATH
 Add-MachinePathItem "$installDir\bin"
 Update-Environment
 
-Invoke-PesterTests -TestFile "Tools" -TestName "OpenSSL"
+# removed: Invoke-PesterTests

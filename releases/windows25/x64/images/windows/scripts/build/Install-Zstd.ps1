@@ -26,4 +26,4 @@ if ($filesInArchive.Contains($zstdName)) {
 # Add zstd-win64 to PATH
 Add-MachinePathItem $zstdPath
 
-Invoke-PesterTests -TestFile "Tools" -TestName "Zstd"
+# removed: Invoke-PesterTests

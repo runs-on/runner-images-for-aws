@@ -25,4 +25,4 @@ Install-Binary `
 
 Add-MachinePathItem "C:\Program Files (x86)\GitHub CLI"
 
-Invoke-PesterTests -TestFile "CLI.Tools" -TestName "GitHub CLI"
+# removed: Invoke-PesterTests

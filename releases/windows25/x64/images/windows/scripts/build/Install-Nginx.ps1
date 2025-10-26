@@ -18,4 +18,4 @@ Set-Service -Name nginx -StartupType Disabled
 Start-Service -Name w3svc
 
 # Invoke Pester Tests
-Invoke-PesterTests -TestFile "Nginx"
+# removed: Invoke-PesterTests

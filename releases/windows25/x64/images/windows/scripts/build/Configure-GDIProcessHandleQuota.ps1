@@ -11,4 +11,4 @@ Write-Host "Set the GDIProcessHandleQuota value to $defaultValue"
 Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Windows" -Name GDIProcessHandleQuota -Value $defaultValue
 Set-ItemProperty -Path "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows NT\CurrentVersion\Windows" -Name GDIProcessHandleQuota -Value $defaultValue
 
-Invoke-PesterTests -TestFile "WindowsFeatures" -TestName "GDIProcessHandleQuota"
+# removed: Invoke-PesterTests

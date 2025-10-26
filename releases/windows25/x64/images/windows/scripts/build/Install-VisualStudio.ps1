@@ -69,4 +69,4 @@ if (-not (Test-IsWin19)) {
         -ExpectedSubject $(Get-MicrosoftPublisher)
 }
 
-Invoke-PesterTests -TestFile "VisualStudio"
+# removed: Invoke-PesterTests

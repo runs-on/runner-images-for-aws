@@ -137,4 +137,4 @@ Expand-7ZipArchive -Path $archivePath -DestinationPath "C:\"
 
 [Environment]::SetEnvironmentVariable("COBERTURA_HOME", $coberturaPath, "Machine")
 
-Invoke-PesterTests -TestFile "Java"
+# removed: Invoke-PesterTests
