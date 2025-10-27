@@ -114,7 +114,7 @@ source "amazon-ebs" "build_ebs" {
   # spot_instance_types                       = ["c6a.metal", "m6a.metal", "c6i.metal", "m6i.metal", "c7i.metal-24xl", "m7i.metal-24xl"]
   # spot_instance_types                       = ["c6a.xlarge", "m6a.xlarge", "c6i.xlarge", "m6i.xlarge", "c7i.xlarge", "m7i.xlarge"]
   # spot_price                                = "auto"
-  instance_type                             = "m7i.xlarge"
+  instance_type                             = "m7i.large"
   region                                    = "${var.region}"
   subnet_id                                 = "${var.subnet_id}"
   associate_public_ip_address               = "true"
