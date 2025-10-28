@@ -392,7 +392,7 @@ build {
       "${path.root}/../scripts/build/Install-Git.ps1",
       "${path.root}/../scripts/build/Install-GitHub-CLI.ps1",
       # "${path.root}/../scripts/build/Install-PHP.ps1",
-      "${path.root}/../scripts/build/Install-Rust.ps1",
+      # "${path.root}/../scripts/build/Install-Rust.ps1",
       "${path.root}/../scripts/build/Install-Sbt.ps1",
       # "${path.root}/../scripts/build/Install-Chrome.ps1",
       # "${path.root}/../scripts/build/Install-EdgeDriver.ps1",
