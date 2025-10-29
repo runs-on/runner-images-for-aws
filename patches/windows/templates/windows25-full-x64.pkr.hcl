@@ -500,8 +500,18 @@ provisioner "powershell" {
   # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/sysprep-using-ec2launchv2.html
   provisioner "powershell" {
     inline = [
-      "Write-Host 'Sysprepping the instance...'",
-      "Start-Process -FilePath \"$env:ProgramFiles\\amazon\\ec2launch\\ec2launch.exe\" -ArgumentList 'sysprep --shutdown=true' -Wait"
+      "# Check Windows version and use appropriate method for re-enabling user data",
+      "$OSVersion = [System.Environment]::OSVersion.Version",
+      "if ($OSVersion.Major -eq 10 -and $OSVersion.Build -ge 20348) {",
+      "    # Windows Server 2022+ (build number 20348 or higher) - uses EC2Launch v2",
+      "    Write-Host 'Windows Server 2022+ detected, using EC2Launch v2'",
+      "    & \"C:\\Program Files\\Amazon\\EC2Launch\\EC2Launch.exe\" reset",
+      "} else {",
+      "    # Older Windows versions - uses EC2Launch v1",
+      "    Write-Host 'Windows Server pre-2022 detected, using EC2Launch v1'",
+      "    & C:\\ProgramData\\Amazon\\EC2-Windows\\Launch\\Scripts\\InitializeInstance.ps1 -Schedule",
+      "}",
+      "exit 0",
     ]
   }
 }

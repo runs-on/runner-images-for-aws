@@ -408,7 +408,7 @@ build {
       # "${path.root}/../scripts/build/Install-DACFx.ps1",
       # "${path.root}/../scripts/build/Install-MysqlCli.ps1",
       "${path.root}/../scripts/build/Install-SQLPowerShellTools.ps1",
-      "${path.root}/../scripts/build/Install-SQLOLEDBDriver.ps1",
+      # "${path.root}/../scripts/build/Install-SQLOLEDBDriver.ps1",
       "${path.root}/../scripts/build/Install-DotnetSDK.ps1",
       "${path.root}/../scripts/build/Install-Mingw64.ps1",
       # "${path.root}/../scripts/build/Install-Haskell.ps1",
