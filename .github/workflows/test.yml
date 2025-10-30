@@ -1,5 +1,5 @@
 name: Test
-run-name: Test ${{ inputs.ami_id }}
+run-name: "Test ${{ inputs.ami_id }} (${{ inputs.platform }}, ${{ inputs.extras }})"
 
 on:
   workflow_dispatch:
@@ -44,7 +44,7 @@ jobs:
   test-windows:
     if: ${{ inputs.platform == 'windows' }}
     name: Test${{ inputs.index || '1' }}
-    runs-on: runs-on=${{ github.run_id }}-${{ inputs.index }}/family=${{ inputs.instance_family || 'm7' }}/cpu=2+4/ami=${{ inputs.ami_id }}/extras=${{ inputs.extras }}
+    runs-on: runs-on=${{ github.run_id }}-${{ inputs.index }}/volume=60g/family=${{ inputs.instance_family || 'm7' }}/cpu=2+4/ami=${{ inputs.ami_id }}/extras=${{ inputs.extras }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
