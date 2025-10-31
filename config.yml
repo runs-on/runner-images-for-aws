@@ -75,14 +75,14 @@ images:
 
   # Windows22
   - id: windows22-full-x64
-    volume_size: 40
+    volume_size: 50
     source_ami_name: Windows_Server-2022-English-Full-Base-*
     source_ami_owner: 801119661308
     description: RunsOn Windows2022 x64
   
   # Windows25
   - id: windows25-full-x64
-    volume_size: 40
+    volume_size: 50
     source_ami_name: Windows_Server-2025-English-Full-Base-*
     source_ami_owner: 801119661308
     description: RunsOn Windows2025 x64
