@@ -6,16 +6,25 @@ Official images are replicated and published every 15 days.
 
 ## Supported images
 
-### Base images compatible with managed GitHub runners
+### Linux
+
+Those images are very close to 1-1 compatible with official GitHub Actions runner images. Some legacy or easily available through actions software has been removed to ensure faster boot times and lower disk usage.
 
 * `ubuntu22-full-x64`
 * `ubuntu22-full-arm64`
 * `ubuntu24-full-x64`
 * `ubuntu24-full-arm64`
 
-### GPU-optimized images
+### Windows
 
-Those use the above images as base, and include latest NVidia GPU drivers, cuda toolkit, and container toolkit.
+Those images are lacking the Hyper-V (and related tooling) framework for Windows, because virtualization on AWS is only available on bare-metal instances. Some legacy or easily available through actions software has been removed to ensure faster boot times and lower disk usage.
+
+* `windows22-full-x64`
+* `windows25-full-x64`
+
+### GPU
+
+Those use the Linux images as base, and include NVidia GPU drivers, cuda toolkit, and container toolkit, version 12.
 
 * `ubuntu22-gpu-x64`
 * `ubuntu24-gpu-x64`
