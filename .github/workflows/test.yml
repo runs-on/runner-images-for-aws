@@ -96,9 +96,6 @@ jobs:
           Write-Host "`nFile: C:\runs-on\output.log"
           Write-Host "------------------------"
           Get-Content -Path "C:\runs-on\output.log"
-          Write-Host "`nFile: C:\runs-on\error.log"
-          Write-Host "------------------------"
-          Get-Content -Path "C:\runs-on\error.log"
       - name: Check sysprep config
         run: |
           dir C:\ProgramData\Amazon\EC2Launch\config
