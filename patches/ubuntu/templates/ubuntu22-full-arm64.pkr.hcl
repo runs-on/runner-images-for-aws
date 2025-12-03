@@ -96,8 +96,9 @@ source "amazon-ebs" "build_ebs" {
   # make AMIs publicly accessible
   ami_groups                                = ["all"]
   ebs_optimized                             = true
-  spot_instance_types                       = ["r7g.large", "c7g.xlarge", "m7g.xlarge", "c7g.2xlarge", "m7g.2xlarge"]
-  spot_price                                = "1.00"
+  # spot_instance_types                       = ["r7g.large", "c7g.xlarge", "m7g.xlarge", "c7g.2xlarge", "m7g.2xlarge"]
+  # spot_price                                = "1.00"
+  instance_type                             = "m8g.large"
   region                                    = "${var.region}"
   ssh_username                              = "ubuntu"
   subnet_id                                 = "${var.subnet_id}"
