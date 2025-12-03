@@ -13,7 +13,7 @@ $fileName = Split-Path $downloadUrl -Leaf
 New-Item -Path "C:\ProgramData\runner" -ItemType Directory
 Invoke-DownloadWithRetry -Url $downloadUrl -Path "C:\ProgramData\runner\$fileName"
 
-# removed: Invoke-PesterTests
+# removed: # removed: Invoke-PesterTests
 # Patched into Install-Runner.ps1
 
 # Create runner user
