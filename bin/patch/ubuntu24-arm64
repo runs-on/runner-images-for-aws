@@ -22,6 +22,8 @@ TOOLSET_PATH="$toolsets_dir/toolset-2404.json"
 
 # override powershell install
 cp patches/ubuntu/build/install-powershell.sh "$release_dir/images/ubuntu/scripts/build/"
+# restore runner install script
+cp patches/ubuntu/build/install-runner-package.sh "$release_dir/images/ubuntu/scripts/build/"
 
 # custom stuff
 mkdir -p $custom_dir

@@ -21,6 +21,8 @@ TOOLSET_PATH="$toolsets_dir/toolset-2404.json"
 
 # add gpu install script
 cp patches/ubuntu/build/install-gpu.sh "$release_dir/images/ubuntu/scripts/build/"
+# restore runner install script
+cp patches/ubuntu/build/install-runner-package.sh "$release_dir/images/ubuntu/scripts/build/"
 
 # custom stuff
 mkdir -p $custom_dir

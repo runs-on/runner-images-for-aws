@@ -19,6 +19,9 @@ tests_dir="$release_dir/images/windows/scripts/tests"
 toolsets_dir="$release_dir/images/windows/toolsets"
 TOOLSET_PATH="$toolsets_dir/toolset-2022.json"
 
+# restore runner install script
+cp patches/windows/build/Install-Runner.ps1 "$release_dir/images/windows/scripts/build/"
+
 for file in patches/windows/files/patch-*.ps1; do
   if [ -f "$file" ]; then
     base_name=$(basename "$file" | sed 's/^patch-//')
@@ -42,6 +45,7 @@ gnu_sed -i 's|throw "Failed to copy HKCU|# removed: throw "Failed to copy HKCU|'
 # allow clobber for powershell modules already installed
 gnu_sed -i 's|Install-Module -Name|Install-Module -AllowClobber -Name|' $build_dir/Install-PowerShellModules.ps1
 
+gnu_sed -i 's/| Out-Null//' $build_dir/Install-NativeImages.ps1
 
 gnu_sed -i 's|Invoke-PesterTests.*|# removed: Invoke-PesterTests|' $build_dir/*.ps1
 
