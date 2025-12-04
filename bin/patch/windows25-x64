@@ -19,6 +19,9 @@ tests_dir="$release_dir/images/windows/scripts/tests"
 toolsets_dir="$release_dir/images/windows/toolsets"
 TOOLSET_PATH="$toolsets_dir/toolset-2025.json"
 
+# restore runner install script
+cp patches/windows/build/Install-Runner.ps1 "$release_dir/images/windows/scripts/build/"
+
 for file in patches/windows/files/patch-*.ps1; do
   if [ -f "$file" ]; then
     base_name=$(basename "$file" | sed 's/^patch-//')
