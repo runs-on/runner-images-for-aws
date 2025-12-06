@@ -296,7 +296,7 @@ provisioner "shell" {
       "${path.root}/../scripts/build/install-java-tools.sh",
       "${path.root}/../scripts/build/install-kubernetes-tools.sh",
       # "${path.root}/../scripts/build/install-miniconda.sh",
-      # "${path.root}/../scripts/build/install-mysql.sh",
+      "${path.root}/../scripts/build/install-mysql.sh",
       // "${path.root}/../scripts/build/install-nginx.sh",
       "${path.root}/../scripts/build/install-nodejs.sh",
       // "${path.root}/../scripts/build/install-bazel.sh",

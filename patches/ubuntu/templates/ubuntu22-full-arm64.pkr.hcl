@@ -272,6 +272,7 @@ build {
       "${path.root}/../scripts/build/install-github-cli.sh",
       "${path.root}/../scripts/build/install-java-tools.sh",
       "${path.root}/../scripts/build/install-kubernetes-tools.sh",
+      "${path.root}/../scripts/build/install-mysql.sh",
       "${path.root}/../scripts/build/install-nvm.sh",
       "${path.root}/../scripts/build/install-nodejs.sh",
       // this ends up in/ home/ubuntu/.cache for some reason, so not useful anyway
