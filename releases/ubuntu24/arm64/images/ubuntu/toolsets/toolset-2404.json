@@ -72,7 +72,6 @@
     "ndk": {
       "default": "27",
       "versions": [
-        "26",
         "27",
         "28",
         "29"
@@ -170,7 +169,6 @@
   },
   "brew": [],
   "docker": {
-    "images": [],
     "components": [
       {
         "package": "containerd.io",
@@ -196,7 +194,8 @@
         "version": "2.38.2",
         "asset": "linux-aarch64"
       }
-    ]
+    ],
+    "images": []
   },
   "pipx": [
     {

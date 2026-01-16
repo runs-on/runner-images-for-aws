@@ -167,7 +167,6 @@
   },
   "brew": [],
   "docker": {
-    "images": [],
     "components": [
       {
         "package": "containerd.io",
@@ -193,7 +192,8 @@
         "version": "2.38.2",
         "asset": "linux-x86_64"
       }
-    ]
+    ],
+    "images": []
   },
   "pipx": [
     {
