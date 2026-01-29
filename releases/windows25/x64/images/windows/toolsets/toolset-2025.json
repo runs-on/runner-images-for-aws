@@ -5,9 +5,9 @@
       "arch": "x64",
       "platform": "win32",
       "versions": [
-        "3.4"
+        "4.0"
       ],
-      "default": "3.4"
+      "default": "4.0"
     },
     {
       "name": "Python",
@@ -69,7 +69,10 @@
       "name": "PSWindowsUpdate"
     },
     {
-      "name": "SqlServer"
+      "name": "SqlServer",
+      "versions": [
+        "22.3.0"
+      ]
     },
     {
       "name": "VSSetup"
@@ -227,7 +230,6 @@
       "Microsoft.VisualStudio.Workload.Universal",
       "Microsoft.VisualStudio.Workload.VisualStudioExtension",
       "Component.MDD.Linux",
-      "Component.MDD.Linux.GCC.arm",
       "Component.Microsoft.Windows.DriverKit",
       "wasm.tools",
       "Microsoft.Component.MSBuild"
