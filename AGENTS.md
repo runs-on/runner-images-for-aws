@@ -6,4 +6,4 @@ Use `.github/workflows/reproductions.yml` to capture issue-specific reproduction
 
 - Create one job per issue.
 - Specify the RunsOn runner label in `runs-on`, for example:
-  - `runs-on=${{ github.run_id }}/runner=2cpu-linux-arm64` (RunsOn custom runner syntax)
+  - `runs-on=${{ github.run_id }}/runner=2cpu-linux-arm64` (RunsOn custom runner syntax; see https://runs-on.com)
