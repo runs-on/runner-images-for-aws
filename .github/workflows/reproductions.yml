@@ -3,6 +3,9 @@ name: Reproductions
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   php-ubuntu24-full-arm64:
     name: PHP 8.3/8.4 on ubuntu24-full-arm64
