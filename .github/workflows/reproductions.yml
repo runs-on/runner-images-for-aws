@@ -7,8 +7,8 @@ permissions:
   contents: read
 
 jobs:
-  php-ubuntu24-full-arm64:
-    name: PHP 8.3/8.4 on ubuntu24-full-arm64
+  php-ubuntu24-arm64:
+    name: Fast PHP installs on ubuntu24-full-arm64
     runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-arm64/image=ubuntu24-dev-arm64
     steps:
       - name: Checkout
@@ -29,3 +29,12 @@ jobs:
           php-version: "8.4"
       - name: Check PHP 8.4
         run: php -v
+
+  git-lfs-ubuntu24-arm64:
+    name: git-lfs on ubuntu24-full-arm64
+    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-arm64/image=ubuntu24-dev-arm64
+    steps:
+      - name: Check git-lfs is available
+        run: |
+          command -v git-lfs
+          git-lfs version
