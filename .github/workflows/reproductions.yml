@@ -38,3 +38,14 @@ jobs:
         run: |
           command -v git-lfs
           git-lfs version
+
+  imageos-ubuntu24-x64:
+    name: ImageOS/ImageVersion on ubuntu24-full-x64
+    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-full-x64
+    steps:
+      - name: Check ImageOS and ImageVersion env vars
+        run: |
+          echo "ImageOS=$ImageOS"
+          echo "ImageVersion=$ImageVersion"
+          test -n "$ImageOS" || (echo "ERROR: ImageOS is not set" && exit 1)
+          test -n "$ImageVersion" || (echo "ERROR: ImageVersion is not set" && exit 1)
