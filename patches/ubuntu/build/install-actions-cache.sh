@@ -30,4 +30,3 @@ archive_path=$(download_with_retry "https://api.github.com/repos/runs-on/action/
 mv "$archive_path" "$RUNS_ON_ACTION_CACHE_DIR/${runs_on_action_sha}.tar.gz"
 
 invoke_tests "ActionArchiveCache"
-
