@@ -43,6 +43,8 @@ fail "Skipping #{release_dir}, not found" unless Dir.exist?(release_dir)
 ami_name = [options[:image_prefix], image['id'], options[:image_version]].join('-')
 packer_template_relative_path = "#{dist.sub(/\d+$/, '')}/templates/#{image['id']}.pkr.hcl"
 packer_template_path = "#{release_dir}/images/#{packer_template_relative_path}"
+custom_amazon_plugin_binary = ENV.fetch('PACKER_AMAZON_PLUGIN_BINARY', '').strip
+custom_plugin_path = ""
 
 # Ensure template directory exists
 FileUtils.mkdir_p(File.dirname(packer_template_path))
@@ -67,10 +69,36 @@ at_exit do
   FileUtils.rm_rf("integrations")
 end
 
-packer_init_cmd = [
-  "packer", "init",
-  packer_template_path
-]
+if custom_amazon_plugin_binary.empty?
+  packer_init_cmd = [
+    "packer", "init", "-upgrade",
+    packer_template_path
+  ]
+else
+  fail("Custom amazon plugin binary not found: #{custom_amazon_plugin_binary}") unless File.file?(custom_amazon_plugin_binary)
+
+  custom_plugin_path = File.expand_path(
+    ".tmp/packer/plugins/#{options[:image_id]}",
+    File.expand_path("..", __dir__)
+  )
+  FileUtils.mkdir_p(custom_plugin_path)
+
+  plugin_install_cmd = [
+    "packer", "plugins", "install", "--force",
+    "--path", custom_amazon_plugin_binary,
+    "github.com/hashicorp/amazon"
+  ]
+  plugin_env = { "PACKER_PLUGIN_PATH" => custom_plugin_path }
+
+  puts "Installing custom amazon plugin from #{custom_amazon_plugin_binary}"
+  puts "Running Packer plugin install command: #{plugin_install_cmd.join(' ')}"
+  system(plugin_env, *plugin_install_cmd) or fail("Packer plugin install failed")
+
+  packer_init_cmd = [
+    "packer", "init",
+    packer_template_path
+  ]
+end
 packer_build_cmd = [
   "packer", "build",
   options[:debug] ? "-debug" : nil,
@@ -87,12 +115,22 @@ packer_build_cmd = [
   packer_template_path
 ].compact
 
+packer_init_env = { "PACKER_LOG" => "0" }
+unless custom_plugin_path.empty?
+  packer_init_env["PACKER_PLUGIN_PATH"] = custom_plugin_path
+end
+
 puts "Running Packer init command: #{packer_init_cmd.join(' ')}"
-system({ "PACKER_LOG" => "0" }, *packer_init_cmd) or fail("Packer init failed")
+system(packer_init_env, *packer_init_cmd) or fail("Packer init failed")
+
+packer_build_env = { "PROJECT_ROOT" => File.expand_path("..", __dir__) }
+unless custom_plugin_path.empty?
+  packer_build_env["PACKER_PLUGIN_PATH"] = custom_plugin_path
+end
 
 puts "Running Packer build command: #{packer_build_cmd.join(' ')}"
 
-unless system({ "PROJECT_ROOT" => File.expand_path("..", __dir__) }, *packer_build_cmd)
+unless system(packer_build_env, *packer_build_cmd)
   # Cleanup any dangling EC2 instances
   ec2_client = Aws::EC2::Client.new(region: 'us-east-1')
   instances = ec2_client.describe_instances(

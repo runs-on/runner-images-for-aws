@@ -56,4 +56,4 @@ if (Test-IsWin25) {
     }
 }
 
-# removed: # removed: Invoke-PesterTests
+# removed: Invoke-PesterTests

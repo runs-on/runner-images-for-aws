@@ -1,0 +1,236 @@
+diff --git a/builder/ebs/builder.go b/builder/ebs/builder.go
+index 15ff88d..a218727 100644
+--- a/builder/ebs/builder.go
++++ b/builder/ebs/builder.go
+@@ -231,6 +231,7 @@ func (b *Builder) Run(ctx context.Context, ui packersdk.Ui, hook packersdk.Hook)
+ 			Comm:                              &b.config.RunConfig.Comm,
+ 			Debug:                             b.config.PackerDebug,
+ 			EbsOptimized:                      b.config.EbsOptimized,
++			EnableNestedVirtualization:        b.config.EnableNestedVirtualization,
+ 			IsBurstableInstanceType:           b.config.RunConfig.IsBurstableInstanceType(),
+ 			EnableUnlimitedCredits:            b.config.EnableUnlimitedCredits,
+ 			ExpectedRootDevice:                "ebs",
+@@ -276,6 +277,7 @@ func (b *Builder) Run(ctx context.Context, ui packersdk.Ui, hook packersdk.Hook)
+ 			Debug:                             b.config.PackerDebug,
+ 			EbsOptimized:                      b.config.EbsOptimized,
+ 			EnableNitroEnclave:                b.config.EnableNitroEnclave,
++			EnableNestedVirtualization:        b.config.EnableNestedVirtualization,
+ 			IsBurstableInstanceType:           b.config.RunConfig.IsBurstableInstanceType(),
+ 			EnableUnlimitedCredits:            b.config.EnableUnlimitedCredits,
+ 			ExpectedRootDevice:                "ebs",
+diff --git a/builder/ebs/builder.hcl2spec.go b/builder/ebs/builder.hcl2spec.go
+index bcb315b..18b6e0b 100644
+--- a/builder/ebs/builder.hcl2spec.go
++++ b/builder/ebs/builder.hcl2spec.go
+@@ -73,6 +73,7 @@ type FlatConfig struct {
+ 	DisableStopInstance                       *bool                                       `mapstructure:"disable_stop_instance" required:"false" cty:"disable_stop_instance" hcl:"disable_stop_instance"`
+ 	EbsOptimized                              *bool                                       `mapstructure:"ebs_optimized" required:"false" cty:"ebs_optimized" hcl:"ebs_optimized"`
+ 	EnableNitroEnclave                        *bool                                       `mapstructure:"enable_nitro_enclave" required:"false" cty:"enable_nitro_enclave" hcl:"enable_nitro_enclave"`
++	EnableNestedVirtualization                *bool                                       `mapstructure:"enable_nested_virtualization" required:"false" cty:"enable_nested_virtualization" hcl:"enable_nested_virtualization"`
+ 	EnableT2Unlimited                         *bool                                       `mapstructure:"enable_t2_unlimited" required:"false" cty:"enable_t2_unlimited" hcl:"enable_t2_unlimited"`
+ 	EnableUnlimitedCredits                    *bool                                       `mapstructure:"enable_unlimited_credits" required:"false" cty:"enable_unlimited_credits" hcl:"enable_unlimited_credits"`
+ 	IamInstanceProfile                        *string                                     `mapstructure:"iam_instance_profile" required:"false" cty:"iam_instance_profile" hcl:"iam_instance_profile"`
+@@ -243,6 +244,7 @@ func (*FlatConfig) HCL2Spec() map[string]hcldec.Spec {
+ 		"disable_stop_instance":           &hcldec.AttrSpec{Name: "disable_stop_instance", Type: cty.Bool, Required: false},
+ 		"ebs_optimized":                   &hcldec.AttrSpec{Name: "ebs_optimized", Type: cty.Bool, Required: false},
+ 		"enable_nitro_enclave":            &hcldec.AttrSpec{Name: "enable_nitro_enclave", Type: cty.Bool, Required: false},
++		"enable_nested_virtualization":    &hcldec.AttrSpec{Name: "enable_nested_virtualization", Type: cty.Bool, Required: false},
+ 		"enable_t2_unlimited":             &hcldec.AttrSpec{Name: "enable_t2_unlimited", Type: cty.Bool, Required: false},
+ 		"enable_unlimited_credits":        &hcldec.AttrSpec{Name: "enable_unlimited_credits", Type: cty.Bool, Required: false},
+ 		"iam_instance_profile":            &hcldec.AttrSpec{Name: "iam_instance_profile", Type: cty.String, Required: false},
+diff --git a/builder/ebssurrogate/builder.go b/builder/ebssurrogate/builder.go
+index aed268b..d9b03e4 100644
+--- a/builder/ebssurrogate/builder.go
++++ b/builder/ebssurrogate/builder.go
+@@ -269,6 +269,7 @@ func (b *Builder) Run(ctx context.Context, ui packersdk.Ui, hook packersdk.Hook)
+ 			Comm:                              &b.config.RunConfig.Comm,
+ 			Debug:                             b.config.PackerDebug,
+ 			EbsOptimized:                      b.config.EbsOptimized,
++			EnableNestedVirtualization:        b.config.EnableNestedVirtualization,
+ 			IsBurstableInstanceType:           b.config.RunConfig.IsBurstableInstanceType(),
+ 			EnableUnlimitedCredits:            b.config.EnableUnlimitedCredits,
+ 			ExpectedRootDevice:                "ebs",
+@@ -313,6 +314,7 @@ func (b *Builder) Run(ctx context.Context, ui packersdk.Ui, hook packersdk.Hook)
+ 			Debug:                             b.config.PackerDebug,
+ 			EbsOptimized:                      b.config.EbsOptimized,
+ 			EnableNitroEnclave:                b.config.EnableNitroEnclave,
++			EnableNestedVirtualization:        b.config.EnableNestedVirtualization,
+ 			IsBurstableInstanceType:           b.config.IsBurstableInstanceType(),
+ 			EnableUnlimitedCredits:            b.config.EnableUnlimitedCredits,
+ 			ExpectedRootDevice:                "ebs",
+diff --git a/builder/ebssurrogate/builder.hcl2spec.go b/builder/ebssurrogate/builder.hcl2spec.go
+index 86eaafa..dfff492 100644
+--- a/builder/ebssurrogate/builder.hcl2spec.go
++++ b/builder/ebssurrogate/builder.hcl2spec.go
+@@ -90,6 +90,7 @@ type FlatConfig struct {
+ 	DisableStopInstance                       *bool                                       `mapstructure:"disable_stop_instance" required:"false" cty:"disable_stop_instance" hcl:"disable_stop_instance"`
+ 	EbsOptimized                              *bool                                       `mapstructure:"ebs_optimized" required:"false" cty:"ebs_optimized" hcl:"ebs_optimized"`
+ 	EnableNitroEnclave                        *bool                                       `mapstructure:"enable_nitro_enclave" required:"false" cty:"enable_nitro_enclave" hcl:"enable_nitro_enclave"`
++	EnableNestedVirtualization                *bool                                       `mapstructure:"enable_nested_virtualization" required:"false" cty:"enable_nested_virtualization" hcl:"enable_nested_virtualization"`
+ 	EnableT2Unlimited                         *bool                                       `mapstructure:"enable_t2_unlimited" required:"false" cty:"enable_t2_unlimited" hcl:"enable_t2_unlimited"`
+ 	EnableUnlimitedCredits                    *bool                                       `mapstructure:"enable_unlimited_credits" required:"false" cty:"enable_unlimited_credits" hcl:"enable_unlimited_credits"`
+ 	IamInstanceProfile                        *string                                     `mapstructure:"iam_instance_profile" required:"false" cty:"iam_instance_profile" hcl:"iam_instance_profile"`
+@@ -264,6 +265,7 @@ func (*FlatConfig) HCL2Spec() map[string]hcldec.Spec {
+ 		"disable_stop_instance":           &hcldec.AttrSpec{Name: "disable_stop_instance", Type: cty.Bool, Required: false},
+ 		"ebs_optimized":                   &hcldec.AttrSpec{Name: "ebs_optimized", Type: cty.Bool, Required: false},
+ 		"enable_nitro_enclave":            &hcldec.AttrSpec{Name: "enable_nitro_enclave", Type: cty.Bool, Required: false},
++		"enable_nested_virtualization":    &hcldec.AttrSpec{Name: "enable_nested_virtualization", Type: cty.Bool, Required: false},
+ 		"enable_t2_unlimited":             &hcldec.AttrSpec{Name: "enable_t2_unlimited", Type: cty.Bool, Required: false},
+ 		"enable_unlimited_credits":        &hcldec.AttrSpec{Name: "enable_unlimited_credits", Type: cty.Bool, Required: false},
+ 		"iam_instance_profile":            &hcldec.AttrSpec{Name: "iam_instance_profile", Type: cty.String, Required: false},
+diff --git a/builder/ebsvolume/builder.go b/builder/ebsvolume/builder.go
+index 5e195c1..3ea8208 100644
+--- a/builder/ebsvolume/builder.go
++++ b/builder/ebsvolume/builder.go
+@@ -215,6 +215,7 @@ func (b *Builder) Run(ctx context.Context, ui packersdk.Ui, hook packersdk.Hook)
+ 			Ctx:                               b.config.ctx,
+ 			Debug:                             b.config.PackerDebug,
+ 			EbsOptimized:                      b.config.EbsOptimized,
++			EnableNestedVirtualization:        b.config.EnableNestedVirtualization,
+ 			ExpectedRootDevice:                "ebs",
+ 			IsBurstableInstanceType:           b.config.RunConfig.IsBurstableInstanceType(),
+ 			EnableUnlimitedCredits:            b.config.EnableUnlimitedCredits,
+@@ -259,6 +260,7 @@ func (b *Builder) Run(ctx context.Context, ui packersdk.Ui, hook packersdk.Hook)
+ 			Debug:                             b.config.PackerDebug,
+ 			EbsOptimized:                      b.config.EbsOptimized,
+ 			EnableNitroEnclave:                b.config.EnableNitroEnclave,
++			EnableNestedVirtualization:        b.config.EnableNestedVirtualization,
+ 			IsBurstableInstanceType:           b.config.RunConfig.IsBurstableInstanceType(),
+ 			EnableUnlimitedCredits:            b.config.EnableUnlimitedCredits,
+ 			ExpectedRootDevice:                "ebs",
+diff --git a/builder/ebsvolume/builder.hcl2spec.go b/builder/ebsvolume/builder.hcl2spec.go
+index f208ddb..01dd920 100644
+--- a/builder/ebsvolume/builder.hcl2spec.go
++++ b/builder/ebsvolume/builder.hcl2spec.go
+@@ -104,6 +104,7 @@ type FlatConfig struct {
+ 	DisableStopInstance                       *bool                                  `mapstructure:"disable_stop_instance" required:"false" cty:"disable_stop_instance" hcl:"disable_stop_instance"`
+ 	EbsOptimized                              *bool                                  `mapstructure:"ebs_optimized" required:"false" cty:"ebs_optimized" hcl:"ebs_optimized"`
+ 	EnableNitroEnclave                        *bool                                  `mapstructure:"enable_nitro_enclave" required:"false" cty:"enable_nitro_enclave" hcl:"enable_nitro_enclave"`
++	EnableNestedVirtualization                *bool                                  `mapstructure:"enable_nested_virtualization" required:"false" cty:"enable_nested_virtualization" hcl:"enable_nested_virtualization"`
+ 	EnableT2Unlimited                         *bool                                  `mapstructure:"enable_t2_unlimited" required:"false" cty:"enable_t2_unlimited" hcl:"enable_t2_unlimited"`
+ 	EnableUnlimitedCredits                    *bool                                  `mapstructure:"enable_unlimited_credits" required:"false" cty:"enable_unlimited_credits" hcl:"enable_unlimited_credits"`
+ 	IamInstanceProfile                        *string                                `mapstructure:"iam_instance_profile" required:"false" cty:"iam_instance_profile" hcl:"iam_instance_profile"`
+@@ -243,6 +244,7 @@ func (*FlatConfig) HCL2Spec() map[string]hcldec.Spec {
+ 		"disable_stop_instance":           &hcldec.AttrSpec{Name: "disable_stop_instance", Type: cty.Bool, Required: false},
+ 		"ebs_optimized":                   &hcldec.AttrSpec{Name: "ebs_optimized", Type: cty.Bool, Required: false},
+ 		"enable_nitro_enclave":            &hcldec.AttrSpec{Name: "enable_nitro_enclave", Type: cty.Bool, Required: false},
++		"enable_nested_virtualization":    &hcldec.AttrSpec{Name: "enable_nested_virtualization", Type: cty.Bool, Required: false},
+ 		"enable_t2_unlimited":             &hcldec.AttrSpec{Name: "enable_t2_unlimited", Type: cty.Bool, Required: false},
+ 		"enable_unlimited_credits":        &hcldec.AttrSpec{Name: "enable_unlimited_credits", Type: cty.Bool, Required: false},
+ 		"iam_instance_profile":            &hcldec.AttrSpec{Name: "iam_instance_profile", Type: cty.String, Required: false},
+diff --git a/common/run_config.go b/common/run_config.go
+index d35eb35..e705e14 100644
+--- a/common/run_config.go
++++ b/common/run_config.go
+@@ -186,6 +186,9 @@ type RunConfig struct {
+ 	// be able to [support Nitro Enclaves](https://aws.amazon.com/ec2/nitro/nitro-enclaves/faqs/).
+ 	// This option is not supported for spot instances.
+ 	EnableNitroEnclave bool `mapstructure:"enable_nitro_enclave" required:"false"`
++	// Enable support for EC2 nested virtualization on supported instance families.
++	// This controls the EC2 CPU option `nestedVirtualization` at instance launch.
++	EnableNestedVirtualization bool `mapstructure:"enable_nested_virtualization" required:"false"`
+ 	// Deprecated argument - please use "enable_unlimited_credits".
+ 	// Enabling T2 Unlimited allows the source instance to burst additional CPU
+ 	// beyond its available [CPU
+diff --git a/common/run_config_test.go b/common/run_config_test.go
+index c9a74ca..15b8355 100644
+--- a/common/run_config_test.go
++++ b/common/run_config_test.go
+@@ -392,6 +392,16 @@ func TestRunConfigPrepare_EnableNitroEnclaveGood(t *testing.T) {
+ 	}
+ }
+ 
++func TestRunConfigPrepare_EnableNestedVirtualizationGood(t *testing.T) {
++	c := testConfig()
++	c.InstanceType = "m8i.large"
++	c.EnableNestedVirtualization = true
++	err := c.Prepare(nil)
++	if len(err) != 0 {
++		t.Fatalf("Should not error with valid nested virtualization config")
++	}
++}
++
+ func TestRunConfigPrepare_FailIfBothHostIDAndGroupSpecified(t *testing.T) {
+ 	c := testConfig()
+ 	c.Placement.HostId = "host"
+diff --git a/common/step_run_source_instance.go b/common/step_run_source_instance.go
+index 839a8ac..62cfb14 100644
+--- a/common/step_run_source_instance.go
++++ b/common/step_run_source_instance.go
+@@ -56,6 +56,7 @@ type StepRunSourceInstance struct {
+ 	VolumeTags                        map[string]string
+ 	NoEphemeral                       bool
+ 	EnableNitroEnclave                bool
++	EnableNestedVirtualization        bool
+ 	IsBurstableInstanceType           bool
+ 
+ 	instanceId string
+@@ -166,6 +167,12 @@ func (s *StepRunSourceInstance) Run(ctx context.Context, state multistep.StateBa
+ 		runOpts.CreditSpecification = &ec2types.CreditSpecificationRequest{CpuCredits: aws.String(CPUCreditsUnlimited)}
+ 	}
+ 
++	if s.EnableNestedVirtualization {
++		runOpts.CpuOptions = &ec2types.CpuOptionsRequest{
++			NestedVirtualization: ec2types.NestedVirtualizationSpecificationEnabled,
++		}
++	}
++
+ 	if s.HttpEndpoint == "enabled" {
+ 		runOpts.MetadataOptions = &ec2types.InstanceMetadataOptionsRequest{
+ 			HttpEndpoint:            ec2types.InstanceMetadataEndpointState(s.HttpEndpoint),
+diff --git a/common/step_run_spot_instance.go b/common/step_run_spot_instance.go
+index 38dd2a2..cd2a412 100644
+--- a/common/step_run_spot_instance.go
++++ b/common/step_run_spot_instance.go
+@@ -61,6 +61,7 @@ type StepRunSpotInstance struct {
+ 	NoEphemeral                       bool
+ 	IsBurstableInstanceType           bool
+ 	EnableUnlimitedCredits            bool
++	EnableNestedVirtualization        bool
+ 
+ 	instanceId string
+ }
+@@ -171,6 +172,12 @@ func (s *StepRunSpotInstance) CreateTemplateData(userData *string, az string,
+ 			CPUCreditsUnlimited)}
+ 	}
+ 
++	if s.EnableNestedVirtualization {
++		templateData.CpuOptions = &ec2types.LaunchTemplateCpuOptionsRequest{
++			NestedVirtualization: ec2types.NestedVirtualizationSpecificationEnabled,
++		}
++	}
++
+ 	if s.HttpEndpoint == "enabled" {
+ 		templateData.MetadataOptions = &ec2types.LaunchTemplateInstanceMetadataOptionsRequest{
+ 			HttpEndpoint:            ec2types.LaunchTemplateInstanceMetadataEndpointState(s.HttpEndpoint),
+diff --git a/common/step_run_spot_instance_test.go b/common/step_run_spot_instance_test.go
+index 3b9bd5d..43f9546 100644
+--- a/common/step_run_spot_instance_test.go
++++ b/common/step_run_spot_instance_test.go
+@@ -147,6 +147,26 @@ func TestCreateTemplateData_NoEphemeral(t *testing.T) {
+ 	// }
+ }
+ 
++func TestCreateTemplateData_EnableNestedVirtualization(t *testing.T) {
++	state := tStateSpot()
++	stepRunSpotInstance := getBasicStep()
++	stepRunSpotInstance.EnableNestedVirtualization = true
++	template := stepRunSpotInstance.CreateTemplateData(
++		aws.String("userdata"),
++		"az",
++		state,
++		&ec2types.LaunchTemplateInstanceMarketOptionsRequest{},
++	)
++
++	if template.CpuOptions == nil {
++		t.Fatalf("expected launch template CPU options to be set")
++	}
++
++	if template.CpuOptions.NestedVirtualization != ec2types.NestedVirtualizationSpecificationEnabled {
++		t.Fatalf("expected nested virtualization to be enabled, got %q", template.CpuOptions.NestedVirtualization)
++	}
++}
++
+ type runSpotEC2ConnMock struct {
+ 	//ec2iface.EC2API
+ 	clients.Ec2Client

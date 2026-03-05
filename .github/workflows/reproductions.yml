@@ -49,3 +49,47 @@ jobs:
           echo "ImageVersion=$ImageVersion"
           test -n "$ImageOS" || (echo "ERROR: ImageOS is not set" && exit 1)
           test -n "$ImageVersion" || (echo "ERROR: ImageVersion is not set" && exit 1)
+
+  issue-19-windows25-hyperv-vs-cpp:
+    name: issue-19 windows25 Hyper-V + VS + C++
+    runs-on: runs-on=${{ github.run_id }}/image=windows25-full-x64/family=m8i
+    steps:
+      - name: Check Visual Studio install
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found at $vswhere" }
+          $installPath = (& $vswhere -latest -products * -property installationPath | Select-Object -First 1).Trim()
+          if (-not $installPath) { throw "Visual Studio installation path not found" }
+          $devenv = Join-Path $installPath "Common7\IDE\devenv.exe"
+          if (-not (Test-Path $devenv)) { throw "devenv.exe not found at $devenv" }
+          Write-Host "Visual Studio installation path: $installPath"
+
+      - name: Check C++ toolchain (cl.exe)
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $installPath = (& $vswhere -latest -products * -property installationPath | Select-Object -First 1).Trim()
+          if (-not $installPath) { throw "Visual Studio installation path not found" }
+          $vsDevCmd = Join-Path $installPath "Common7\Tools\VsDevCmd.bat"
+          if (-not (Test-Path $vsDevCmd)) { throw "VsDevCmd.bat not found at $vsDevCmd" }
+          cmd.exe /c "\"$vsDevCmd\" -arch=x64 >nul && where cl"
+          if ($LASTEXITCODE -ne 0) { throw "cl.exe not found from VS developer command prompt" }
+
+      - name: Check Hyper-V feature states
+        shell: pwsh
+        run: |
+          $serverFeatures = @("Hyper-V", "Hyper-V-PowerShell")
+          foreach ($feature in $serverFeatures) {
+            $state = (Get-WindowsFeature -Name $feature).InstallState
+            Write-Host "$feature=$state"
+            if ($state -ne "Installed") { throw "$feature is not Installed" }
+          }
+          $optionalState = (Get-WindowsOptionalFeature -Online -FeatureName "HypervisorPlatform").State
+          Write-Host "HypervisorPlatform=$optionalState"
+          if ($optionalState -ne "Enabled") { throw "HypervisorPlatform is not Enabled" }
+
+      - name: Hyper-V diagnostics (systeminfo)
+        shell: pwsh
+        run: |
+          systeminfo

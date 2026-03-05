@@ -37,6 +37,21 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.PRIVATE_KEY_FOR_INTEGRATIONS }}
       - run: git log --oneline -n 1
+      - name: Setup Packer
+        uses: hashicorp/setup-packer@v3
+        with:
+          version: 1.15.0
+      - name: Setup Go (windows25 custom plugin)
+        if: ${{ inputs.image_id == 'windows25-full-x64' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.25.1
+      - name: Build patched amazon plugin (windows25)
+        if: ${{ inputs.image_id == 'windows25-full-x64' }}
+        id: patched_amazon_plugin
+        run: |
+          plugin_binary="$(./scripts/build-patched-packer-plugin-amazon.sh)"
+          echo "plugin_binary=$plugin_binary" >> "$GITHUB_OUTPUT"
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: 3.2.2
@@ -50,3 +65,5 @@ jobs:
       - run: bundle exec bin/build --image-id ${{ inputs.image_id }}
         id: build
         timeout-minutes: 180
+        env:
+          PACKER_AMAZON_PLUGIN_BINARY: ${{ steps.patched_amazon_plugin.outputs.plugin_binary }}

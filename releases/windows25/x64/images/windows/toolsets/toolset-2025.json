@@ -147,6 +147,17 @@
       "includeAllSubFeatures": true
     },
     {
+      "name": "Hyper-V",
+      "includeAllSubFeatures": true
+    },
+    {
+      "name": "HypervisorPlatform",
+      "optionalFeature": true
+    },
+    {
+      "name": "Hyper-V-PowerShell"
+    },
+    {
       "name": "Wireless-Networking"
     }
   ],
@@ -159,7 +170,6 @@
     "workloads": [
       "Component.Dotfuscator",
       "Component.Linux.CMake",
-      "Component.UnityEngine.x64",
       "Microsoft.Component.VC.Runtime.UCRTSDK",
       "Microsoft.Net.Component.4.8.1.SDK",
       "Microsoft.Net.Component.4.8.1.TargetingPack",
@@ -175,8 +185,6 @@
       "Microsoft.VisualStudio.Component.TeamOffice",
       "Microsoft.VisualStudio.Component.TestTools.CodedUITest",
       "Microsoft.VisualStudio.Component.TestTools.WebLoadTest",
-      "Microsoft.VisualStudio.Component.UWP.VC.ARM64",
-      "Microsoft.VisualStudio.Component.UWP.VC.ARM64EC",
       "Microsoft.VisualStudio.Component.VC.CLI.Support",
       "Microsoft.VisualStudio.Component.VC.CMake.Project",
       "Microsoft.VisualStudio.Component.VC.DiagnosticTools",
@@ -212,22 +220,17 @@
       "Microsoft.VisualStudio.ComponentGroup.Azure.CloudServices",
       "Microsoft.VisualStudio.ComponentGroup.Azure.ResourceManager.Tools",
       "Microsoft.VisualStudio.ComponentGroup.NativeDesktop.Llvm.Clang",
-      "Microsoft.VisualStudio.ComponentGroup.UWP.VC.v142",
       "Microsoft.VisualStudio.ComponentGroup.Web.CloudTools",
       "Microsoft.VisualStudio.Workload.Azure",
       "Microsoft.VisualStudio.Workload.Data",
       "Microsoft.VisualStudio.Workload.ManagedDesktop",
-      "Microsoft.VisualStudio.Workload.ManagedGame",
       "Microsoft.VisualStudio.Workload.NativeCrossPlat",
       "Microsoft.VisualStudio.Workload.NativeDesktop",
-      "Microsoft.VisualStudio.Workload.NativeGame",
-      "Microsoft.VisualStudio.Workload.NativeMobile",
       "Microsoft.VisualStudio.Workload.NetCrossPlat",
       "Microsoft.VisualStudio.Workload.NetWeb",
       "Microsoft.VisualStudio.Workload.Node",
       "Microsoft.VisualStudio.Workload.Office",
       "Microsoft.VisualStudio.Workload.Python",
-      "Microsoft.VisualStudio.Workload.Universal",
       "Microsoft.VisualStudio.Workload.VisualStudioExtension",
       "Component.MDD.Linux",
       "Component.Microsoft.Windows.DriverKit",

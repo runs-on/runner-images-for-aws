@@ -2,7 +2,7 @@ packer {
   required_plugins {
     amazon = {
       source  = "github.com/hashicorp/amazon"
-      version = "~> 1"
+      version = ">= 1.8.0, < 2.0.0"
     }
   }
 }
@@ -111,10 +111,11 @@ source "amazon-ebs" "build_ebs" {
   # make AMIs publicly accessible
   ami_groups                                = ["all"]
   ebs_optimized                             = true
+  enable_nested_virtualization              = true
   # spot_instance_types                       = ["c6a.metal", "m6a.metal", "c6i.metal", "m6i.metal", "c7i.metal-24xl", "m7i.metal-24xl"]
   # spot_instance_types                       = ["c6a.xlarge", "m6a.xlarge", "c6i.xlarge", "m6i.xlarge", "c7i.xlarge", "m7i.xlarge"]
   # spot_price                                = "auto"
-  instance_type                             = "m7i.large"
+  instance_type                             = "m8i.4xlarge"
   region                                    = "${var.region}"
   subnet_id                                 = "${var.subnet_id}"
   associate_public_ip_address               = "true"
@@ -325,45 +326,44 @@ provisioner "powershell" {
     restart_timeout = "30m"
   }
 
-  # provisioner "powershell" {
-  #   elevated_password = "${var.install_password}"
-  #   elevated_user     = "${var.install_user}"
-  #   environment_vars  = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-  #   scripts           = [
-  #     "${path.root}/../scripts/build/Install-VisualStudio.ps1",
-  #     "${path.root}/../scripts/build/Install-KubernetesTools.ps1"
-  #   ]
-  #   valid_exit_codes  = [0, 3010]
-  # }
+  provisioner "powershell" {
+    elevated_password = "${var.install_password}"
+    elevated_user     = "${var.install_user}"
+    environment_vars  = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
+    scripts           = [
+      "${path.root}/../scripts/build/Install-VisualStudio.ps1"
+    ]
+    valid_exit_codes  = [0, 3010]
+  }
 
-  # provisioner "windows-restart" {
-  #   check_registry  = true
-  #   restart_timeout = "10m"
-  # }
+  provisioner "windows-restart" {
+    check_registry  = true
+    restart_timeout = "10m"
+  }
 
   provisioner "powershell" {
     pause_before     = "2m0s"
     environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
     scripts          = [
-      "${path.root}/../scripts/build/Install-Wix.ps1",
-      # "${path.root}/../scripts/build/Install-VSExtensions.ps1",
-      "${path.root}/../scripts/build/Install-AzureCli.ps1",
-      # "${path.root}/../scripts/build/Install-AzureDevOpsCli.ps1",
-      "${path.root}/../scripts/build/Install-ChocolateyPackages.ps1",
-      "${path.root}/../scripts/build/Install-JavaTools.ps1",
-      "${path.root}/../scripts/build/Install-Kotlin.ps1",
-      "${path.root}/../scripts/build/Install-OpenSSL.ps1"
+      "${path.root}/../scripts/build/Install-Wix.ps1"
     ]
   }
 
-  provisioner "powershell" {
-    execution_policy = "remotesigned"
-    environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts          = ["${path.root}/../scripts/build/Install-ServiceFabricSDK.ps1"]
+  provisioner "windows-restart" {
+    check_registry  = true
+    restart_timeout = "30m"
   }
 
-  provisioner "windows-restart" {
-    restart_timeout = "10m"
+  provisioner "powershell" {
+    pause_before     = "2m0s"
+    environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
+    scripts          = [
+      "${path.root}/../scripts/build/Install-VSExtensions.ps1",
+      "${path.root}/../scripts/build/Install-AzureCli.ps1",
+      # "${path.root}/../scripts/build/Install-AzureDevOpsCli.ps1",
+      "${path.root}/../scripts/build/Install-ChocolateyPackages.ps1",
+      "${path.root}/../scripts/build/Install-OpenSSL.ps1"
+    ]
   }
 
   provisioner "powershell" {
@@ -381,7 +381,6 @@ provisioner "powershell" {
       "${path.root}/../scripts/build/Install-Git.ps1",
       "${path.root}/../scripts/build/Install-GitHub-CLI.ps1",
       # "${path.root}/../scripts/build/Install-PHP.ps1",
-      "${path.root}/../scripts/build/Install-Rust.ps1",
       "${path.root}/../scripts/build/Install-Sbt.ps1",
       "${path.root}/../scripts/build/Install-Chrome.ps1",
       # "${path.root}/../scripts/build/Install-EdgeDriver.ps1",
@@ -390,7 +389,6 @@ provisioner "powershell" {
       # "${path.root}/../scripts/build/Install-IEWebDriver.ps1",
       # "${path.root}/../scripts/build/Install-Apache.ps1",
       # "${path.root}/../scripts/build/Install-Nginx.ps1",
-      "${path.root}/../scripts/build/Install-Msys2.ps1",
       "${path.root}/../scripts/build/Install-WinAppDriver.ps1",
       # "${path.root}/../scripts/build/Install-R.ps1",
       "${path.root}/../scripts/build/Install-AWSTools.ps1",
@@ -399,7 +397,6 @@ provisioner "powershell" {
       "${path.root}/../scripts/build/Install-SQLPowerShellTools.ps1",
       # "${path.root}/../scripts/build/Install-SQLOLEDBDriver.ps1",
       "${path.root}/../scripts/build/Install-DotnetSDK.ps1",
-      "${path.root}/../scripts/build/Install-Mingw64.ps1",
       # "${path.root}/../scripts/build/Install-Haskell.ps1",
       # "${path.root}/../scripts/build/Install-Stack.ps1",
       # "${path.root}/../scripts/build/Install-Miniconda.ps1",

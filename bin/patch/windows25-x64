@@ -19,8 +19,10 @@ tests_dir="$release_dir/images/windows/scripts/tests"
 toolsets_dir="$release_dir/images/windows/toolsets"
 TOOLSET_PATH="$toolsets_dir/toolset-2025.json"
 
-# restore runner install script
+# restore patched build scripts
 cp patches/windows/build/Install-Runner.ps1 "$release_dir/images/windows/scripts/build/"
+cp patches/windows/build/Install-NativeImages.ps1 "$release_dir/images/windows/scripts/build/"
+cp patches/windows/build/Install-VisualStudio.ps1 "$release_dir/images/windows/scripts/build/"
 
 for file in patches/windows/files/patch-*.ps1; do
   if [ -f "$file" ]; then
@@ -45,6 +47,14 @@ gnu_sed -i 's|throw "Failed to copy HKCU|# removed: throw "Failed to copy HKCU|'
 # allow clobber for powershell modules already installed
 gnu_sed -i 's|Install-Module -Name|Install-Module -AllowClobber -Name|' $build_dir/Install-PowerShellModules.ps1
 
+# guard manifest cleanup in dotnet install script to avoid failing on missing manifest paths
+gnu_sed -i '/Remove-Item -Path "\$sdkManifestPath\\\$($_.BaseName)" -Recurse -Force | Out-Null/c\
+            if (Test-Path -Path "$sdkManifestPath\\$($_.BaseName)") { Remove-Item -Path "$sdkManifestPath\\$($_.BaseName)" -Recurse -Force | Out-Null }' $build_dir/Install-DotnetSDK.ps1
+
+# preserve temp directories during cleanup; removing them breaks later packer/powershell temp scripts
+gnu_sed -i 's|"$env:SystemRoot\\Temp",|# RunsOn preserved: "$env:SystemRoot\\Temp",|' $build_dir/Invoke-Cleanup.ps1
+gnu_sed -i 's|"$env:TEMP",|# RunsOn preserved: "$env:TEMP",|' $build_dir/Invoke-Cleanup.ps1
+
 set -x
 
 gnu_sed -i 's|Invoke-PesterTests.*|# removed: Invoke-PesterTests|' $build_dir/*.ps1
@@ -58,10 +68,6 @@ gnu_sed -i 's|New-Item -ItemType SymbolicLink.*|# RunsOn removed: &|' $build_dir
 rm -rf $release_dir/images/windows/custom
 mkdir -p $release_dir/images/windows/custom
 cp -r patches/windows/custom $release_dir/images/windows/
-
-yq -oj -i 'eval(del(.windowsFeatures[] | select(.name == "Hyper-V")))' $TOOLSET_PATH
-yq -oj -i 'eval(del(.windowsFeatures[] | select(.name == "HypervisorPlatform")))' $TOOLSET_PATH
-yq -oj -i 'eval(del(.windowsFeatures[] | select(.name == "Hyper-V-PowerShell")))' $TOOLSET_PATH
 
 yq -oj -i '.docker.images = []' $TOOLSET_PATH
 
@@ -92,6 +98,16 @@ yq -oj -i 'eval(.java | .versions |= [(parent | .default)])' $TOOLSET_PATH
 
 # only keep the default android ndk version
 yq -oj -i 'eval(.android.ndk | .versions |= [(parent | .default)])' $TOOLSET_PATH
+
+# lean Visual Studio profile for Windows 2025: remove Android/mobile/game/UWP-heavy workloads
+yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Component.UnityEngine.x64"))' $TOOLSET_PATH
+yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Component.UWP.VC.ARM64"))' $TOOLSET_PATH
+yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Component.UWP.VC.ARM64EC"))' $TOOLSET_PATH
+yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.ComponentGroup.UWP.VC.v142"))' $TOOLSET_PATH
+yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Workload.ManagedGame"))' $TOOLSET_PATH
+yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Workload.NativeGame"))' $TOOLSET_PATH
+yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Workload.NativeMobile"))' $TOOLSET_PATH
+yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Workload.Universal"))' $TOOLSET_PATH
 
 # only keep yarn
 yq -oj -i 'del(.npm.global_packages[] | (select(.name != "yarn" and .name != "typescript")))' $TOOLSET_PATH
