@@ -83,6 +83,11 @@ variable "volume_type" {
   default = "gp3"
 }
 
+variable "instance_type" {
+  type    = string
+  default = "m8g.large"
+}
+
 source "amazon-ebs" "build_ebs" {
   aws_polling {
     delay_seconds = 30
@@ -98,7 +103,7 @@ source "amazon-ebs" "build_ebs" {
   ebs_optimized                             = true
   # spot_instance_types                       = ["r7g.large", "c7g.xlarge", "m7g.xlarge", "c7g.2xlarge", "m7g.2xlarge"]
   # spot_price                                = "1.00"
-  instance_type                             = "m8g.large"
+  instance_type                             = var.instance_type
   region                                    = "${var.region}"
   ssh_username                              = "ubuntu"
   subnet_id                                 = "${var.subnet_id}"

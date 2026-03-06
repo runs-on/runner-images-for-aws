@@ -111,6 +111,8 @@ packer_build_cmd = [
   "-var", "region=#{options[:region]}",
   "-var", "source_ami_name=#{image.fetch('source_ami_name')}",
   "-var", "source_ami_owner=#{image.fetch('source_ami_owner')}",
+  ("-var" if image.key?('instance_type')),
+  ("instance_type=#{image.fetch('instance_type')}" if image.key?('instance_type')),
   "-var", "volume_size=#{image.fetch('volume_size')}",
   "-var", "ami_description=#{image.fetch('description')}",
   packer_template_path

@@ -46,6 +46,11 @@ variable "volume_type" {
   default = "gp3"
 }
 
+variable "instance_type" {
+  type    = string
+  default = "g4dn.xlarge"
+}
+
 variable "region" {
   type    = string
 }
@@ -84,7 +89,7 @@ source "amazon-ebs" "build_ebs" {
   ebs_optimized                             = true
   # spot_instance_types                       = ["g4dn.xlarge", "g5.xlarge", "g6.xlarge", "g6e.xlarge"]
   # spot_price                                = "auto"
-  instance_type                             = "g4dn.xlarge"
+  instance_type                             = var.instance_type
   region                                    = "${var.region}"
   ssh_username                              = "ubuntu"
   subnet_id                                 = "${var.subnet_id}"

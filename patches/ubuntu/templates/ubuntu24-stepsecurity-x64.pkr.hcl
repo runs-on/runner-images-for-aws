@@ -50,6 +50,11 @@ variable "volume_type" {
   default = "gp3"
 }
 
+variable "instance_type" {
+  type    = string
+  default = "m8a.large"
+}
+
 variable "region" {
   type    = string
 }
@@ -86,7 +91,7 @@ source "amazon-ebs" "build_ebs" {
   # make AMIs publicly accessible
   ami_groups                                = ["all"]
   ebs_optimized                             = true
-  instance_type                             = "m8a.large"
+  instance_type                             = var.instance_type
   region                                    = "${var.region}"
   ssh_username                              = "ubuntu"
   subnet_id                                 = "${var.subnet_id}"

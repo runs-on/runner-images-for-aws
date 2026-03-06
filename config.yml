@@ -13,18 +13,21 @@ regions:
 images:
   # Ubuntu22
   - id: ubuntu22-full-x64
+    instance_type: m8a.large
     volume_size: 30
     source_ami_name: ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*
     source_ami_owner: 099720109477
     description: RunsOn Ubuntu22 x64
 
   - id: ubuntu22-full-arm64
+    instance_type: m8g.large
     volume_size: 30
     source_ami_name: ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-arm64-server-*
     source_ami_owner: 099720109477
     description: RunsOn Ubuntu22 arm64
 
   - id: ubuntu22-gpu-x64
+    instance_type: g4dn.xlarge
     volume_size: 40
     source_ami_name: runs-on-dev-ubuntu22-full-x64-*
     source_ami_owner: 135269210855
@@ -32,42 +35,49 @@ images:
 
   # Ubuntu24
   - id: ubuntu24-full-x64
+    instance_type: m8a.large
     volume_size: 30
     source_ami_name: ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*
     source_ami_owner: 099720109477
     description: RunsOn Ubuntu24 x64
 
   - id: ubuntu24-full-arm64
+    instance_type: m8g.large
     volume_size: 30
     source_ami_name: ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-arm64-server-*
     source_ami_owner: 099720109477
     description: RunsOn Ubuntu24 arm64
 
   - id: ubuntu24-gpu-x64
+    instance_type: g4dn.xlarge
     volume_size: 40
     source_ami_name: runs-on-dev-ubuntu24-full-x64-*
     source_ami_owner: 135269210855
     description: RunsOn Ubuntu24 GPU optimized x64
 
   - id: ubuntu24-stepsecurity-x64
+    instance_type: m8a.large
     volume_size: 30
     source_ami_name: runs-on-dev-ubuntu24-full-x64-*
     source_ami_owner: 135269210855
     description: RunsOn Ubuntu24 + StepSecurity x64
 
   - id: ubuntu24-stepsecurity-arm64
+    instance_type: m8g.large
     volume_size: 30
     source_ami_name: runs-on-dev-ubuntu24-full-arm64-*
     source_ami_owner: 135269210855
     description: RunsOn Ubuntu24 + StepSecurity arm64
 
   - id: ubuntu22-stepsecurity-x64
+    instance_type: m8a.large
     volume_size: 30
     source_ami_name: runs-on-dev-ubuntu22-full-x64-*
     source_ami_owner: 135269210855
     description: RunsOn Ubuntu22 + StepSecurity x64
 
   - id: ubuntu22-stepsecurity-arm64
+    instance_type: m8g.large
     volume_size: 30
     source_ami_name: runs-on-dev-ubuntu22-full-arm64-*
     source_ami_owner: 135269210855
@@ -75,6 +85,7 @@ images:
 
   # Windows22
   - id: windows22-full-x64
+    instance_type: m7a.large
     volume_size: 50
     source_ami_name: Windows_Server-2022-English-Full-Base-*
     source_ami_owner: 801119661308
@@ -82,6 +93,7 @@ images:
   
   # Windows25
   - id: windows25-full-x64
+    instance_type: m8i.xlarge
     volume_size: 100
     source_ami_name: Windows_Server-2025-English-Full-Base-*
     source_ami_owner: 801119661308
