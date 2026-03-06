@@ -98,6 +98,11 @@ variable "volume_type" {
   default = "gp3"
 }
 
+variable "instance_type" {
+  type    = string
+  default = "m7a.large"
+}
+
 source "amazon-ebs" "build_ebs" {
   aws_polling {
     delay_seconds = 30
@@ -113,7 +118,7 @@ source "amazon-ebs" "build_ebs" {
   ami_groups                                = ["all"]
   ebs_optimized                             = true
   # spot_instance_types                       = ["c6a.metal", "m6a.metal", "c6i.metal", "m6i.metal", "c7i.metal-24xl", "m7i.metal-24xl"]
-  instance_type                             = "m7a.large"
+  instance_type                             = var.instance_type
   region                                    = "${var.region}"
   subnet_id                                 = "${var.subnet_id}"
   associate_public_ip_address               = "true"

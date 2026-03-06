@@ -125,7 +125,7 @@ foreach ($dotnetVersion in $dotnetToolset.versions) {
 if ((Test-IsWin22) -or (Test-IsWin25)) {
     if (Test-Path "${env:TEMP_DIR}\8.0.100") {
         Get-ChildItem -Path "${env:TEMP_DIR}\8.0.100" | ForEach-Object {
-            Remove-Item -Path "$sdkManifestPath\$($_.BaseName)" -Recurse -Force | Out-Null
+            if (Test-Path -Path "$sdkManifestPath\$($_.BaseName)") { Remove-Item -Path "$sdkManifestPath\$($_.BaseName)" -Recurse -Force | Out-Null }
             Move-Item -Path $_.FullName -Destination $sdkManifestPath -Force -ErrorAction Stop
         }
     }

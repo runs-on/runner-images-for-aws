@@ -17,7 +17,7 @@ Those images are very close to 1-1 compatible with official GitHub Actions runne
 
 ### Windows
 
-Those images are lacking the Hyper-V (and related tooling) framework for Windows, because virtualization on AWS is only available on bare-metal instances. Some legacy or easily available through actions software has been removed to ensure faster boot times and lower disk usage.
+These images are being aligned with upstream "full" Windows tooling (including Visual Studio/C++ and Hyper-V-related components where supported). Some legacy or easily available through actions software may still be removed to ensure faster boot times and lower disk usage. Availability of virtualization-dependent components can vary based on EC2 instance capabilities and build tooling support.
 
 * `windows22-full-x64`
 * `windows25-full-x64`

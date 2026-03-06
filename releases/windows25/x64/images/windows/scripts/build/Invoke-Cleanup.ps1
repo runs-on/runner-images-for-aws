@@ -14,9 +14,9 @@ Write-Host "Clean up various directories"
     "$env:SystemDrive\Recovery",
     "$env:SystemRoot\logs",
     "$env:SystemRoot\winsxs\manifestcache",
-    "$env:SystemRoot\Temp",
+    # RunsOn preserved: "$env:SystemRoot\Temp",
     "$env:SystemDrive\Users\$env:INSTALL_USER\AppData\Local\Temp",
-    "$env:TEMP",
+    # RunsOn preserved: "$env:TEMP",
     "$env:AZURE_CONFIG_DIR\logs",
     "$env:AZURE_CONFIG_DIR\commands",
     "$env:AZURE_CONFIG_DIR\telemetry"
