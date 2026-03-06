@@ -118,6 +118,7 @@ source "amazon-ebs" "build_ebs" {
   instance_type                             = "m8i.4xlarge"
   region                                    = "${var.region}"
   subnet_id                                 = "${var.subnet_id}"
+  iam_instance_profile                      = "SSMInstanceProfile"
   associate_public_ip_address               = "true"
   force_deregister                          = "true"
   force_delete_snapshot                     = "true"
@@ -402,6 +403,7 @@ provisioner "powershell" {
       # "${path.root}/../scripts/build/Install-Miniconda.ps1",
       # "${path.root}/../scripts/build/Install-AzureCosmosDbEmulator.ps1",
       "${path.root}/../scripts/build/Install-Zstd.ps1",
+      "${path.root}/../scripts/build/Install-Rust.ps1",
       "${path.root}/../scripts/build/Install-Vcpkg.ps1",
       # "${path.root}/../scripts/build/Install-Bazel.ps1",
       "${path.root}/../scripts/build/Install-RootCA.ps1",

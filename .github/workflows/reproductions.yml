@@ -76,6 +76,20 @@ jobs:
           cmd.exe /c "\"$vsDevCmd\" -arch=x64 >nul && where cl"
           if ($LASTEXITCODE -ne 0) { throw "cl.exe not found from VS developer command prompt" }
 
+      - name: Check issue-19 package set
+        shell: pwsh
+        run: |
+          $required = @("bash", "cargo", "rustc", "pwsh", "AzureSignTool")
+          foreach ($tool in $required) {
+            $found = Get-Command $tool -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($null -eq $found) { throw "$tool was not found on PATH" }
+            Write-Host "$tool => $($found.Source)"
+          }
+          pwsh --version
+          cargo --version
+          rustc --version
+          AzureSignTool --version
+
       - name: Check Hyper-V feature states
         shell: pwsh
         run: |

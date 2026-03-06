@@ -78,9 +78,6 @@
       "name": "VSSetup"
     },
     {
-      "name": "Microsoft.Graph"
-    },
-    {
       "name": "AWSPowershell"
     }
   ],
@@ -288,6 +285,11 @@
         "name": "nbgv",
         "test": "nbgv --version",
         "getversion": "nbgv --version"
+      },
+      {
+        "name": "AzureSignTool",
+        "test": "AzureSignTool --version",
+        "getversion": "AzureSignTool --version"
       }
     ],
     "warmup": false

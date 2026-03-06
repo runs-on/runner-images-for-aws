@@ -90,6 +90,12 @@ yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .default |= (parent | .ve
 # only keep latest dotnet version
 yq -oj -i 'eval(.dotnet | .versions |= [.[-1]])' $TOOLSET_PATH
 
+# keep AzureSignTool available for Windows signing workflows (issue #19)
+yq -oj -i 'eval(.dotnet.tools += [{"name":"AzureSignTool","test":"AzureSignTool --version","getversion":"AzureSignTool --version"}] | .dotnet.tools |= unique_by(.name))' $TOOLSET_PATH
+
+# remove Microsoft.Graph module (frequently hangs installs and not required for issue #19 asks)
+yq -oj -i 'eval(del(.powershellModules[] | select(.name == "Microsoft.Graph")))' $TOOLSET_PATH
+
 # remove PSScriptAnalyzer
 # yq -oj -i 'eval(del(.powershellModules[] | select(.name == "PSScriptAnalyzer")))' $TOOLSET_PATH
 
