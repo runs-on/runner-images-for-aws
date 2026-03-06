@@ -6,6 +6,7 @@ require 'slop'
 require 'fileutils'
 require 'yaml'
 require 'aws-sdk-ec2'
+require 'timeout'
 
 IMAGES = YAML.load_file(File.expand_path("../config.yml", __dir__)).fetch("images")
 
@@ -130,7 +131,57 @@ end
 
 puts "Running Packer build command: #{packer_build_cmd.join(' ')}"
 
-unless system(packer_build_env, *packer_build_cmd)
+windows_disk_monitor_pid = nil
+if options[:image_id].start_with?("windows")
+  monitor_script = File.expand_path("../scripts/monitor-windows-builder-disk.sh", __dir__)
+  if File.executable?(monitor_script)
+    windows_metrics_file = ENV.fetch("WINDOWS_METRICS_FILE", File.expand_path("../WINDOWS_METRICS.md", __dir__))
+    windows_metrics_interval_sec = ENV.fetch("WINDOWS_METRICS_INTERVAL_SEC", "180")
+
+    monitor_cmd = [
+      monitor_script,
+      "--ami-name", ami_name,
+      "--region", options[:region],
+      "--interval-sec", windows_metrics_interval_sec,
+      "--metrics-file", windows_metrics_file
+    ]
+    aws_profile = ENV.fetch("AWS_PROFILE", "").strip
+    monitor_cmd += ["--profile", aws_profile] unless aws_profile.empty?
+
+    puts "Starting Windows disk monitor command: #{monitor_cmd.join(' ')}"
+    windows_disk_monitor_pid = Process.spawn(packer_build_env, *monitor_cmd)
+  else
+    puts "Windows disk monitor script not executable: #{monitor_script}; skipping disk metrics tracking"
+  end
+end
+
+build_succeeded = false
+begin
+  build_succeeded = system(packer_build_env, *packer_build_cmd)
+ensure
+  unless windows_disk_monitor_pid.nil?
+    begin
+      Process.kill("TERM", windows_disk_monitor_pid)
+    rescue Errno::ESRCH
+    end
+
+    begin
+      Timeout.timeout(10) { Process.wait(windows_disk_monitor_pid) }
+    rescue Timeout::Error
+      begin
+        Process.kill("KILL", windows_disk_monitor_pid)
+      rescue Errno::ESRCH
+      end
+      begin
+        Process.wait(windows_disk_monitor_pid)
+      rescue Errno::ECHILD
+      end
+    rescue Errno::ECHILD
+    end
+  end
+end
+
+unless build_succeeded
   # Cleanup any dangling EC2 instances
   ec2_client = Aws::EC2::Client.new(region: 'us-east-1')
   instances = ec2_client.describe_instances(
