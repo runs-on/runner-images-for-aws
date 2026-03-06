@@ -52,7 +52,7 @@ jobs:
 
   issue-19-windows25-hyperv-vs-cpp:
     name: issue-19 windows25 Hyper-V + VS + C++
-    runs-on: runs-on=${{ github.run_id }}/image=windows25-full-x64/family=m8i
+    runs-on: runs-on=${{ github.run_id }}/image=windows25-dev-x64/family=m8i
     steps:
       - name: Check Visual Studio install
         shell: pwsh

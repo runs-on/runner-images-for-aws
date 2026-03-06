@@ -19,3 +19,8 @@ images:
     arch: "arm64"
     owner: "135269210855"
     name: "runs-on-dev-ubuntu24-full-arm64-*"
+  windows25-dev-x64:
+    platform: "windows"
+    arch: "x64"
+    owner: "135269210855"
+    name: "runs-on-dev-windows25-full-x64-*"
