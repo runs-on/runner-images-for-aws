@@ -73,7 +73,13 @@ jobs:
           if (-not $installPath) { throw "Visual Studio installation path not found" }
           $vsDevCmd = Join-Path $installPath "Common7\Tools\VsDevCmd.bat"
           if (-not (Test-Path $vsDevCmd)) { throw "VsDevCmd.bat not found at $vsDevCmd" }
-          cmd.exe /c "\"$vsDevCmd\" -arch=x64 >nul && where cl"
+          $checkClScript = Join-Path $env:TEMP "check-cl-from-vsdevcmd.cmd"
+          @"
+          @echo off
+          call "$vsDevCmd" -arch=x64 >nul
+          where cl
+          "@ | Set-Content -Path $checkClScript -Encoding Ascii
+          cmd.exe /c $checkClScript
           if ($LASTEXITCODE -ne 0) { throw "cl.exe not found from VS developer command prompt" }
 
       - name: Check issue-19 package set
