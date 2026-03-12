@@ -85,12 +85,16 @@ jobs:
       - name: Check issue-19 package set
         shell: pwsh
         run: |
-          $required = @("bash", "cargo", "rustc", "pwsh", "AzureSignTool")
+          $required = @("bash", "cargo", "rustc", "pwsh")
           foreach ($tool in $required) {
             $found = Get-Command $tool -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($null -eq $found) { throw "$tool was not found on PATH" }
             Write-Host "$tool => $($found.Source)"
           }
+          $env:Path += ";C:\Users\Default\.dotnet\tools"
+          $azureSignTool = Get-Command AzureSignTool -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($null -eq $azureSignTool) { throw "AzureSignTool was not found in C:\Users\Default\.dotnet\tools" }
+          Write-Host "AzureSignTool => $($azureSignTool.Source)"
           pwsh --version
           cargo --version
           rustc --version
