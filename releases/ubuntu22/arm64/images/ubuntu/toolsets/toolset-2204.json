@@ -46,7 +46,7 @@
     "versions": [
       "11"
     ],
-    "maven": "3.9.12"
+    "maven": "3.9.13"
   },
   "android": {
     "cmdline-tools": "commandlinetools-linux-9477386_latest.zip",
