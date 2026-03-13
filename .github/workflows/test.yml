@@ -47,7 +47,7 @@ jobs:
     runs-on: runs-on=${{ github.run_id }}-${{ inputs.index }}/volume=60g/family=${{ inputs.instance_family || 'm7' }}/cpu=2+4/ami=${{ inputs.ami_id }}/extras=${{ inputs.extras }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - uses: runs-on/action@v2
         with:
           show_env: true
@@ -125,7 +125,7 @@ jobs:
       - name: Ensure apt-get update is working
         run: sudo apt-get update
       - name: Ensure code can be checked out
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
       - name: Docker
         run: docker run hello-world
       - name: envinfo
@@ -151,7 +151,7 @@ jobs:
           nvidia-smi -L
           nvidia-smi -q -d Memory
       # Test for docker build and caching
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           repository: dockersamples/example-voting-app
       - name: Generate random file to test caching

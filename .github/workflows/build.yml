@@ -30,7 +30,7 @@ jobs:
       ami_name: ${{ steps.build.outputs.ami_name }}
       ami_id: ${{ steps.build.outputs.ami_id }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           ref: ${{ github.ref_name }}
       - uses: webfactory/ssh-agent@72c0bfd31ab22a2e11716951e3f107a9647dc97e

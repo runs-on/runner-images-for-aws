@@ -23,7 +23,7 @@ jobs:
       - name: Generate release name
         id: generate-release-name
         run: echo "release_name=linux-$(date +%Y%m%d%H%M%S)" >> $GITHUB_OUTPUT
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: 3.2.2
