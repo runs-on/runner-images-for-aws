@@ -5,122 +5,302 @@ require 'yaml'
 require 'slop'
 require 'io/console'
 
-AMI_DEV_PREFIX = "runs-on-dev"
-AMI_PROD_PREFIX = "runs-on-v2.2"
-SOURCE_REGION = "us-east-1"
-REGIONS = YAML.load_file(File.expand_path("../config.yml", __dir__)).fetch("regions")
+module CopyAmi
+  module_function
 
-options = {}
+  AMI_DEV_PREFIX = "runs-on-dev"
+  AMI_PROD_PREFIX = "runs-on-v2.2"
+  SOURCE_REGION = "us-east-1"
+  REGIONS = YAML.load_file(File.expand_path("../config.yml", __dir__)).fetch("regions")
+  DEFAULT_WAIT_OPTIONS = {
+    image: { delay: 15, max_attempts: 40 }.freeze,
+    snapshot: { delay: 15, max_attempts: 40 }.freeze
+  }.freeze
+  WINDOWS_WAIT_OPTIONS = {
+    image: { delay: 30, max_attempts: 240 }.freeze,
+    snapshot: { delay: 30, max_attempts: 240 }.freeze
+  }.freeze
 
-usage = Slop::Options.new do |opts|
-  opts.banner = "Usage: #{$0} [--force] [--region <region>] ami_id_or_name"
-  opts.bool '-f', '--force', 'Do not ask for confirmation'
-  opts.string '-r', '--region', 'Copy to a specific region'
-  opts.bool '-h', '--help', 'Show help'
-end
-
-begin
-  options = usage.parse(ARGV)
-  if options.arguments.empty?
-    raise Slop::Error.new("AMI ID or name is required")
+  def usage
+    Slop::Options.new do |opts|
+      opts.banner = "Usage: #{$0} [--force] [--region <region>] ami_id_or_name"
+      opts.bool '-f', '--force', 'Do not ask for confirmation'
+      opts.string '-r', '--region', 'Copy to a specific region'
+      opts.bool '-h', '--help', 'Show help'
+    end
   end
-rescue Slop::Error => e
-  puts "Error: #{e.message}"
-  puts
-  puts usage
-  exit 1
-end
 
-ami_id_or_name = options.arguments.first
-force = options.force?
-regions_to_copy = options.region? ? [options[:region]] : REGIONS
+  def parse_options(argv, out: $stdout)
+    options = usage.parse(argv)
+    raise Slop::Error, "AMI ID or name is required" if options.arguments.empty?
 
-def copy_ami_to_regions(ami_id_or_name, regions, force = false)
-  ec2 = Aws::EC2::Client.new(region: SOURCE_REGION)
-  ami_description = ec2.describe_images({
-    filters: [
+    options
+  rescue Slop::Error => e
+    out.puts "Error: #{e.message}"
+    out.puts
+    out.puts usage
+    raise
+  end
+
+  def wait_options(image_name)
+    return WINDOWS_WAIT_OPTIONS if image_name.include?("windows")
+
+    DEFAULT_WAIT_OPTIONS
+  end
+
+  def run(argv = ARGV, out: $stdout)
+    options = parse_options(argv, out: out)
+    ami_id_or_name = options.arguments.first
+    force = options.force?
+    regions_to_copy = options.region? ? [options[:region]] : REGIONS
+
+    results = copy_ami_to_regions(ami_id_or_name, regions_to_copy, force, out: out)
+    results.all? { |result| result[:success] }
+  rescue Slop::Error
+    false
+  end
+
+  def ec2_client(region)
+    Aws::EC2::Client.new(region: region)
+  end
+
+  def copy_ami_to_regions(ami_id_or_name, regions, force = false, source_client: nil, client_factory: nil, out: $stdout)
+    source_client ||= ec2_client(SOURCE_REGION)
+    client_factory ||= method(:ec2_client)
+
+    ami_description = find_source_image(source_client, ami_id_or_name)
+    raise "no AMI found" if ami_description.nil?
+
+    ami_id = ami_description.image_id
+    name = ami_description.name.sub(AMI_DEV_PREFIX, AMI_PROD_PREFIX)
+    waiter_options = wait_options(name)
+
+    out.puts "Going to copy AMI #{ami_id} (#{ami_description.name}) to #{regions.join(', ')} with name: #{name}"
+    out.puts "Using wait settings image(delay=#{waiter_options[:image][:delay]}s, max_attempts=#{waiter_options[:image][:max_attempts]}) snapshot(delay=#{waiter_options[:snapshot][:delay]}s, max_attempts=#{waiter_options[:snapshot][:max_attempts]})"
+
+    confirm_release!(name, force, out)
+
+    sleep 5
+
+    results = regions.map do |region|
+      process_region(
+        source_ami_id: ami_id,
+        target_name: name,
+        region: region,
+        wait_options: waiter_options,
+        ec2: client_factory.call(region),
+        out: out
+      )
+    end
+
+    print_summary(results, waiter_options, out)
+    results
+  end
+
+  def find_source_image(ec2, ami_id_or_name)
+    filters = [
       ami_id_or_name.start_with?("ami-") ? { name: "image-id", values: [ami_id_or_name] } : { name: "name", values: [ami_id_or_name] },
       { name: "state", values: ["available"] }
     ]
-  }).images.first
-
-  if ami_description.nil?
-    fail "no AMI found"
+    ec2.describe_images(filters: filters).images.first
   end
 
-  ami_id = ami_description.image_id
-  name = ami_description.name.sub(AMI_DEV_PREFIX, AMI_PROD_PREFIX)
-  puts "Going to copy AMI #{ami_id} (#{ami_description.name}) to #{regions.join(', ')} with name: #{name}"
+  def confirm_release!(name, force, out)
+    return unless name.start_with?("runs-on-v")
 
-  if name.start_with?("runs-on-v")
-    puts "Warning: you are copying the AMI as an official image (#{name})."
+    out.puts "Warning: you are copying the AMI as an official image (#{name})."
     reply = if force
       'y'
     else
-      print "Make sure you know what you are doing (y/n): "
-      STDOUT.flush
+      out.print "Make sure you know what you are doing (y/n): "
+      out.flush
       STDIN.getch
     end
 
-    if reply.downcase != 'y'
-      puts "\nExiting"
-      exit 1
-    end
+    return if reply.downcase == 'y'
+
+    out.puts "\nExiting"
+    exit 1
   end
 
-  sleep 5
+  def process_region(source_ami_id:, target_name:, region:, wait_options:, ec2:, out: $stdout)
+    out.puts "Processing region #{region}..."
 
-  results = regions.map do |region|
-    puts "Copying AMI #{ami_id} to #{region}..."
-    ec2 = Aws::EC2::Client.new(region: region)
-    response = ec2.copy_image({
+    existing_image = find_target_image(ec2, target_name)
+    image_id = existing_image&.image_id
+
+    if existing_image&.public && existing_image&.state == "available"
+      out.puts "AMI #{image_id} already exists and is public in #{region}, skipping"
+      return build_result(region: region, status: "already public", success: true, image_id: image_id, image_state: existing_image.state, public: existing_image.public, snapshot_id: snapshot_id_for_image(existing_image))
+    end
+
+    if existing_image
+      out.puts "Reusing existing AMI #{image_id} in #{region} (state=#{existing_image.state}, public=#{existing_image.public})"
+    else
+      image_id = copy_image(ec2, source_ami_id, target_name, region, out)
+    end
+
+    wait_for_image(ec2, image_id, region, wait_options[:image], out)
+    image = find_image_by_id(ec2, image_id)
+    snapshot_id = snapshot_id_for_image(image)
+    raise "no snapshot found for AMI #{image_id} in #{region}" if snapshot_id.nil?
+
+    wait_for_snapshot(ec2, snapshot_id, region, wait_options[:snapshot], out)
+    publish_image(ec2, image_id, snapshot_id, out)
+
+    refreshed_image = find_image_by_id(ec2, image_id)
+    success = refreshed_image&.state == "available" && refreshed_image&.public
+    status = success ? "published" : "publish incomplete"
+
+    build_result(
+      region: region,
+      status: status,
+      success: success,
+      image_id: image_id,
+      image_state: refreshed_image&.state || image&.state,
+      public: refreshed_image&.public,
+      snapshot_id: snapshot_id
+    )
+  rescue Aws::Waiters::Errors::TooManyAttemptsError => e
+    diagnostic = region_diagnostics(ec2, image_id: image_id, image_name: target_name)
+    build_result(region: region, status: "timed out", success: false, error: e.message, **diagnostic)
+  rescue Aws::EC2::Errors::ServiceError => e
+    diagnostic = region_diagnostics(ec2, image_id: image_id, image_name: target_name)
+    status = e.code == "InvalidAMIName.Duplicate" ? "copy failed" : "error"
+    build_result(region: region, status: status, success: false, error: "#{e.code}: #{e.message}", **diagnostic)
+  rescue StandardError => e
+    diagnostic = region_diagnostics(ec2, image_id: image_id, image_name: target_name)
+    build_result(region: region, status: "error", success: false, error: e.message, **diagnostic)
+  end
+
+  def copy_image(ec2, source_ami_id, target_name, region, out)
+    out.puts "Copying AMI #{source_ami_id} to #{region}..."
+    response = ec2.copy_image(
       source_region: SOURCE_REGION,
-      source_image_id: ami_id,
+      source_image_id: source_ami_id,
       copy_image_tags: true,
-      name: name,
-      description: "RunsOn copy of #{ami_id} to #{region}",
-    })
-
-    res = {client: ec2, region: region, image_id: response.image_id}
+      name: target_name,
+      description: "RunsOn copy of #{source_ami_id} to #{region}"
+    )
 
     # to avoid throttling
     sleep 2
-    res
+    response.image_id
+  rescue Aws::EC2::Errors::ServiceError => e
+    raise unless e.code == "InvalidAMIName.Duplicate"
+
+    existing_image = find_target_image(ec2, target_name)
+    raise if existing_image.nil?
+
+    out.puts "AMI #{target_name} already exists in #{region}, reusing #{existing_image.image_id}"
+    existing_image.image_id
   end
 
-  results.each do |res|
-    ec2, image_id, region = res.values_at(:client, :image_id, :region)
-    puts "Waiting for AMI #{image_id} to be available in #{region}..."
-    ec2.wait_until(:image_available, image_ids: [image_id])
-    puts "AMI #{image_id} is now available in region #{region}"
+  def wait_for_image(ec2, image_id, region, wait_options, out)
+    out.puts "Waiting for AMI #{image_id} to be available in #{region}..."
+    ec2.wait_until(:image_available, image_ids: [image_id]) do |waiter|
+      waiter.delay = wait_options[:delay]
+      waiter.max_attempts = wait_options[:max_attempts]
+    end
+    out.puts "AMI #{image_id} is now available in region #{region}"
+  end
 
-    # Wait for the snapshot to be available
-    snapshot_id = ec2.describe_images(image_ids: [image_id]).images.first.block_device_mappings.first.ebs.snapshot_id
-    puts "Waiting for snapshot #{snapshot_id} to be available..."
-    ec2.wait_until(:snapshot_completed, snapshot_ids: [snapshot_id])
-    puts "Snapshot #{snapshot_id} is now available"
+  def wait_for_snapshot(ec2, snapshot_id, region, wait_options, out)
+    out.puts "Waiting for snapshot #{snapshot_id} to be available in #{region}..."
+    ec2.wait_until(:snapshot_completed, snapshot_ids: [snapshot_id]) do |waiter|
+      waiter.delay = wait_options[:delay]
+      waiter.max_attempts = wait_options[:max_attempts]
+    end
+    out.puts "Snapshot #{snapshot_id} is now available in #{region}"
+  end
 
-    # Make the underlying snapshot public
-    ec2.modify_snapshot_attribute({
+  def publish_image(ec2, image_id, snapshot_id, out)
+    ec2.modify_snapshot_attribute(
       snapshot_id: snapshot_id,
       attribute: "createVolumePermission",
       operation_type: "add",
       group_names: ["all"]
-    })
-    puts "Snapshot #{snapshot_id} for AMI #{image_id} updated to public"
+    )
+    out.puts "Snapshot #{snapshot_id} for AMI #{image_id} updated to public"
 
-    # Make the AMI public
-    ec2.modify_image_attribute({
+    ec2.modify_image_attribute(
       image_id: image_id,
       launch_permission: {
         add: [{ group: 'all' }]
       }
-    })
-    puts "Launch permissions for AMI #{image_id} updated to public"
+    )
+    out.puts "Launch permissions for AMI #{image_id} updated to public"
 
-    # to avoid throttling
     sleep 2
+  end
+
+  def region_diagnostics(ec2, image_id: nil, image_name: nil)
+    image = if image_id
+      find_image_by_id(ec2, image_id)
+    elsif image_name
+      find_target_image(ec2, image_name)
+    end
+
+    {
+      image_id: image&.image_id || image_id,
+      image_state: image&.state,
+      public: image&.public,
+      snapshot_id: snapshot_id_for_image(image)
+    }
+  rescue Aws::EC2::Errors::ServiceError
+    { image_id: image_id }
+  end
+
+  def find_target_image(ec2, image_name)
+    images = ec2.describe_images(
+      owners: ["self"],
+      filters: [
+        { name: "name", values: [image_name] },
+        { name: "state", values: %w[pending available failed] }
+      ]
+    ).images
+
+    images.max_by(&:creation_date)
+  end
+
+  def find_image_by_id(ec2, image_id)
+    ec2.describe_images(image_ids: [image_id]).images.first
+  rescue Aws::EC2::Errors::ServiceError
+    nil
+  end
+
+  def snapshot_id_for_image(image)
+    image&.block_device_mappings&.first&.ebs&.snapshot_id
+  end
+
+  def print_summary(results, wait_options, out)
+    out.puts
+    out.puts "Region summary:"
+    out.puts "Wait settings image(delay=#{wait_options[:image][:delay]}s, max_attempts=#{wait_options[:image][:max_attempts]}) snapshot(delay=#{wait_options[:snapshot][:delay]}s, max_attempts=#{wait_options[:snapshot][:max_attempts]})"
+
+    results.each do |result|
+      parts = ["#{result[:region]}: #{result[:status]}"]
+      parts << "image=#{result[:image_id]}" if result[:image_id]
+      parts << "state=#{result[:image_state]}" if result[:image_state]
+      parts << "public=#{result[:public]}" unless result[:public].nil?
+      parts << "snapshot=#{result[:snapshot_id]}" if result[:snapshot_id]
+      parts << "error=#{result[:error]}" if result[:error]
+      out.puts parts.join(" | ")
+    end
+  end
+
+  def build_result(region: nil, status: nil, success: nil, image_id: nil, image_state: nil, public: nil, snapshot_id: nil, error: nil)
+    {
+      region: region,
+      status: status,
+      success: success,
+      image_id: image_id,
+      image_state: image_state,
+      public: public,
+      snapshot_id: snapshot_id,
+      error: error
+    }
   end
 end
 
-copy_ami_to_regions(ami_id_or_name, regions_to_copy, force)
+exit(CopyAmi.run ? 0 : 1) if __FILE__ == $PROGRAM_NAME
