@@ -66,11 +66,10 @@ jobs:
     defaults:
       run:
         shell: bash -leo pipefail {0}
-    env:
-      ISSUE_16_BIN_DIR: ${{ runner.temp }}/issue-16-bin
     steps:
       - name: Create marker binary and append to GITHUB_PATH
         run: |
+          ISSUE_16_BIN_DIR="$RUNNER_TEMP/issue-16-bin"
           mkdir -p "$ISSUE_16_BIN_DIR"
           cat <<'EOF' > "$ISSUE_16_BIN_DIR/issue-16-marker"
           #!/usr/bin/env bash
