@@ -7,14 +7,14 @@ on:
         type: string
         required: true
         description: 'Reproduction job IDs to run'
-        default: '["php-ubuntu24-arm64", "git-lfs-ubuntu24-arm64", "imageos-ubuntu24-x64", "issue-16-ubuntu24-x64-github-path-login-shell", "issue-41-ubuntu24-gpu-arm64", "issue-19-windows25-hyperv-vs-cpp"]'
+        default: '["php-ubuntu24-arm64", "git-lfs-ubuntu24-arm64", "imageos-ubuntu24-x64", "issue-16-ubuntu24-x64-github-path-login-shell", "issue-16-ubuntu-latest-github-path-debug", "issue-41-ubuntu24-gpu-arm64", "issue-19-windows25-hyperv-vs-cpp"]'
 
 permissions:
   contents: read
 
 jobs:
   php-ubuntu24-arm64:
-    if: ${{ contains(fromJSON(github.event.inputs.jobs || '["php-ubuntu24-arm64", "git-lfs-ubuntu24-arm64", "imageos-ubuntu24-x64", "issue-16-ubuntu24-x64-github-path-login-shell", "issue-41-ubuntu24-gpu-arm64", "issue-19-windows25-hyperv-vs-cpp"]'), 'php-ubuntu24-arm64') }}
+    if: ${{ contains(fromJSON(github.event.inputs.jobs || '["php-ubuntu24-arm64", "git-lfs-ubuntu24-arm64", "imageos-ubuntu24-x64", "issue-16-ubuntu24-x64-github-path-login-shell", "issue-16-ubuntu-latest-github-path-debug", "issue-41-ubuntu24-gpu-arm64", "issue-19-windows25-hyperv-vs-cpp"]'), 'php-ubuntu24-arm64') }}
     name: Fast PHP installs on ubuntu24-full-arm64
     runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-arm64/image=ubuntu24-dev-arm64
     steps:
@@ -38,7 +38,7 @@ jobs:
         run: php -v
 
   git-lfs-ubuntu24-arm64:
-    if: ${{ contains(fromJSON(github.event.inputs.jobs || '["php-ubuntu24-arm64", "git-lfs-ubuntu24-arm64", "imageos-ubuntu24-x64", "issue-16-ubuntu24-x64-github-path-login-shell", "issue-41-ubuntu24-gpu-arm64", "issue-19-windows25-hyperv-vs-cpp"]'), 'git-lfs-ubuntu24-arm64') }}
+    if: ${{ contains(fromJSON(github.event.inputs.jobs || '["php-ubuntu24-arm64", "git-lfs-ubuntu24-arm64", "imageos-ubuntu24-x64", "issue-16-ubuntu24-x64-github-path-login-shell", "issue-16-ubuntu-latest-github-path-debug", "issue-41-ubuntu24-gpu-arm64", "issue-19-windows25-hyperv-vs-cpp"]'), 'git-lfs-ubuntu24-arm64') }}
     name: git-lfs on ubuntu24-full-arm64
     runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-arm64/image=ubuntu24-dev-arm64
     steps:
@@ -48,7 +48,7 @@ jobs:
           git-lfs version
 
   imageos-ubuntu24-x64:
-    if: ${{ contains(fromJSON(github.event.inputs.jobs || '["php-ubuntu24-arm64", "git-lfs-ubuntu24-arm64", "imageos-ubuntu24-x64", "issue-16-ubuntu24-x64-github-path-login-shell", "issue-41-ubuntu24-gpu-arm64", "issue-19-windows25-hyperv-vs-cpp"]'), 'imageos-ubuntu24-x64') }}
+    if: ${{ contains(fromJSON(github.event.inputs.jobs || '["php-ubuntu24-arm64", "git-lfs-ubuntu24-arm64", "imageos-ubuntu24-x64", "issue-16-ubuntu24-x64-github-path-login-shell", "issue-16-ubuntu-latest-github-path-debug", "issue-41-ubuntu24-gpu-arm64", "issue-19-windows25-hyperv-vs-cpp"]'), 'imageos-ubuntu24-x64') }}
     name: ImageOS/ImageVersion on ubuntu24-full-x64
     runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-full-x64
     steps:
@@ -60,7 +60,7 @@ jobs:
           test -n "$ImageVersion" || (echo "ERROR: ImageVersion is not set" && exit 1)
 
   issue-16-ubuntu24-x64-github-path-login-shell:
-    if: ${{ contains(fromJSON(github.event.inputs.jobs || '["php-ubuntu24-arm64", "git-lfs-ubuntu24-arm64", "imageos-ubuntu24-x64", "issue-16-ubuntu24-x64-github-path-login-shell", "issue-41-ubuntu24-gpu-arm64", "issue-19-windows25-hyperv-vs-cpp"]'), 'issue-16-ubuntu24-x64-github-path-login-shell') }}
+    if: ${{ contains(fromJSON(github.event.inputs.jobs || '["php-ubuntu24-arm64", "git-lfs-ubuntu24-arm64", "imageos-ubuntu24-x64", "issue-16-ubuntu24-x64-github-path-login-shell", "issue-16-ubuntu-latest-github-path-debug", "issue-41-ubuntu24-gpu-arm64", "issue-19-windows25-hyperv-vs-cpp"]'), 'issue-16-ubuntu24-x64-github-path-login-shell') }}
     name: issue-16 ubuntu24 x64 GITHUB_PATH with login shell
     runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-full-x64
     defaults:
@@ -97,8 +97,87 @@ jobs:
             exit 1
           fi
 
+  issue-16-ubuntu-latest-github-path-debug:
+    if: ${{ contains(fromJSON(github.event.inputs.jobs || '["php-ubuntu24-arm64", "git-lfs-ubuntu24-arm64", "imageos-ubuntu24-x64", "issue-16-ubuntu24-x64-github-path-login-shell", "issue-16-ubuntu-latest-github-path-debug", "issue-41-ubuntu24-gpu-arm64", "issue-19-windows25-hyperv-vs-cpp"]'), 'issue-16-ubuntu-latest-github-path-debug') }}
+    name: issue-16 ubuntu-latest GITHUB_PATH debug
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dump runner shell setup
+        run: |
+          set -euxo pipefail
+          echo "runner.name=$RUNNER_NAME"
+          echo "runner.os=$RUNNER_OS"
+          echo "runner.arch=$RUNNER_ARCH"
+          echo "image.os=${ImageOS:-}"
+          echo "image.version=${ImageVersion:-}"
+          echo "user=$(whoami)"
+          echo "home=$HOME"
+          echo "shell=${SHELL:-}"
+          echo "pwd=$PWD"
+          echo "PATH=$PATH"
+          for file in /etc/environment /etc/profile /etc/bash.bashrc "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.bashrc"; do
+            echo "::group::${file}"
+            if [[ -f "$file" ]]; then
+              sed -n '1,220p' "$file"
+            else
+              echo "missing"
+            fi
+            echo "::endgroup::"
+          done
+
+      - name: Add marker directory to GITHUB_PATH
+        run: |
+          set -euxo pipefail
+          ISSUE_16_BIN_DIR="$RUNNER_TEMP/issue-16-bin"
+          mkdir -p "$ISSUE_16_BIN_DIR"
+          cat <<'EOF' > "$ISSUE_16_BIN_DIR/issue-16-marker"
+          #!/usr/bin/env bash
+          echo "issue-16-marker ok"
+          EOF
+          chmod +x "$ISSUE_16_BIN_DIR/issue-16-marker"
+          printf '%s\n' "$ISSUE_16_BIN_DIR" >> "$GITHUB_PATH"
+          echo "Wrote $ISSUE_16_BIN_DIR to GITHUB_PATH"
+
+      - name: Check default shell PATH
+        id: issue-16-gh-default-shell
+        continue-on-error: true
+        run: |
+          set -euxo pipefail
+          echo "PATH=$PATH"
+          command -v issue-16-marker
+          issue-16-marker
+
+      - name: Check login shell PATH
+        id: issue-16-gh-login-shell
+        continue-on-error: true
+        shell: bash -leo pipefail {0}
+        run: |
+          set -euxo pipefail
+          echo "PATH=$PATH"
+          command -v issue-16-marker
+          issue-16-marker
+
+      - name: Compare child shell startup modes
+        id: issue-16-gh-child-shells
+        continue-on-error: true
+        run: |
+          set -euxo pipefail
+          echo "::group::bash -c"
+          bash -c 'echo "PATH=$PATH"; command -v issue-16-marker; issue-16-marker'
+          echo "::endgroup::"
+          echo "::group::bash -l -c"
+          bash -l -c 'echo "PATH=$PATH"; command -v issue-16-marker; issue-16-marker'
+          echo "::endgroup::"
+
+      - name: Report ubuntu-latest outcomes
+        if: ${{ always() }}
+        run: |
+          echo "default-shell=${{ steps.issue-16-gh-default-shell.outcome }}"
+          echo "login-shell=${{ steps.issue-16-gh-login-shell.outcome }}"
+          echo "child-shells=${{ steps.issue-16-gh-child-shells.outcome }}"
+
   issue-41-ubuntu24-gpu-arm64:
-    if: ${{ contains(fromJSON(github.event.inputs.jobs || '["php-ubuntu24-arm64", "git-lfs-ubuntu24-arm64", "imageos-ubuntu24-x64", "issue-16-ubuntu24-x64-github-path-login-shell", "issue-41-ubuntu24-gpu-arm64", "issue-19-windows25-hyperv-vs-cpp"]'), 'issue-41-ubuntu24-gpu-arm64') }}
+    if: ${{ contains(fromJSON(github.event.inputs.jobs || '["php-ubuntu24-arm64", "git-lfs-ubuntu24-arm64", "imageos-ubuntu24-x64", "issue-16-ubuntu24-x64-github-path-login-shell", "issue-16-ubuntu-latest-github-path-debug", "issue-41-ubuntu24-gpu-arm64", "issue-19-windows25-hyperv-vs-cpp"]'), 'issue-41-ubuntu24-gpu-arm64') }}
     name: issue-41 ubuntu24 GPU arm64 on g5g
     runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-arm64/image=ubuntu24-gpu-arm64/family=g5g
     steps:
@@ -111,7 +190,7 @@ jobs:
         run: docker run --rm --gpus all nvidia/cuda:12.9.1-base-ubuntu24.04 nvidia-smi
 
   issue-19-windows25-hyperv-vs-cpp:
-    if: ${{ contains(fromJSON(github.event.inputs.jobs || '["php-ubuntu24-arm64", "git-lfs-ubuntu24-arm64", "imageos-ubuntu24-x64", "issue-16-ubuntu24-x64-github-path-login-shell", "issue-41-ubuntu24-gpu-arm64", "issue-19-windows25-hyperv-vs-cpp"]'), 'issue-19-windows25-hyperv-vs-cpp') }}
+    if: ${{ contains(fromJSON(github.event.inputs.jobs || '["php-ubuntu24-arm64", "git-lfs-ubuntu24-arm64", "imageos-ubuntu24-x64", "issue-16-ubuntu24-x64-github-path-login-shell", "issue-16-ubuntu-latest-github-path-debug", "issue-41-ubuntu24-gpu-arm64", "issue-19-windows25-hyperv-vs-cpp"]'), 'issue-19-windows25-hyperv-vs-cpp') }}
     name: issue-19 windows25 Hyper-V + VS + C++
     runs-on: runs-on=${{ github.run_id }}/image=windows25-dev-x64/family=m8i
     steps:
