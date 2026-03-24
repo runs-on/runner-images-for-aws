@@ -50,6 +50,18 @@ jobs:
           test -n "$ImageOS" || (echo "ERROR: ImageOS is not set" && exit 1)
           test -n "$ImageVersion" || (echo "ERROR: ImageVersion is not set" && exit 1)
 
+  issue-41-ubuntu24-gpu-arm64:
+    name: issue-41 ubuntu24 GPU arm64 on g5g
+    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-arm64/image=ubuntu24-gpu-arm64/family=g5g
+    steps:
+      - name: Check NVIDIA tooling
+        run: |
+          nvidia-smi
+          nvidia-smi -L
+          nvcc --version
+      - name: CUDA container smoke test
+        run: docker run --rm --gpus all nvidia/cuda:12.9.1-base-ubuntu24.04 nvidia-smi
+
   issue-19-windows25-hyperv-vs-cpp:
     name: issue-19 windows25 Hyper-V + VS + C++
     runs-on: runs-on=${{ github.run_id }}/image=windows25-dev-x64/family=m8i

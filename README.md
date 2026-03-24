@@ -28,6 +28,7 @@ Those use the Linux images as base, and include NVidia GPU drivers, cuda toolkit
 
 * `ubuntu22-gpu-x64`
 * `ubuntu24-gpu-x64`
+* `ubuntu24-gpu-arm64`
 
 ## Supported regions
 

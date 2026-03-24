@@ -15,14 +15,45 @@ else
     exit 1
 fi
 
+DEBIAN_ARCH="$(dpkg --print-architecture)"
+CUDA_REPO_ARCH=""
+case "$DEBIAN_ARCH" in
+    amd64)
+        CUDA_REPO_ARCH="x86_64"
+        ;;
+    arm64)
+        CUDA_REPO_ARCH="sbsa"
+        ;;
+    *)
+        echo "Unsupported Debian architecture: $DEBIAN_ARCH"
+        exit 1
+        ;;
+esac
+
+# Use the Ubuntu 580 server driver on both arches and the NVIDIA 12.9 toolkit.
+# The cuda-12-9 meta-package pulls a 575-era runtime dependency, so avoid it.
+GPU_PACKAGES=(nvidia-driver-580-server cuda-toolkit-12-9 nvidia-container-toolkit)
+
 set -eox pipefail
+
+dump_dkms_logs() {
+    find /var/lib/dkms -path '*/build/make.log' -print0 2>/dev/null | while IFS= read -r -d '' logfile; do
+        echo "=== DKMS log: $logfile ==="
+        cat "$logfile" || true
+    done
+}
+
+dump_apt_logs() {
+    apt-cache policy "${GPU_PACKAGES[@]}" || true
+    apt-get install -y --no-install-recommends -o Debug::pkgProblemResolver=yes "${GPU_PACKAGES[@]}" || true
+}
 
 if [ -f /root/cuda-installed.txt ]; then
     # Verify CUDA and driver installation
     echo "=== CUDA Installation Verification ==="
     su - runner -c "nvcc --version"
     nvidia-smi
-    nvidia-smi | grep "CUDA Version: 12"
+    nvidia-smi -L
     rm /root/cuda-installed.txt
     exit 0
 fi
@@ -35,16 +66,9 @@ cloud-init single --name cc_resizefs
 
 # NVIDIA CUDA drivers and toolkit
 DEBIAN_FILE="cuda-keyring_1.1-1_all.deb"
-REPO_URL="https://developer.download.nvidia.com/compute/cuda/repos/$DIST_SLUG/x86_64/$DEBIAN_FILE"
+REPO_URL="https://developer.download.nvidia.com/compute/cuda/repos/$DIST_SLUG/$CUDA_REPO_ARCH/$DEBIAN_FILE"
 wget $REPO_URL
 dpkg -i $DEBIAN_FILE && rm $DEBIAN_FILE
-
-# NVIDIA container toolkit
-REPO_URL="https://nvidia.github.io/libnvidia-container/stable/deb/\$(ARCH)"
-GPG_KEY="/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg"
-REPO_PATH="/etc/apt/sources.list.d/nvidia-container-toolkit.list"
-curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o $GPG_KEY
-echo "deb [signed-by=$GPG_KEY] $REPO_URL /" > $REPO_PATH
 
 apt-get update -qq
 
@@ -53,7 +77,11 @@ apt-get update -qq
 # - cuda-toolkit is NVIDIA's official package from their repository
 # - nvidia-cuda-toolkit is Ubuntu's packaged version of CUDA toolkit (often outdated version)
 # So using cuda-toolkit here:
-apt install -y --no-install-recommends cuda-drivers-575 cuda-12-9 cuda-toolkit-12-9 nvidia-container-toolkit
+if ! apt install -y --no-install-recommends "${GPU_PACKAGES[@]}"; then
+    dump_apt_logs
+    dump_dkms_logs
+    exit 1
+fi
 
 ( dpkg -l | grep -E "(nvidia-driver|cuda)" | head -10 ) || true
 

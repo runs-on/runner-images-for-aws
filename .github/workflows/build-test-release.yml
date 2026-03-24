@@ -35,6 +35,7 @@ jobs:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 1
       platform: ${{ inputs.platform }}
+      gpu: false
 
   test2:
     needs:
@@ -45,6 +46,7 @@ jobs:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 2
       platform: ${{ inputs.platform }}
+      gpu: false
 
   test-extras1:
     needs:
@@ -56,6 +58,7 @@ jobs:
       index: 3
       extras: "s3-cache"
       platform: ${{ inputs.platform }}
+      gpu: false
 
   test-extras2:
     needs:
@@ -67,9 +70,10 @@ jobs:
       index: 4
       extras: "s3-cache"
       platform: ${{ inputs.platform }}
+      gpu: false
 
   test-gpu:
-    if: contains(inputs.image_id, 'gpu-x64')
+    if: contains(inputs.image_id, '-gpu-')
     needs:
       - build
       - test-extras2
@@ -77,8 +81,9 @@ jobs:
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
       index: 5
-      instance_family: "g4dn"
+      instance_family: ${{ endsWith(inputs.image_id, '-arm64') && 'g5g' || 'g4dn' }}
       platform: ${{ inputs.platform }}
+      gpu: true
 
   release:
     if: ${{ !failure() && !cancelled() }}

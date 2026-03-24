@@ -48,7 +48,7 @@ variable "volume_type" {
 
 variable "instance_type" {
   type    = string
-  default = "g4dn.xlarge"
+  default = "g5g.xlarge"
 }
 
 variable "region" {
@@ -87,7 +87,7 @@ source "amazon-ebs" "build_ebs" {
   # make AMIs publicly accessible
   ami_groups    = ["all"]
   ebs_optimized = true
-  # spot_instance_types                       = ["g4dn.xlarge", "g5.xlarge", "g6.xlarge", "g6e.xlarge"]
+  # spot_instance_types                       = ["g5g.xlarge"]
   # spot_price                                = "auto"
   instance_type               = var.instance_type
   region                      = "${var.region}"

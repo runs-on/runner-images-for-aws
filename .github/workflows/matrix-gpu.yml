@@ -7,7 +7,7 @@ on:
         type: string
         required: true
         description: 'Distribution(s) to build'
-        default: '["ubuntu22-gpu-x64", "ubuntu24-gpu-x64"]'
+        default: '["ubuntu22-gpu-x64", "ubuntu24-gpu-x64", "ubuntu24-gpu-arm64"]'
   workflow_run:
     workflows: ['Linux images']
     branches: [main]
@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image_id: ${{ fromJSON(github.event.inputs.images || '["ubuntu22-gpu-x64", "ubuntu24-gpu-x64"]') }}
+        image_id: ${{ fromJSON(github.event.inputs.images || '["ubuntu22-gpu-x64", "ubuntu24-gpu-x64", "ubuntu24-gpu-arm64"]') }}
     uses: ./.github/workflows/build-test-release.yml
     secrets: inherit
     with:

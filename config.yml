@@ -55,6 +55,13 @@ images:
     source_ami_owner: 135269210855
     description: RunsOn Ubuntu24 GPU optimized x64
 
+  - id: ubuntu24-gpu-arm64
+    instance_type: g5g.xlarge
+    volume_size: 40
+    source_ami_name: runs-on-dev-ubuntu24-full-arm64-*
+    source_ami_owner: 135269210855
+    description: RunsOn Ubuntu24 GPU optimized arm64
+
   - id: ubuntu24-stepsecurity-x64
     instance_type: m8a.large
     volume_size: 30

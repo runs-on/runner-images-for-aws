@@ -17,22 +17,23 @@ fi
 
 DEBIAN_ARCH="$(dpkg --print-architecture)"
 CUDA_REPO_ARCH=""
+GPU_PACKAGES=()
 case "$DEBIAN_ARCH" in
     amd64)
         CUDA_REPO_ARCH="x86_64"
+        GPU_PACKAGES=(cuda-drivers-575 cuda-12-9 cuda-toolkit-12-9 nvidia-container-toolkit)
         ;;
     arm64)
         CUDA_REPO_ARCH="sbsa"
+        # cuda-12-9 pulls a 575-era runtime dependency on arm64, so install the
+        # toolkit from NVIDIA and the headless server driver from Ubuntu instead.
+        GPU_PACKAGES=(nvidia-driver-580-server cuda-toolkit-12-9 nvidia-container-toolkit)
         ;;
     *)
         echo "Unsupported Debian architecture: $DEBIAN_ARCH"
         exit 1
         ;;
 esac
-
-# Use the Ubuntu 580 server driver on both arches and the NVIDIA 12.9 toolkit.
-# The cuda-12-9 meta-package pulls a 575-era runtime dependency, so avoid it.
-GPU_PACKAGES=(nvidia-driver-580-server cuda-toolkit-12-9 nvidia-container-toolkit)
 
 set -eox pipefail
 
