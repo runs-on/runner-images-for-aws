@@ -8,8 +8,17 @@ $markerFile = Join-Path $markerDirectory 'gpu-installed.txt'
 $downloadDirectory = Join-Path $markerDirectory 'GPU'
 $driverLogDirectory = Join-Path $downloadDirectory 'Logs'
 $driverInstaller = Join-Path $downloadDirectory 'nvidia-grid-driver.exe'
-$cudaVersion = '12.9.1.576'
+$cudaVersion = '12.9.1'
 $cudaVersionLabel = '12.9'
+$cudaInstallerVersion = '576.57'
+$cudaInstallerUrl = 'https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_576.57_windows.exe'
+$cudaInstallerSha256 = 'f0ca7cc7b4cea2fac2c4951819d2a9caea31e04000e9110e2048719525f8ea0e'
+$cudaInstaller = Join-Path $downloadDirectory "cuda_$($cudaVersion)_$($cudaInstallerVersion)_windows.exe"
+$cudaInstallerSubpackages = @(
+    "cudart_$cudaVersionLabel",
+    "nvcc_$cudaVersionLabel",
+    "visual_studio_integration_$cudaVersionLabel"
+)
 $driverBucketUrl = 'https://ec2-windows-nvidia-drivers.s3.amazonaws.com'
 $gridLicenseRegistryPath = 'HKLM:\SOFTWARE\NVIDIA Corporation\Global\GridLicensing'
 
@@ -75,6 +84,28 @@ function Ensure-AwsGridDriverInstaller {
     Invoke-WebRequest -Uri $driverUri -OutFile $driverInstaller -UseBasicParsing
 }
 
+function Ensure-CudaToolkitInstaller {
+    New-RunsOnDirectory -Path $downloadDirectory
+
+    if (Test-Path -Path $cudaInstaller) {
+        $existingHash = (Get-FileHash -Path $cudaInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($existingHash -eq $cudaInstallerSha256) {
+            Write-Host "Reusing CUDA toolkit installer from $cudaInstaller"
+            return
+        }
+
+        Remove-Item -Path $cudaInstaller -Force
+    }
+
+    Write-Host "Downloading CUDA toolkit installer from $cudaInstallerUrl"
+    Invoke-WebRequest -Uri $cudaInstallerUrl -OutFile $cudaInstaller -UseBasicParsing
+
+    $downloadedHash = (Get-FileHash -Path $cudaInstaller -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($downloadedHash -ne $cudaInstallerSha256) {
+        throw "CUDA installer checksum mismatch for $cudaInstaller"
+    }
+}
+
 function Install-AwsGridDriver {
     Ensure-AwsGridDriverInstaller
 
@@ -96,17 +127,14 @@ function Install-AwsGridDriver {
 }
 
 function Install-CudaToolkit {
-    $choco = (Get-Command choco.exe -ErrorAction Stop).Source
-    Invoke-ExternalCommand -FilePath $choco -ArgumentList @(
-        'upgrade',
-        'cuda',
-        '--version',
-        $cudaVersion,
-        '--source',
-        'https://community.chocolatey.org/api/v2/',
-        '--no-progress',
-        '-y'
-    ) -ValidExitCodes @(0, 1605, 1614, 1641, 3010)
+    Ensure-CudaToolkitInstaller
+
+    $cudaArguments = @(
+        '-s',
+        '-n'
+    ) + $cudaInstallerSubpackages
+
+    Invoke-ExternalCommand -FilePath $cudaInstaller -ArgumentList $cudaArguments -ValidExitCodes @(0, 1641, 3010)
 }
 
 function Get-NvidiaSmiPath {
