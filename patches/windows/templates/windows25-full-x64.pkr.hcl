@@ -324,7 +324,8 @@ provisioner "powershell" {
       "${path.root}/../scripts/build/Install-DockerCompose.ps1",
       "${path.root}/../scripts/build/Install-PowershellCore.ps1",
       "${path.root}/../scripts/build/Install-WebPlatformInstaller.ps1",
-      "${path.root}/../scripts/build/Install-Runner.ps1"
+      "${path.root}/../scripts/build/Install-Runner.ps1",
+      "${path.root}/../scripts/build/Install-RunsOnBootstrap.ps1"
     ]
   }
 

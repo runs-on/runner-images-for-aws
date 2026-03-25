@@ -21,13 +21,18 @@ These images are being aligned with upstream "full" Windows tooling (including V
 
 * `windows22-full-x64`
 * `windows25-full-x64`
+* `windows25-gpu-x64`
 
 ### GPU
 
-Those use the Linux images as base, and include NVidia GPU drivers, cuda toolkit, and container toolkit, version 12.
+Those use the corresponding base images.
+Linux GPU images include NVIDIA GPU drivers, CUDA toolkit, and container toolkit.
+Windows GPU images include the AWS GRID driver plus the CUDA toolkit.
 
 * `ubuntu22-gpu-x64`
 * `ubuntu24-gpu-x64`
+* `ubuntu24-gpu-arm64`
+* `windows25-gpu-x64`
 
 ## Supported regions
 

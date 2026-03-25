@@ -98,3 +98,10 @@ images:
     source_ami_name: Windows_Server-2025-English-Full-Base-*
     source_ami_owner: 801119661308
     description: RunsOn Windows2025 x64
+
+  - id: windows25-gpu-x64
+    instance_type: g4dn.xlarge
+    volume_size: 100
+    source_ami_name: runs-on-dev-windows25-full-x64-*
+    source_ami_owner: 135269210855
+    description: RunsOn Windows2025 GPU optimized x64

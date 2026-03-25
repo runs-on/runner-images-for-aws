@@ -7,7 +7,7 @@ on:
         type: string
         required: true
         description: 'Distribution(s) to build'
-        default: '["windows22-full-x64", "windows25-full-x64"]'
+        default: '["windows22-full-x64", "windows25-full-x64", "windows25-gpu-x64"]'
   schedule:
     - cron: '0 6 2,17 * *'
 
@@ -51,7 +51,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image_id: ${{ fromJSON(github.event.inputs.images || '["windows22-full-x64", "windows25-full-x64"]') }}
+        image_id: ${{ fromJSON(github.event.inputs.images || '["windows22-full-x64", "windows25-full-x64", "windows25-gpu-x64"]') }}
     uses: ./.github/workflows/build-test-release.yml
     secrets: inherit
     with:

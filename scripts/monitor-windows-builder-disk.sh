@@ -164,7 +164,7 @@ probe_disk_usage_ssm() {
   fi
 
   local ps_cmd
-  ps_cmd='$d=Get-CimInstance Win32_LogicalDisk -Filter "DeviceID=''C:''"; if ($null -eq $d) { Write-Output "{\"error\":\"no-c-drive\"}"; exit 2 }; [pscustomobject]@{UsedGB=[math]::Round(($d.Size-$d.FreeSpace)/1GB,2);FreeGB=[math]::Round($d.FreeSpace/1GB,2);TotalGB=[math]::Round($d.Size/1GB,2)} | ConvertTo-Json -Compress'
+  ps_cmd='$d=Get-PSDrive -Name C -PSProvider FileSystem; if ($null -eq $d) { Write-Output "{\"error\":\"no-c-drive\"}"; exit 2 }; [pscustomobject]@{UsedGB=[math]::Round(($d.Used/1GB),2);FreeGB=[math]::Round(($d.Free/1GB),2);TotalGB=[math]::Round((($d.Used+$d.Free)/1GB),2)} | ConvertTo-Json -Compress'
 
   local params_json
   params_json="$(jq -nc --arg cmd "$ps_cmd" '{commands:[$cmd]}')"

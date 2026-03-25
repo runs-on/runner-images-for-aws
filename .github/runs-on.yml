@@ -24,3 +24,8 @@ images:
     arch: "x64"
     owner: "135269210855"
     name: "runs-on-dev-windows25-full-x64-*"
+  windows25-gpu-dev-x64:
+    platform: "windows"
+    arch: "x64"
+    owner: "135269210855"
+    name: "runs-on-dev-windows25-gpu-x64-*"
