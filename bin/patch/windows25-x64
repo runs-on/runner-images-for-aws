@@ -23,6 +23,7 @@ TOOLSET_PATH="$toolsets_dir/toolset-2025.json"
 cp patches/windows/build/Install-Runner.ps1 "$release_dir/images/windows/scripts/build/"
 cp patches/windows/build/Install-NativeImages.ps1 "$release_dir/images/windows/scripts/build/"
 cp patches/windows/build/Install-VisualStudio.ps1 "$release_dir/images/windows/scripts/build/"
+cp patches/windows/build/Install-GPU.ps1 "$release_dir/images/windows/scripts/build/"
 
 for file in patches/windows/files/patch-*.ps1; do
   if [ -f "$file" ]; then
