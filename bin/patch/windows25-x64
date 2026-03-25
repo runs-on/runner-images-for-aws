@@ -42,7 +42,7 @@ done
 
 gnu_sed -i "s|Resize-Partition.*|# removed: Resize-Partition|" $build_dir/Configure-BaseImage.ps1
 gnu_sed -i 's/$outputLines\[0\].*/$outputLines | Where-Object { $_ -match "openjdk version" } | Select-Object -First 1 | Should -Match $outputPattern/' $tests_dir/Java.Tests.ps1
-if ! rg -q 'https://api\.adoptium\.net/v3/assets/latest/\$\{JDKVersion\}/hotspot\?architecture=\$\{Architecture\}&os=windows' "$build_dir/Install-JavaTools.ps1"; then
+if ! grep -q 'https://api\.adoptium\.net/v3/assets/latest/${JDKVersion}/hotspot?architecture=${Architecture}&os=windows' "$build_dir/Install-JavaTools.ps1"; then
   gnu_sed -i 's|https://api.adoptium.net/v3/assets/latest/${JDKVersion}/hotspot|https://api.adoptium.net/v3/assets/latest/${JDKVersion}/hotspot?architecture=${Architecture}\&os=windows|' $build_dir/Install-JavaTools.ps1
 fi
 
