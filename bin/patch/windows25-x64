@@ -21,6 +21,7 @@ TOOLSET_PATH="$toolsets_dir/toolset-2025.json"
 
 # restore patched build scripts
 cp patches/windows/build/Install-Runner.ps1 "$release_dir/images/windows/scripts/build/"
+cp patches/windows/build/Install-RunsOnBootstrap.ps1 "$release_dir/images/windows/scripts/build/"
 cp patches/windows/build/Install-NativeImages.ps1 "$release_dir/images/windows/scripts/build/"
 cp patches/windows/build/Install-VisualStudio.ps1 "$release_dir/images/windows/scripts/build/"
 cp patches/windows/build/Install-GPU.ps1 "$release_dir/images/windows/scripts/build/"
@@ -41,6 +42,7 @@ done
 
 gnu_sed -i "s|Resize-Partition.*|# removed: Resize-Partition|" $build_dir/Configure-BaseImage.ps1
 gnu_sed -i 's/$outputLines\[0\].*/$outputLines | Where-Object { $_ -match "openjdk version" } | Select-Object -First 1 | Should -Match $outputPattern/' $tests_dir/Java.Tests.ps1
+gnu_sed -i 's|https://api.adoptium.net/v3/assets/latest/${JDKVersion}/hotspot|https://api.adoptium.net/v3/assets/latest/${JDKVersion}/hotspot?architecture=${Architecture}\&os=windows|' $build_dir/Install-JavaTools.ps1
 
 gnu_sed -i 's|throw "Failed to warmup|# removed: throw "Failed to warmup|' $build_dir/Configure-User.ps1
 gnu_sed -i 's|throw "Failed to copy HKCU|# removed: throw "Failed to copy HKCU|' $build_dir/Configure-User.ps1
