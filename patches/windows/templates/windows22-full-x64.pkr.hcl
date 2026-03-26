@@ -550,6 +550,8 @@ build {
     inline = [
       "Write-Output 'Disabling Windows Recovery Environment before Sysprep.'",
       "reagentc /disable",
+      "Write-Output 'Disabling WinRM in the published AMI.'",
+      "Set-Service -Name WinRM -StartupType Disabled",
       # "if( Test-Path $env:SystemRoot\\System32\\Sysprep\\unattend.xml ){ rm $env:SystemRoot\\System32\\Sysprep\\unattend.xml -Force}",
       "& $env:SystemRoot\\System32\\Sysprep\\Sysprep.exe /oobe /generalize /mode:vm /quiet /quit /unattend:\"C:\\ProgramData\\Amazon\\EC2Launch\\sysprep\\unattend.xml\"",
       "$timeout = New-TimeSpan -Minutes 15",

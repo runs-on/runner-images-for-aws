@@ -54,5 +54,3 @@ $manualServices | ForEach-Object {
 $disabledServices | ForEach-Object {
     Set-RunsOnServicePolicy -Name $_ -StartupType Disabled
 }
-
-Set-RunsOnServicePolicy -Name "WinRM" -StartupType Disabled -StopIfRunning $false
