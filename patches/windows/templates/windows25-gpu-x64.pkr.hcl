@@ -168,6 +168,10 @@ build {
 
   provisioner "powershell" {
     inline = [
+      "Write-Host 'Disabling WinRM in the published AMI...'",
+      "Set-Service -Name WinRM -StartupType Disabled",
+      "Write-Host 'Scheduling WinRM shutdown so Packer does not need to reconnect after final capture starts...'",
+      "$null = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', \"Start-Sleep -Seconds 15; Stop-Service -Name WinRM -Force -ErrorAction SilentlyContinue\")",
       "$OSVersion = [System.Environment]::OSVersion.Version",
       "if ($OSVersion.Major -eq 10 -and $OSVersion.Build -ge 20348) {",
       "    Write-Host 'Windows Server 2022+ detected, using EC2Launch v2'",
