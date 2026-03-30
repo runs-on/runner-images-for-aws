@@ -6,17 +6,17 @@ export AMI_PREFIX=runs-on-dev
 
 define sync_template
 sync-$(1):
-	env $$(shell cat .env) bundle exec bin/sync --image-id $(1)
+	env $$(shell cat .env) mise exec -- bundle exec bin/sync --image-id $(1)
 endef
 
 define build_template
 build-$(1): sync-$(1)
-	env $$(shell cat .env) bundle exec bin/build --image-id $(1)
+	env $$(shell cat .env) mise exec -- bundle exec bin/build --image-id $(1)
 endef
 
 define debug_template
 debug-$(1): sync-$(1)
-	env $$(shell cat .env) bundle exec bin/build --image-id $(1) --debug
+	env $$(shell cat .env) mise exec -- bundle exec bin/build --image-id $(1) --debug
 endef
 
 $(foreach id,$(IMAGE_IDS),$(eval $(call sync_template,$(id))))
@@ -27,10 +27,10 @@ reset:
 	git reset releases && git checkout releases
 
 cleanup-dev:
-	env $(shell cat .env) AMI_PREFIX=runs-on-dev bundle exec bin/utils/cleanup-amis
+	env $(shell cat .env) AMI_PREFIX=runs-on-dev mise exec -- bundle exec bin/utils/cleanup-amis
 
 cleanup-prod:
-	env $(shell cat .env) AMI_PREFIX=runs-on-v2.2 bundle exec bin/utils/cleanup-amis
+	env $(shell cat .env) AMI_PREFIX=runs-on-v2.2 mise exec -- bundle exec bin/utils/cleanup-amis
 
 setup-roles:
 	aws iam create-role --role-name SSMInstanceProfile --assume-role-policy-document '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}'
