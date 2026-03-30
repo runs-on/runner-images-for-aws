@@ -34,7 +34,12 @@ begin
     end
 
     puts "Syncing #{image['id']}..."
-    dist, variant, arch = image['id'].split('-', 3)
+    image_id_parts = image['id'].split('-')
+    fail("Invalid image id: #{image['id']}") if image_id_parts.length < 3
+
+    dist = image_id_parts.first
+    arch = image_id_parts.last
+    variant = image_id_parts[1..-2].join('-')
     release_dir = "releases/#{dist}/#{arch}"
     FileUtils.rm_rf(release_dir)
     FileUtils.mkdir_p(File.dirname(release_dir))
