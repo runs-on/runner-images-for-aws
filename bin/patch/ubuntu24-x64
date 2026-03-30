@@ -14,10 +14,13 @@ if [ -z "$RELEASE_DIR" ]; then
 fi
 
 release_dir="$RELEASE_DIR"
+repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
 build_dir="$release_dir/images/ubuntu/scripts/build"
 custom_dir="$release_dir/images/ubuntu/custom"
 toolsets_dir="$release_dir/images/ubuntu/toolsets"
 TOOLSET_PATH="$toolsets_dir/toolset-2404.json"
+dist_dir="$repo_root/dist"
+rolaunch_bin="$dist_dir/rolaunch-linux-amd64"
 
 # add gpu install script
 cp patches/ubuntu/build/install-gpu.sh "$release_dir/images/ubuntu/scripts/build/"
@@ -27,6 +30,16 @@ cp patches/ubuntu/build/install-runner-package.sh "$release_dir/images/ubuntu/sc
 # custom stuff
 mkdir -p $custom_dir
 cp -r patches/ubuntu/files $custom_dir/
+cp patches/ubuntu/files/bootstrap-minimal-rootfs.sh "$custom_dir/files/"
+mkdir -p "$dist_dir"
+rm -f "$rolaunch_bin"
+(cd tools/rolaunch && mise exec go@1.26 -- env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o "$rolaunch_bin" .)
+if ! command -v upx >/dev/null; then
+  echo "upx is required to compress rolaunch for packer upload" >&2
+  exit 1
+fi
+upx -f -1 "$rolaunch_bin"
+cp "$rolaunch_bin" "$custom_dir/files/rolaunch"
 
 # Save ~3.2GB by removing default docker images
 yq -oj -i '.docker.images = []' $TOOLSET_PATH
