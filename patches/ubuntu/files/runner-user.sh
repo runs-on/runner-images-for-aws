@@ -1,15 +1,23 @@
 #!/bin/bash
 set -ex
 
+disable_units() {
+  systemctl disable "$@" || true
+}
+
 # make sure we have the latest packages
 apt-get update
 apt-get upgrade -y
 
 echo "Setting up runner user..."
-adduser --shell /bin/bash --disabled-password --gecos "" --uid 1001 runner
+if id -u runner >/dev/null 2>&1; then
+  usermod --shell /bin/bash runner
+else
+  adduser --shell /bin/bash --disabled-password --gecos "" --uid 1001 runner
+fi
 usermod -aG sudo runner
-echo "%sudo   ALL=(ALL:ALL) NOPASSWD:ALL" >> /etc/sudoers
-echo "Defaults env_keep += \"DEBIAN_FRONTEND\"" >> /etc/sudoers
+grep -qxF "%sudo   ALL=(ALL:ALL) NOPASSWD:ALL" /etc/sudoers || echo "%sudo   ALL=(ALL:ALL) NOPASSWD:ALL" >> /etc/sudoers
+grep -qxF "Defaults env_keep += \"DEBIAN_FRONTEND\"" /etc/sudoers || echo "Defaults env_keep += \"DEBIAN_FRONTEND\"" >> /etc/sudoers
 
 # add bc, probably installed by PHP script originally
 apt-get install -y bc
@@ -45,7 +53,8 @@ test -s /home/runner/run.sh
 /home/runner/bin/Runner.Listener warmup && rm -rf /home/runner/_diag
 
 # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/set-time.html
-echo 'server 169.254.169.123 prefer iburst minpoll 4 maxpoll 4' >  /etc/chrony/chrony.conf
+install -d -m 0755 /etc/chrony
+echo 'server 169.254.169.123 prefer iburst minpoll 4 maxpoll 4' > /etc/chrony/chrony.conf
 
 echo "Storage=Volatile" >> /etc/systemd/journald.conf
 echo "RuntimeMaxUse=64M" >> /etc/systemd/journald.conf
@@ -53,31 +62,31 @@ echo "RuntimeMaxUse=64M" >> /etc/systemd/journald.conf
 apt-get purge plymouth update-notifier-common multipath-tools -y
 
 # speed-up boot
-systemctl disable timers.target
+disable_units timers.target
 #  dev-hugepages.mount
-systemctl disable console-setup.service hibinit-agent.service grub-initrd-fallback.service qemu-kvm.service lvm2-monitor.service rsyslog.service ubuntu-advantage.service vgauth.service setvtrgb.service systemd-journal-flush.service
-systemctl disable snapd.seeded.service snapd.autoimport.service snapd.core-fixup.service snapd.recovery-chooser-trigger.service snapd.system-shutdown.service
+disable_units console-setup.service hibinit-agent.service grub-initrd-fallback.service qemu-kvm.service lvm2-monitor.service rsyslog.service ubuntu-advantage.service vgauth.service setvtrgb.service systemd-journal-flush.service
+disable_units snapd.seeded.service snapd.autoimport.service snapd.core-fixup.service snapd.recovery-chooser-trigger.service snapd.system-shutdown.service snapd.apparmor.service snapd.core-fixup.service
 # only on ubuntu 22.04
-systemctl disable update-notifier-download.service plymouth-quit.service plymouth-quit-wait.service || true
-systemctl disable libvirt-guests.service libvirtd.service systemd-machined.service || true
-systemctl disable mono-xsp4.service || true
-systemctl disable containerd.service docker.service
-systemctl disable apport.service logrotate.service grub-common.service keyboard-setup.service systemd-update-utmp.service systemd-fsck-root.service systemd-tmpfiles-setup.service apparmor.service e2scrub_reap.service || true
-systemctl disable ufw.service snapd.service snap.lxd.activate.service snapd.apparmor.service ec2-instance-connect.service snap.amazon-ssm-agent.amazon-ssm-agent.service cron.service || true
+disable_units update-notifier-download.service plymouth-quit.service plymouth-quit-wait.service
+disable_units libvirt-guests.service libvirtd.service systemd-machined.service
+disable_units mono-xsp4.service
+disable_units containerd.service docker.service
+disable_units apport.service logrotate.service grub-common.service keyboard-setup.service systemd-update-utmp.service systemd-fsck-root.service systemd-tmpfiles-setup.service apparmor.service e2scrub_reap.service
+disable_units ufw.service snapd.service snap.lxd.activate.service snapd.apparmor.service ec2-instance-connect.service snap.amazon-ssm-agent.amazon-ssm-agent.service cron.service
 # Disable firmware update services, not needed for one-shot runners
-systemctl disable fwupd.service fwupd-refresh.service || true
+disable_units fwupd.service fwupd-refresh.service
 # Disable dpkg-db-backup service, not needed for one-shot runners
-systemctl disable dpkg-db-backup.service dpkg-db-backup.timer || true
+disable_units dpkg-db-backup.service dpkg-db-backup.timer
 # Can spawn every 24h, not needed for one-shot runners
-systemctl disable apt-news.service esm-cache.service || true
-systemctl disable ec2-instance-connect.service ec2-instance-connect-harvest-hostkeys.service || true
-systemctl disable ModemManager.service || true
+disable_units apt-news.service esm-cache.service
+disable_units ec2-instance-connect.service ec2-instance-connect-harvest-hostkeys.service
+disable_units ModemManager.service
 
 # disable all podman services
-find /lib/systemd/system -name 'podman*' -type f -exec systemctl disable {} \;
+find /lib/systemd/system -name 'podman*' -type f -exec systemctl disable {} \; || true
 
 # disable all php services
-find /lib/systemd/system -name 'php*' -type f -exec systemctl disable {} \;
+find /lib/systemd/system -name 'php*' -type f -exec systemctl disable {} \; || true
 
 # cleanup
 rm -f /home/ubuntu/minikube-linux-amd64
