@@ -297,7 +297,7 @@ if [[ -z "$ROOT_PARTUUID" ]]; then
   exit 1
 fi
 
-run_logged "formatting $loop_partition as ext4" mkfs.ext4 -F -m 0 -E lazy_itable_init=0,lazy_journal_init=0 -L cloudimg-rootfs "$loop_partition"
+run_logged "formatting $loop_partition as ext4" mkfs.ext4 -F -i 65536 -m 0 -E lazy_itable_init=0,lazy_journal_init=0 -L cloudimg-rootfs "$loop_partition"
 mkdir -p "$TARGET_ROOT_MOUNT"
 run_logged "mounting sparse root filesystem" mount -o discard "$loop_partition" "$TARGET_ROOT_MOUNT"
 

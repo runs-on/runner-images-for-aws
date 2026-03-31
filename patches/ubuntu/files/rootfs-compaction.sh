@@ -82,9 +82,22 @@ finalize_sparse_rootfs_image() {
   local loop_disk="$2"
   local sparse_image="$3"
   local target_disk="$4"
-  local cleanup_handler="${5:-}"
+  local pre_trim_handler=""
+  local cleanup_handler=""
+
+  if [[ $# -ge 6 ]]; then
+    pre_trim_handler="${5:-}"
+    cleanup_handler="${6:-}"
+  else
+    cleanup_handler="${5:-}"
+  fi
 
   scrub_rootfs_mount_for_image "$mount_dir"
+
+  if [[ -n "$pre_trim_handler" ]] && declare -F "$pre_trim_handler" >/dev/null 2>&1; then
+    "$pre_trim_handler" "$mount_dir"
+  fi
+
   trim_rootfs_mount "$mount_dir"
 
   if [[ -n "$cleanup_handler" ]] && declare -F "$cleanup_handler" >/dev/null 2>&1; then
