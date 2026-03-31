@@ -41,6 +41,14 @@ images:
     source_ami_owner: 099720109477
     description: RunsOn Ubuntu24 x64
 
+  - id: ubuntu24-minimal-x64
+    instance_type: m8azn.large
+    volume_size: 4
+    volume_throughput: 750
+    source_ami_name: ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*
+    source_ami_owner: 099720109477
+    description: RunsOn Ubuntu24 minimal x64
+
   - id: ubuntu24-full-arm64
     instance_type: m8g.large
     volume_size: 30
