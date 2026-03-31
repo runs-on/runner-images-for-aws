@@ -32,6 +32,18 @@ cleanup_root() {
   set -e
 }
 
+prepare_rootfs_for_compaction() {
+  local root="$1"
+
+  if [[ -f "${root}${INSTALLER_SCRIPT_FOLDER}/cleanup.sh" ]]; then
+    log "running installer cleanup inside target root"
+    ro-run-script-in-target "${INSTALLER_SCRIPT_FOLDER}/cleanup.sh"
+  fi
+
+  log "compressing target docker binaries with host-side UPX"
+  compress_target_docker_binaries
+}
+
 install_host_upx() {
   local upx_url=""
 
@@ -96,16 +108,14 @@ fi
 
 source "${MINIMAL_TARGET_STATE_FILE}"
 
-if [[ -f "${TARGET_ROOT_MOUNT}${INSTALLER_SCRIPT_FOLDER}/cleanup.sh" ]]; then
-  log "running installer cleanup inside target root"
-  ro-run-script-in-target "${INSTALLER_SCRIPT_FOLDER}/cleanup.sh"
-fi
-
-log "compressing target docker binaries with host-side UPX"
-compress_target_docker_binaries
-
 log "finalizing sparse rootfs image"
-finalize_sparse_rootfs_image "${TARGET_ROOT_MOUNT}" "${LOOP_DISK}" "${SPARSE_IMAGE}" "${TARGET_DISK}" cleanup_root
+finalize_sparse_rootfs_image \
+  "${TARGET_ROOT_MOUNT}" \
+  "${LOOP_DISK}" \
+  "${SPARSE_IMAGE}" \
+  "${TARGET_DISK}" \
+  prepare_rootfs_for_compaction \
+  cleanup_root
 
 log "materialization completed; clearing build state"
 rm -f "${MINIMAL_TARGET_STATE_FILE}"
