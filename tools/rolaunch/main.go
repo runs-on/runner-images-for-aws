@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -36,12 +37,13 @@ const (
 	defaultResolverConfigPath = "/etc/resolv.conf"
 	defaultEC2Resolver        = "169.254.169.253"
 	defaultAptSourcesListPath = "/etc/apt/sources.list"
+	defaultAptSourcesDeb822   = "/etc/apt/sources.list.d/ubuntu.sources"
 	defaultReadinessTimeout   = 5 * time.Minute
 	defaultReadinessInterval  = 250 * time.Millisecond
 	defaultIMDSRequestTimeout = 5 * time.Second
 )
 
-var ubuntuArchiveMirrorPattern = regexp.MustCompile(`https?://(?:[a-z0-9-]+\.)?ec2\.archive\.ubuntu\.com/ubuntu`)
+var ubuntuArchiveMirrorPattern = regexp.MustCompile(`https?://(?:(?:azure|[a-z0-9-]+\.ec2)\.)?archive\.ubuntu\.com/ubuntu/?`)
 
 // NOTE: cloud-initramfs-growroot and cloud-guest-utils are still useful if root-volume resize
 // support is required later, even if they are not part of this first iteration.
@@ -94,6 +96,8 @@ func run(ctx context.Context, cfg config) error {
 		return err
 	}
 
+	rootResizeDone := startRootFilesystemResize(ctx)
+
 	if err := os.MkdirAll(cfg.workDir, 0o700); err != nil {
 		return fmt.Errorf("create workdir: %w", err)
 	}
@@ -117,6 +121,7 @@ func run(ctx context.Context, cfg config) error {
 		return err
 	}
 	if alreadyProcessed {
+		waitForRootFilesystemResize(rootResizeDone)
 		log.Printf("userdata already processed for instance %s, skipping", instanceID)
 		return nil
 	}
@@ -136,6 +141,7 @@ func run(ctx context.Context, cfg config) error {
 
 	raw = normalizeUserData(raw)
 	if len(raw) == 0 {
+		waitForRootFilesystemResize(rootResizeDone)
 		if err := markDone(cfg.doneMarker, instanceID); err != nil {
 			return err
 		}
@@ -157,7 +163,9 @@ func run(ctx context.Context, cfg config) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	if err := cmd.Run(); err != nil {
+	err = cmd.Run()
+	waitForRootFilesystemResize(rootResizeDone)
+	if err != nil {
 		if ctx.Err() != nil {
 			return fmt.Errorf("executing userdata script: %w", ctx.Err())
 		}
@@ -220,6 +228,221 @@ func resolverConfigHasEC2Resolver(raw []byte) bool {
 		}
 	}
 	return false
+}
+
+func startRootFilesystemResize(ctx context.Context) <-chan error {
+	done := make(chan error, 1)
+	go func() {
+		done <- maybeResizeRootFilesystem(ctx)
+		close(done)
+	}()
+	return done
+}
+
+func waitForRootFilesystemResize(done <-chan error) {
+	if done == nil {
+		return
+	}
+	if err := <-done; err != nil {
+		log.Printf("warning: root filesystem resize skipped: %v", err)
+	}
+}
+
+func maybeResizeRootFilesystem(ctx context.Context) error {
+	rootPartition, fsType, err := rootMountInfo()
+	if err != nil {
+		return err
+	}
+
+	device, partNum, err := parseBlockDevicePartition(rootPartition)
+	if err != nil {
+		return err
+	}
+
+	partName := filepath.Base(rootPartition)
+	diskName := filepath.Base(device)
+
+	partSize, err := readSysfsSize(partName)
+	if err != nil {
+		return fmt.Errorf("read partition size for %s: %w", partName, err)
+	}
+	diskSectors, err := readSysfsBlockAttrInt(diskName, "size")
+	if err != nil {
+		return fmt.Errorf("read disk sectors for %s: %w", diskName, err)
+	}
+	partSectors, err := readSysfsBlockAttrInt(partName, "size")
+	if err != nil {
+		return fmt.Errorf("read partition sectors for %s: %w", partName, err)
+	}
+	partStartSectors, err := readSysfsStart(partName)
+	if err != nil {
+		return fmt.Errorf("read partition start for %s: %w", partName, err)
+	}
+
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs("/", &stat); err != nil {
+		return fmt.Errorf("statfs /: %w", err)
+	}
+	fsSize := int64(stat.Blocks) * int64(stat.Bsize)
+
+	growableSectors := growableSectorsAtEnd(diskSectors, partStartSectors, partSectors)
+	needGrowpart := diskSectors > 0 && partSectors > 0 && growableSectors > diskSectors/100
+	needResizeFsByGap := partSize > 0 && fsSize > 0 && (partSize-fsSize) > partSize/100
+	needResizeFs := needGrowpart || needResizeFsByGap
+
+	if !needGrowpart && !needResizeFs {
+		return nil
+	}
+
+	log.Printf(
+		"root resize needed: root=%s fs=%s part_start=%d part_size=%d fs_size=%d growable=%d needGrowpart=%v needResizeFs=%v",
+		rootPartition,
+		fsType,
+		partStartSectors,
+		partSize,
+		fsSize,
+		growableSectors*512,
+		needGrowpart,
+		needResizeFs,
+	)
+
+	if needGrowpart {
+		if _, err := exec.LookPath("growpart"); err != nil {
+			return fmt.Errorf("growpart not available: %w", err)
+		}
+
+		out, err := exec.CommandContext(ctx, "growpart", device, partNum).CombinedOutput()
+		text := strings.TrimSpace(string(out))
+		if err != nil {
+			if strings.Contains(text, "NOCHANGE:") {
+				log.Printf("growpart returned NOCHANGE, continuing: %s", text)
+			} else {
+				return fmt.Errorf("growpart %s %s failed: %w (output: %s)", device, partNum, err, text)
+			}
+		} else if text != "" {
+			log.Printf("growpart output: %s", text)
+		}
+
+		if _, err := exec.LookPath("udevadm"); err == nil {
+			if out, err := exec.CommandContext(ctx, "udevadm", "settle").CombinedOutput(); err != nil {
+				log.Printf("warning: udevadm settle failed after growpart: %v (%s)", err, strings.TrimSpace(string(out)))
+			}
+		}
+	}
+
+	if !needResizeFs {
+		return nil
+	}
+
+	var (
+		cmdName string
+		cmdArgs []string
+	)
+
+	switch fsType {
+	case "ext2", "ext3", "ext4":
+		cmdName = "resize2fs"
+		cmdArgs = []string{rootPartition}
+	case "xfs":
+		cmdName = "xfs_growfs"
+		cmdArgs = []string{"/"}
+	default:
+		log.Printf("warning: unsupported root filesystem %q, skipping resize", fsType)
+		return nil
+	}
+
+	if _, err := exec.LookPath(cmdName); err != nil {
+		return fmt.Errorf("%s not available: %w", cmdName, err)
+	}
+
+	out, err := exec.CommandContext(ctx, cmdName, cmdArgs...).CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if err != nil {
+		return fmt.Errorf("%s failed: %w (output: %s)", cmdName, err, text)
+	}
+	if text != "" {
+		log.Printf("%s output: %s", cmdName, text)
+	}
+
+	return nil
+}
+
+func rootMountInfo() (string, string, error) {
+	if out, err := exec.Command("findmnt", "-n", "-o", "SOURCE,FSTYPE", "/").CombinedOutput(); err == nil {
+		fields := strings.Fields(strings.TrimSpace(string(out)))
+		if len(fields) >= 2 {
+			return fields[0], fields[1], nil
+		}
+	}
+
+	raw, err := os.ReadFile("/proc/mounts")
+	if err != nil {
+		return "", "", fmt.Errorf("read /proc/mounts: %w", err)
+	}
+
+	for _, line := range strings.Split(string(raw), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[1] == "/" {
+			return fields[0], fields[2], nil
+		}
+	}
+
+	return "", "", fmt.Errorf("root mount not found in /proc/mounts")
+}
+
+func parseBlockDevicePartition(rootPartition string) (string, string, error) {
+	var matches []string
+
+	if strings.Contains(rootPartition, "nvme") || strings.Contains(rootPartition, "mmcblk") {
+		matches = regexp.MustCompile(`^(.+?)(p\d+)$`).FindStringSubmatch(rootPartition)
+		if len(matches) == 3 {
+			return matches[1], strings.TrimPrefix(matches[2], "p"), nil
+		}
+	} else {
+		matches = regexp.MustCompile(`^(.+?)(\d+)$`).FindStringSubmatch(rootPartition)
+		if len(matches) == 3 {
+			return matches[1], matches[2], nil
+		}
+	}
+
+	return "", "", fmt.Errorf("parse root block device %q", rootPartition)
+}
+
+func readSysfsBlockAttrInt(name, attr string) (int64, error) {
+	data, err := os.ReadFile(filepath.Join("/sys/class/block", name, attr))
+	if err != nil {
+		return 0, err
+	}
+	value, err := strconv.ParseInt(strings.TrimSpace(string(data)), 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return value, nil
+}
+
+func readSysfsSize(name string) (int64, error) {
+	sectors, err := readSysfsBlockAttrInt(name, "size")
+	if err != nil {
+		return 0, err
+	}
+	return sectors * 512, nil
+}
+
+func readSysfsStart(name string) (int64, error) {
+	return readSysfsBlockAttrInt(name, "start")
+}
+
+func growableSectorsAtEnd(diskSectors, partStartSectors, partSectors int64) int64 {
+	if diskSectors <= 0 || partSectors <= 0 || partStartSectors < 0 {
+		return 0
+	}
+
+	growable := diskSectors - (partStartSectors + partSectors)
+	if growable < 0 {
+		return 0
+	}
+
+	return growable
 }
 
 func waitForReadinessAndFetchToken(ctx context.Context, cfg config) (string, error) {
@@ -292,13 +515,19 @@ func ensureLocalAptMirror(ctx context.Context, cfg config, token string) error {
 	}
 
 	mirror := fmt.Sprintf("http://%s.ec2.archive.ubuntu.com/ubuntu", region)
-	updated, err := rewriteAptSourcesFile(defaultAptSourcesListPath, mirror)
-	if err != nil {
-		return err
+	updatedPaths := make([]string, 0, 2)
+	for _, path := range []string{defaultAptSourcesListPath, defaultAptSourcesDeb822} {
+		updated, err := rewriteAptSourcesFile(path, mirror)
+		if err != nil {
+			return err
+		}
+		if updated {
+			updatedPaths = append(updatedPaths, path)
+		}
 	}
 
-	if updated {
-		log.Printf("configured apt archive mirror %s", mirror)
+	if len(updatedPaths) > 0 {
+		log.Printf("configured apt archive mirror %s in %s", mirror, strings.Join(updatedPaths, ", "))
 	}
 
 	return nil

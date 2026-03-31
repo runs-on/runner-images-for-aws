@@ -118,6 +118,30 @@ func TestRewriteUbuntuArchiveMirrorsSourcesList(t *testing.T) {
 	}
 }
 
+func TestRewriteUbuntuArchiveMirrorsDeb822Sources(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte("Types: deb\n" +
+		"URIs: http://azure.archive.ubuntu.com/ubuntu/\n" +
+		"Suites: noble noble-updates noble-backports\n" +
+		"Components: main restricted universe multiverse\n" +
+		"Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n")
+
+	updated, changed := rewriteUbuntuArchiveMirrors(raw, "http://eu-west-3.ec2.archive.ubuntu.com/ubuntu")
+	if !changed {
+		t.Fatal("expected archive mirror rewrite")
+	}
+
+	want := "Types: deb\n" +
+		"URIs: http://eu-west-3.ec2.archive.ubuntu.com/ubuntu\n" +
+		"Suites: noble noble-updates noble-backports\n" +
+		"Components: main restricted universe multiverse\n" +
+		"Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n"
+	if got := string(updated); got != want {
+		t.Fatalf("unexpected rewritten ubuntu.sources contents: %q", got)
+	}
+}
+
 func TestFetchInstanceRegionUsesPlacementRegion(t *testing.T) {
 	t.Parallel()
 
