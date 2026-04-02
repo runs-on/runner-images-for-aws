@@ -23,6 +23,7 @@ import (
 const (
 	defaultIMDSEndpoint       = "http://169.254.169.254"
 	defaultWorkDir            = "/var/lib/rolaunch"
+	defaultIdentityName       = "instance-identity.json"
 	defaultUserDataName       = "user-data.sh"
 	defaultDoneMarkerName     = "runs-on-user-data.done"
 	defaultUbuntuUser         = "ubuntu"
@@ -32,11 +33,12 @@ const (
 	defaultEC2Resolver        = "169.254.169.253"
 	defaultAptSourcesListPath = "/etc/apt/sources.list"
 	defaultAptSourcesDeb822   = "/etc/apt/sources.list.d/ubuntu.sources"
-	defaultTimingsPath        = "/runs-on/timings.json"
+	defaultTimingsPath        = defaultWorkDir + "/timings.json"
 	defaultRunnerListenerPath = "/home/runner/bin/Runner.Listener"
 	defaultRunnerUser         = "runner"
-	defaultReadinessTimeout   = 5 * time.Minute
-	defaultReadinessInterval  = 250 * time.Millisecond
+	defaultReadinessTimeout   = 3 * time.Minute
+	defaultReadinessInterval  = 50 * time.Millisecond
+	enableRunnerWarmup        = false
 )
 
 var ubuntuArchiveMirrorPattern = regexp.MustCompile(`https?://(?:(?:azure|[a-z0-9-]+\.ec2)\.)?archive\.ubuntu\.com/ubuntu/?`)
@@ -47,6 +49,7 @@ type config struct {
 	imdsBase     string
 	timeout      time.Duration
 	workDir      string
+	identityPath string
 	userDataPath string
 	doneMarker   string
 	timingsPath  string
@@ -61,8 +64,23 @@ type authorizedKeysTarget struct {
 }
 
 type instanceIdentity struct {
-	InstanceID string `json:"instanceId"`
-	Region     string `json:"region"`
+	DevpayProductCodes      []string  `json:"devpayProductCodes,omitempty"`
+	MarketplaceProductCodes []string  `json:"marketplaceProductCodes,omitempty"`
+	AvailabilityZone        string    `json:"availabilityZone"`
+	PrivateIP               string    `json:"privateIp"`
+	Version                 string    `json:"version,omitempty"`
+	Region                  string    `json:"region"`
+	InstanceID              string    `json:"instanceId"`
+	BillingProducts         []string  `json:"billingProducts,omitempty"`
+	InstanceType            string    `json:"instanceType"`
+	AccountID               string    `json:"accountId,omitempty"`
+	PendingTime             time.Time `json:"pendingTime"`
+	ImageID                 string    `json:"imageId"`
+	KernelID                string    `json:"kernelId,omitempty"`
+	RamdiskID               string    `json:"ramdiskId,omitempty"`
+	Architecture            string    `json:"architecture"`
+	PublicIPv4              *string   `json:"publicIpv4,omitempty"`
+	InstanceLifecycle       *string   `json:"instanceLifecycle,omitempty"`
 }
 
 type taskResult[T any] struct {
@@ -95,6 +113,7 @@ type launcherOps struct {
 	makeWorkDir                 func(string) error
 	ensureResolverConfig        func(string) error
 	waitForInstanceIdentity     func(context.Context, config) (instanceIdentity, error)
+	enrichInstanceIdentity      func(context.Context, config, instanceIdentity) (instanceIdentity, error)
 	fetchUserData               func(context.Context, config) ([]byte, error)
 	fetchTemporaryPublicKey     func(context.Context, config) ([]byte, error)
 	prefetchMatchingBootstrap   func(context.Context, config, string, []byte) (bool, error)
@@ -117,6 +136,9 @@ func defaultLauncherOps() launcherOps {
 		ensureResolverConfig: ensureResolverConfig,
 		waitForInstanceIdentity: func(ctx context.Context, cfg config) (instanceIdentity, error) {
 			return awsState.waitForReadinessAndFetchIdentity(ctx, cfg)
+		},
+		enrichInstanceIdentity: func(ctx context.Context, cfg config, identity instanceIdentity) (instanceIdentity, error) {
+			return awsState.enrichOptionalInstanceIdentity(ctx, cfg, identity)
 		},
 		fetchUserData: func(ctx context.Context, cfg config) ([]byte, error) {
 			return awsState.fetchUserData(ctx, cfg)
@@ -150,6 +172,7 @@ func main() {
 		imdsBase:     *imdsEndpoint,
 		timeout:      *timeout,
 		workDir:      *workDir,
+		identityPath: filepath.Join(*workDir, defaultIdentityName),
 		userDataPath: filepath.Join(*workDir, defaultUserDataName),
 		doneMarker:   filepath.Join(*workDir, defaultDoneMarkerName),
 		timingsPath:  defaultTimingsPath,
@@ -170,10 +193,9 @@ func run(ctx context.Context, cfg config) error {
 func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 	recorder := newTimingRecorder()
 	recorder.add("rolaunch.started")
+	persistTimingMilestones(recorder, cfg.timingsPath)
 	defer func() {
-		if err := recorder.save(cfg.timingsPath); err != nil {
-			log.Printf("warning: failed to save timing milestones to %s: %v", cfg.timingsPath, err)
-		}
+		persistTimingMilestones(recorder, cfg.timingsPath)
 	}()
 
 	rootResizeDone := ops.startRootFilesystemResize(ctx)
@@ -185,12 +207,14 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 		recorder.add("rolaunch.host-key-ready")
 		return nil
 	})
-	warmupTask := startAsync(func() (bool, error) {
-		return ops.warmupRunner(ctx)
-	})
-	defer func() {
-		finishWarmupTask(warmupTask, recorder)
-	}()
+	if enableRunnerWarmup {
+		warmupTask := startAsync(func() (bool, error) {
+			return ops.warmupRunner(ctx)
+		})
+		defer func() {
+			finishWarmupTask(warmupTask, recorder)
+		}()
+	}
 	workDirTask := startAsyncTask(func() error {
 		if err := ops.makeWorkDir(cfg.workDir); err != nil {
 			return fmt.Errorf("create workdir: %w", err)
@@ -213,6 +237,21 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 	if err != nil {
 		return fmt.Errorf("discover instance identity: %w", err)
 	}
+	optionalIdentityTask := startAsync(func() (instanceIdentity, error) {
+		return ops.enrichInstanceIdentity(ctx, cfg, identity)
+	})
+
+	persistIdentity := func() {
+		persistedIdentity := identity
+		if enrichedIdentity, err := optionalIdentityTask.wait(); err != nil {
+			log.Printf("warning: failed to enrich optional instance metadata: %v", err)
+		} else {
+			persistedIdentity = enrichedIdentity
+		}
+		if err := saveInstanceIdentity(cfg.identityPath, persistedIdentity); err != nil {
+			log.Printf("warning: failed to persist instance identity to %s: %v", cfg.identityPath, err)
+		}
+	}
 
 	alreadyProcessed, err := ops.markerMatchesInstance(cfg.doneMarker, identity.InstanceID)
 	if err != nil {
@@ -222,6 +261,7 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 		if err := waitAllTasks(hostKeyTask, workDirTask, resolverTask); err != nil {
 			return err
 		}
+		persistIdentity()
 		if ops.waitForRootFilesystemResize(rootResizeDone) {
 			recorder.add("rolaunch.root-resize-finished")
 		}
@@ -261,6 +301,7 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 	if err := waitAllTasks(hostKeyTask, workDirTask, resolverTask); err != nil {
 		return err
 	}
+	persistIdentity()
 
 	applyTasks := []asyncResult[struct{}]{
 		startAsyncTask(func() error {
@@ -927,6 +968,12 @@ func newTimingRecorder() *timingRecorder {
 	return &timingRecorder{}
 }
 
+func persistTimingMilestones(recorder *timingRecorder, path string) {
+	if err := recorder.save(path); err != nil {
+		log.Printf("warning: failed to save timing milestones to %s: %v", path, err)
+	}
+}
+
 func (r *timingRecorder) add(name string, at ...time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -964,6 +1011,7 @@ func (r *timingRecorder) save(path string) error {
 	sort.SliceStable(merged, func(i, j int) bool {
 		return merged[i].Time.Before(merged[j].Time)
 	})
+	merged = dedupeTimingSteps(merged)
 
 	data, err := json.Marshal(merged)
 	if err != nil {
@@ -993,6 +1041,24 @@ func (r *timingRecorder) save(path string) error {
 	return nil
 }
 
+func dedupeTimingSteps(steps []Step) []Step {
+	if len(steps) == 0 {
+		return nil
+	}
+
+	deduped := make([]Step, 0, len(steps))
+	seen := make(map[string]struct{}, len(steps))
+	for _, step := range steps {
+		key := step.Name + "\x00" + step.Time.UTC().Format(time.RFC3339Nano)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		deduped = append(deduped, step)
+	}
+	return deduped
+}
+
 func loadTimingSteps(path string) ([]Step, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -1000,6 +1066,9 @@ func loadTimingSteps(path string) ([]Step, error) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("read timings file: %w", err)
+	}
+	if len(bytes.TrimSpace(data)) == 0 {
+		return nil, nil
 	}
 
 	var steps []Step

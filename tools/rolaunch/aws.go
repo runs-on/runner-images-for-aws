@@ -16,6 +16,7 @@ import (
 	"time"
 
 	aws "github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -30,7 +31,6 @@ const (
 type awsState struct {
 	mu             sync.Mutex
 	metadataClient *imds.Client
-	metadataErr    error
 	s3Clients      map[string]*s3.Client
 	s3Errors       map[string]error
 }
@@ -79,10 +79,7 @@ func (s *awsState) waitForReadinessAndFetchIdentity(ctx context.Context, cfg con
 }
 
 func (s *awsState) fetchInstanceIdentity(ctx context.Context, cfg config) (instanceIdentity, error) {
-	client, err := s.metadataClientFor(ctx, cfg)
-	if err != nil {
-		return instanceIdentity{}, err
-	}
+	client := s.metadataClientFor(cfg)
 
 	output, err := client.GetInstanceIdentityDocument(ctx, &imds.GetInstanceIdentityDocumentInput{})
 	if err != nil {
@@ -90,8 +87,21 @@ func (s *awsState) fetchInstanceIdentity(ctx context.Context, cfg config) (insta
 	}
 
 	identity := instanceIdentity{
-		InstanceID: strings.TrimSpace(output.InstanceID),
-		Region:     strings.TrimSpace(output.Region),
+		DevpayProductCodes:      append([]string(nil), output.DevpayProductCodes...),
+		MarketplaceProductCodes: append([]string(nil), output.MarketplaceProductCodes...),
+		AvailabilityZone:        strings.TrimSpace(output.AvailabilityZone),
+		PrivateIP:               strings.TrimSpace(output.PrivateIP),
+		Version:                 strings.TrimSpace(output.Version),
+		Region:                  strings.TrimSpace(output.Region),
+		InstanceID:              strings.TrimSpace(output.InstanceID),
+		BillingProducts:         append([]string(nil), output.BillingProducts...),
+		InstanceType:            strings.TrimSpace(output.InstanceType),
+		AccountID:               strings.TrimSpace(output.AccountID),
+		PendingTime:             output.PendingTime,
+		ImageID:                 strings.TrimSpace(output.ImageID),
+		KernelID:                strings.TrimSpace(output.KernelID),
+		RamdiskID:               strings.TrimSpace(output.RamdiskID),
+		Architecture:            strings.TrimSpace(output.Architecture),
 	}
 	if identity.InstanceID == "" {
 		return instanceIdentity{}, fmt.Errorf("received empty instance-id from IMDS")
@@ -99,14 +109,36 @@ func (s *awsState) fetchInstanceIdentity(ctx context.Context, cfg config) (insta
 	if identity.Region == "" {
 		return instanceIdentity{}, fmt.Errorf("received empty region from IMDS")
 	}
+
+	return identity, nil
+}
+
+func (s *awsState) enrichOptionalInstanceIdentity(ctx context.Context, cfg config, identity instanceIdentity) (instanceIdentity, error) {
+	if body, found, err := s.fetchMetadataPath(ctx, cfg, "public-ipv4"); err == nil {
+		value := ""
+		if found {
+			value = strings.TrimSpace(string(body))
+		}
+		identity.PublicIPv4 = &value
+	} else {
+		return instanceIdentity{}, err
+	}
+
+	if body, found, err := s.fetchMetadataPath(ctx, cfg, "instance-life-cycle"); err == nil {
+		value := ""
+		if found {
+			value = strings.TrimSpace(string(body))
+		}
+		identity.InstanceLifecycle = &value
+	} else {
+		return instanceIdentity{}, err
+	}
+
 	return identity, nil
 }
 
 func (s *awsState) fetchUserData(ctx context.Context, cfg config) ([]byte, error) {
-	client, err := s.metadataClientFor(ctx, cfg)
-	if err != nil {
-		return nil, err
-	}
+	client := s.metadataClientFor(cfg)
 
 	output, err := client.GetUserData(ctx, &imds.GetUserDataInput{})
 	if err != nil {
@@ -145,10 +177,7 @@ func (s *awsState) fetchTemporaryPublicKey(ctx context.Context, cfg config) ([]b
 }
 
 func (s *awsState) fetchMetadataPath(ctx context.Context, cfg config, path string) ([]byte, bool, error) {
-	client, err := s.metadataClientFor(ctx, cfg)
-	if err != nil {
-		return nil, false, err
-	}
+	client := s.metadataClientFor(cfg)
 
 	output, err := client.GetMetadata(ctx, &imds.GetMetadataInput{Path: path})
 	if err != nil {
@@ -198,22 +227,23 @@ func (s *awsState) prefetchMatchingBootstrap(ctx context.Context, cfg config, re
 	return true, nil
 }
 
-func (s *awsState) metadataClientFor(ctx context.Context, cfg config) (*imds.Client, error) {
+func (s *awsState) metadataClientFor(cfg config) *imds.Client {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.metadataClient != nil || s.metadataErr != nil {
-		return s.metadataClient, s.metadataErr
+	if s.metadataClient != nil {
+		return s.metadataClient
 	}
 
-	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, metadataLoadOptions(cfg)...)
-	if err != nil {
-		s.metadataErr = fmt.Errorf("load AWS config: %w", err)
-		return nil, s.metadataErr
-	}
-
-	s.metadataClient = imds.NewFromConfig(awsCfg, imdsClientOptions(cfg)...)
-	return s.metadataClient, nil
+	// The readiness loop already retries aggressively around IMDS availability,
+	// so keep the per-attempt client bootstrap minimal and avoid extra SDK retries.
+	s.metadataClient = imds.New(imds.Options{
+		ClientEnableState:        imds.ClientEnabled,
+		Endpoint:                 cfg.imdsBase,
+		Retryer:                  retry.AddWithMaxAttempts(retry.NewStandard(), 1),
+		DisableDefaultMaxBackoff: true,
+	})
+	return s.metadataClient
 }
 
 func (s *awsState) s3ClientFor(ctx context.Context, cfg config, region string) (*s3.Client, error) {
@@ -252,17 +282,6 @@ func metadataLoadOptions(cfg config) []func(*awsconfig.LoadOptions) error {
 		options = append(options, awsconfig.WithEC2IMDSEndpoint(cfg.imdsBase))
 	}
 	return options
-}
-
-func imdsClientOptions(cfg config) []func(*imds.Options) {
-	if cfg.imdsBase == "" {
-		return nil
-	}
-	return []func(*imds.Options){
-		func(options *imds.Options) {
-			options.Endpoint = cfg.imdsBase
-		},
-	}
 }
 
 func imdsStatusCode(err error) int {

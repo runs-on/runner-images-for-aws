@@ -95,21 +95,12 @@ func TestRunFetchesIdentityWithoutWaitingForLocalPrep(t *testing.T) {
 
 	hostKeyRelease := make(chan struct{})
 	hostKeyDone := make(chan struct{})
-	warmupRelease := make(chan struct{})
-	warmupDone := make(chan struct{})
 	identityStarted := make(chan struct{})
-	warmupStarted := make(chan struct{})
 
 	ops.ensureHostKey = func() error {
 		<-hostKeyRelease
 		close(hostKeyDone)
 		return nil
-	}
-	ops.warmupRunner = func(context.Context) (bool, error) {
-		close(warmupStarted)
-		<-warmupRelease
-		close(warmupDone)
-		return false, nil
 	}
 	ops.waitForInstanceIdentity = func(context.Context, config) (instanceIdentity, error) {
 		close(identityStarted)
@@ -121,12 +112,9 @@ func TestRunFetchesIdentityWithoutWaitingForLocalPrep(t *testing.T) {
 	})
 
 	waitForSignal(t, identityStarted, "instance identity fetch start")
-	waitForSignal(t, warmupStarted, "runner warmup start")
 	assertNotSignaled(t, hostKeyDone, "host key completion")
-	assertNotSignaled(t, warmupDone, "runner warmup completion")
 
 	close(hostKeyRelease)
-	close(warmupRelease)
 	if err := <-runDone; err != nil {
 		t.Fatalf("runWithOps returned error: %v", err)
 	}
@@ -171,6 +159,43 @@ func TestRunStartsMetadataFetchesAfterIdentity(t *testing.T) {
 	waitForSignal(t, publicKeyStarted, "public key fetch")
 
 	close(releaseMetadata)
+	if err := <-runDone; err != nil {
+		t.Fatalf("runWithOps returned error: %v", err)
+	}
+}
+
+func TestRunStartsMetadataFetchesBeforeOptionalIdentityMetadataCompletes(t *testing.T) {
+	cfg := testConfig(t.TempDir())
+	ops := testLauncherOps()
+
+	enrichmentStarted := make(chan struct{})
+	releaseEnrichment := make(chan struct{})
+	userDataStarted := make(chan struct{})
+	publicKeyStarted := make(chan struct{})
+
+	ops.enrichInstanceIdentity = func(_ context.Context, _ config, identity instanceIdentity) (instanceIdentity, error) {
+		close(enrichmentStarted)
+		<-releaseEnrichment
+		return identity, nil
+	}
+	ops.fetchUserData = func(context.Context, config) ([]byte, error) {
+		close(userDataStarted)
+		return nil, nil
+	}
+	ops.fetchTemporaryPublicKey = func(context.Context, config) ([]byte, error) {
+		close(publicKeyStarted)
+		return nil, nil
+	}
+
+	runDone := runAsync(func() error {
+		return runWithOps(context.Background(), cfg, ops)
+	})
+
+	waitForSignal(t, enrichmentStarted, "optional instance metadata enrichment")
+	waitForSignal(t, userDataStarted, "userdata fetch")
+	waitForSignal(t, publicKeyStarted, "public key fetch")
+
+	close(releaseEnrichment)
 	if err := <-runDone; err != nil {
 		t.Fatalf("runWithOps returned error: %v", err)
 	}
@@ -332,29 +357,17 @@ func TestRunTreatsRootResizeFailureAsWarning(t *testing.T) {
 	}
 }
 
-func TestRunTreatsRunnerWarmupFailureAsWarning(t *testing.T) {
+func TestRunDoesNotInvokeRunnerWarmupWhenDisabled(t *testing.T) {
 	cfg := testConfig(t.TempDir())
 	ops := testLauncherOps()
 
-	var logs bytes.Buffer
-	originalWriter := log.Writer()
-	originalFlags := log.Flags()
-	log.SetOutput(&logs)
-	log.SetFlags(0)
-	defer func() {
-		log.SetOutput(originalWriter)
-		log.SetFlags(originalFlags)
-	}()
-
 	ops.warmupRunner = func(context.Context) (bool, error) {
-		return false, fmt.Errorf("warmup failed")
+		t.Fatal("warmupRunner should not be called when runner warmup is disabled")
+		return false, nil
 	}
 
 	if err := runWithOps(context.Background(), cfg, ops); err != nil {
 		t.Fatalf("runWithOps returned error: %v", err)
-	}
-	if !strings.Contains(logs.String(), "warning: runner warmup skipped: warmup failed") {
-		t.Fatalf("expected runner warmup warning, got %q", logs.String())
 	}
 }
 
@@ -455,6 +468,66 @@ func TestTimingRecorderSaveMergesExistingAndSorts(t *testing.T) {
 	})
 }
 
+func TestTimingRecorderSaveTreatsEmptyExistingFileAsNoData(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "timings.json")
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatalf("write empty timings file: %v", err)
+	}
+
+	recorder := newTimingRecorder()
+	recorder.add("rolaunch.started", time.Date(2026, 3, 31, 10, 0, 1, 0, time.UTC))
+	recorder.add("rolaunch.done", time.Date(2026, 3, 31, 10, 0, 4, 0, time.UTC))
+
+	if err := recorder.save(path); err != nil {
+		t.Fatalf("save returned error: %v", err)
+	}
+
+	steps, err := loadTimingSteps(path)
+	if err != nil {
+		t.Fatalf("loadTimingSteps returned error: %v", err)
+	}
+	assertStepNames(t, steps, []string{
+		"rolaunch.started",
+		"rolaunch.done",
+	})
+}
+
+func TestTimingRecorderSaveDedupesExistingAndCurrentSteps(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "timings.json")
+	startedAt := time.Date(2026, 3, 31, 10, 0, 1, 0, time.UTC)
+	existing := []Step{
+		{Name: "rolaunch.started", Time: startedAt},
+	}
+	raw, err := json.Marshal(existing)
+	if err != nil {
+		t.Fatalf("marshal existing steps: %v", err)
+	}
+	if err := os.WriteFile(path, raw, 0o644); err != nil {
+		t.Fatalf("write existing timings: %v", err)
+	}
+
+	recorder := newTimingRecorder()
+	recorder.add("rolaunch.started", startedAt)
+	recorder.add("rolaunch.done", time.Date(2026, 3, 31, 10, 0, 4, 0, time.UTC))
+
+	if err := recorder.save(path); err != nil {
+		t.Fatalf("save returned error: %v", err)
+	}
+
+	steps, err := loadTimingSteps(path)
+	if err != nil {
+		t.Fatalf("loadTimingSteps returned error: %v", err)
+	}
+	assertStepNames(t, steps, []string{
+		"rolaunch.started",
+		"rolaunch.done",
+	})
+}
+
 func TestTimingRecorderSaveReturnsErrorForUnreadablePath(t *testing.T) {
 	t.Parallel()
 
@@ -527,23 +600,39 @@ func TestRunPersistsTimingsForPrefetchedBootstrap(t *testing.T) {
 	})
 }
 
-func TestRunPersistsRunnerWarmupTimingWhenWarmupSucceeds(t *testing.T) {
+func TestRunPersistsStartedTimingImmediately(t *testing.T) {
 	t.Parallel()
 
 	cfg := testConfig(t.TempDir())
 	ops := testLauncherOps()
-	ops.warmupRunner = func(context.Context) (bool, error) {
-		return true, nil
+	releaseIdentity := make(chan struct{})
+	ops.waitForInstanceIdentity = func(context.Context, config) (instanceIdentity, error) {
+		<-releaseIdentity
+		return instanceIdentity{InstanceID: "i-123", Region: "eu-west-3"}, nil
 	}
 
-	if err := runWithOps(context.Background(), cfg, ops); err != nil {
+	runDone := runAsync(func() error {
+		return runWithOps(context.Background(), cfg, ops)
+	})
+
+	var steps []Step
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(cfg.timingsPath); err == nil {
+			steps = mustLoadSteps(t, cfg.timingsPath)
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(steps) == 0 {
+		t.Fatal("expected timings file to be created before run completion")
+	}
+	assertStepNames(t, steps, []string{"rolaunch.started"})
+
+	close(releaseIdentity)
+	if err := <-runDone; err != nil {
 		t.Fatalf("runWithOps returned error: %v", err)
 	}
-
-	steps := mustLoadSteps(t, cfg.timingsPath)
-	assertStepsPresent(t, steps, []string{
-		"rolaunch.runner-warmup-finished",
-	})
 }
 
 func TestRunPersistsTimingsWhenMarkerAlreadyMatches(t *testing.T) {
@@ -683,6 +772,74 @@ func TestRunIgnoresInvalidExistingTimingsFile(t *testing.T) {
 	}
 }
 
+func TestRunPersistsInstanceIdentity(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig(t.TempDir())
+	ops := testLauncherOps()
+	publicIP := "54.0.0.1"
+	instanceLifecycle := "spot"
+	ops.waitForInstanceIdentity = func(context.Context, config) (instanceIdentity, error) {
+		return instanceIdentity{
+			InstanceID:       "i-123",
+			Region:           "eu-west-3",
+			AvailabilityZone: "eu-west-3a",
+			PrivateIP:        "10.0.0.10",
+			InstanceType:     "c7i.large",
+			ImageID:          "ami-123",
+			Architecture:     "x86_64",
+		}, nil
+	}
+	ops.enrichInstanceIdentity = func(_ context.Context, _ config, identity instanceIdentity) (instanceIdentity, error) {
+		identity.PublicIPv4 = &publicIP
+		identity.InstanceLifecycle = &instanceLifecycle
+		return identity, nil
+	}
+
+	if err := runWithOps(context.Background(), cfg, ops); err != nil {
+		t.Fatalf("runWithOps returned error: %v", err)
+	}
+
+	identity, err := loadInstanceIdentity(cfg.identityPath)
+	if err != nil {
+		t.Fatalf("loadInstanceIdentity returned error: %v", err)
+	}
+	if identity.InstanceID != "i-123" {
+		t.Fatalf("unexpected instance id %q", identity.InstanceID)
+	}
+	if identity.Region != "eu-west-3" {
+		t.Fatalf("unexpected region %q", identity.Region)
+	}
+	if identity.PublicIPv4 == nil || *identity.PublicIPv4 != publicIP {
+		t.Fatalf("unexpected public ip %#v", identity.PublicIPv4)
+	}
+	if identity.InstanceLifecycle == nil || *identity.InstanceLifecycle != instanceLifecycle {
+		t.Fatalf("unexpected instance lifecycle %#v", identity.InstanceLifecycle)
+	}
+}
+
+func TestRunPersistsInstanceIdentityWhenUserdataAlreadyProcessed(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig(t.TempDir())
+	ops := testLauncherOps()
+	ops.markerMatchesInstance = func(string, string) (bool, error) {
+		return true, nil
+	}
+
+	if err := runWithOps(context.Background(), cfg, ops); err != nil {
+		t.Fatalf("runWithOps returned error: %v", err)
+	}
+
+	identity, err := loadInstanceIdentity(cfg.identityPath)
+	if err != nil {
+		t.Fatalf("loadInstanceIdentity returned error: %v", err)
+	}
+	if identity.InstanceID != "i-123" {
+		t.Fatalf("unexpected instance id %q", identity.InstanceID)
+	}
+}
+
 func TestMarkerMatchesInstance(t *testing.T) {
 	t.Parallel()
 
@@ -744,6 +901,7 @@ func TestMarkDoneWritesInstanceID(t *testing.T) {
 
 func testConfig(workDir string) config {
 	return config{
+		identityPath: filepath.Join(workDir, "instance-identity.json"),
 		workDir:      workDir,
 		userDataPath: filepath.Join(workDir, defaultUserDataName),
 		doneMarker:   filepath.Join(workDir, defaultDoneMarkerName),
@@ -759,6 +917,9 @@ func testLauncherOps() launcherOps {
 		ensureResolverConfig: func(string) error { return nil },
 		waitForInstanceIdentity: func(context.Context, config) (instanceIdentity, error) {
 			return instanceIdentity{InstanceID: "i-123", Region: "eu-west-3"}, nil
+		},
+		enrichInstanceIdentity: func(_ context.Context, _ config, identity instanceIdentity) (instanceIdentity, error) {
+			return identity, nil
 		},
 		fetchUserData: func(context.Context, config) ([]byte, error) {
 			return nil, nil
