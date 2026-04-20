@@ -1,14 +1,6 @@
 #!/bin/bash
 set -exo pipefail
 
-# install RunsOn bootstrap binaries - IMPORTANT: only delete old ones when RunsOn stack versions that use them are deprecated
-for BOOTSTRAP_VERSION in v0.1.12 v0.1.9; do
-  BOOTSTRAP_BIN=/usr/local/bin/runs-on-bootstrap-${BOOTSTRAP_VERSION}
-  curl -L --connect-time 3 --max-time 15 --retry 5 -s https://github.com/runs-on/bootstrap/releases/download/${BOOTSTRAP_VERSION}/bootstrap-${BOOTSTRAP_VERSION}-linux-$(uname -i) -o $BOOTSTRAP_BIN
-  chmod +x $BOOTSTRAP_BIN
-  $BOOTSTRAP_BIN -h
-done
-
 cat > /root/.gemrc <<EOF
 gem: --no-document
 EOF
@@ -37,6 +29,7 @@ systemctl enable amazon-ssm-agent
 rm -f amazon-ssm-agent.deb
 
 apt-get update -qq
+apt-get install -y ncdu
 wget https://runs-on.s3.eu-west-1.amazonaws.com/tools/efs-utils/amazon-efs-utils-2.3.0-1_amd64.deb
 apt-get install -y ./amazon-efs-utils-2.3.0-1_amd64.deb
 rm -f amazon-efs-utils-2.3.0-1_amd64.deb

@@ -26,6 +26,8 @@ import (
 const (
 	imdsPublicKeysMetadataPath = "public-keys"
 	imdsPublicKeySuffix        = "openssh-key"
+	runsOnInstanceConfigPath   = "/runs-on/instance-config.json"
+	runsOnRunnerConfigPath     = "/runs-on/config.json"
 )
 
 type awsState struct {
@@ -42,6 +44,15 @@ type bootstrapPrefetchSpec struct {
 	S3Bucket          string
 	S3Key             string
 	DownloadedBinPath string
+}
+
+type bootstrapEnvValues struct {
+	S3BucketCache string
+	RoleID        string
+}
+
+type s3ObjectGetter interface {
+	GetObject(context.Context, *s3.GetObjectInput, ...func(*s3.Options)) (*s3.GetObjectOutput, error)
 }
 
 func newAWSState() *awsState {
@@ -227,6 +238,39 @@ func (s *awsState) prefetchMatchingBootstrap(ctx context.Context, cfg config, re
 	return true, nil
 }
 
+func (s *awsState) prefetchAgentConfigFiles(ctx context.Context, cfg config, identity instanceIdentity, raw []byte) error {
+	s3Client, err := s.s3ClientFor(ctx, cfg, identity.Region)
+	if err != nil {
+		log.Printf("warning: failed to bootstrap S3 client for agent config prefetch: %v", err)
+		return nil
+	}
+
+	return prefetchAgentConfigFilesWithClient(ctx, s3Client, identity, raw, runsOnInstanceConfigPath, runsOnRunnerConfigPath)
+}
+
+func prefetchAgentConfigFilesWithClient(ctx context.Context, client s3ObjectGetter, identity instanceIdentity, raw []byte, instanceConfigPath string, runnerConfigPath string) error {
+	values, ok := extractBootstrapEnvValues(raw)
+	if !ok {
+		return nil
+	}
+
+	instanceConfigKey := fmt.Sprintf("runners/%s:%s/instance-config.json", values.RoleID, identity.InstanceID)
+	if err := downloadS3ObjectToFile(ctx, client, values.S3BucketCache, instanceConfigKey, instanceConfigPath); err != nil {
+		log.Printf("warning: failed to prefetch instance config from s3://%s/%s: %v", values.S3BucketCache, instanceConfigKey, err)
+	}
+
+	runnerConfigKey := fmt.Sprintf("runners/%s:%s/runner-config.json", values.RoleID, identity.InstanceID)
+	if err := downloadS3ObjectToFile(ctx, client, values.S3BucketCache, runnerConfigKey, runnerConfigPath); err != nil {
+		if isS3NotFound(err) {
+			log.Printf("runner config not found in s3://%s/%s, skipping best-effort prefetch", values.S3BucketCache, runnerConfigKey)
+			return nil
+		}
+		log.Printf("warning: failed to prefetch runner config from s3://%s/%s: %v", values.S3BucketCache, runnerConfigKey, err)
+	}
+
+	return nil
+}
+
 func (s *awsState) metadataClientFor(cfg config) *imds.Client {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -265,6 +309,10 @@ func (s *awsState) s3ClientFor(ctx context.Context, cfg config, region string) (
 		s.s3Errors[region] = err
 		s.mu.Unlock()
 		return nil, err
+	}
+
+	awsCfg.Retryer = func() aws.Retryer {
+		return retry.AddWithMaxAttempts(retry.NewStandard(), 1)
 	}
 
 	client := s3.NewFromConfig(awsCfg)
@@ -365,6 +413,23 @@ func extractQuotedEnvAssignment(script string, key string) (string, bool) {
 	return "", false
 }
 
+func extractBootstrapEnvValues(raw []byte) (bootstrapEnvValues, bool) {
+	script := string(raw)
+	bucketCache, found := extractQuotedEnvAssignment(script, "RUNS_ON_S3_BUCKET_CACHE")
+	if !found {
+		return bootstrapEnvValues{}, false
+	}
+	roleID, found := extractQuotedEnvAssignment(script, "RUNS_ON_ROLE_ID")
+	if !found {
+		return bootstrapEnvValues{}, false
+	}
+
+	return bootstrapEnvValues{
+		S3BucketCache: bucketCache,
+		RoleID:        roleID,
+	}, true
+}
+
 func parseS3URL(raw string) (bucket string, prefix string, err error) {
 	if !strings.HasPrefix(raw, "s3://") {
 		return "", "", fmt.Errorf("invalid s3 url %q", raw)
@@ -398,7 +463,7 @@ func agentArtifactNameForArch(goArch string) (string, error) {
 	}
 }
 
-func downloadS3ObjectToFile(ctx context.Context, client *s3.Client, bucket string, key string, destPath string) error {
+func downloadS3ObjectToFile(ctx context.Context, client s3ObjectGetter, bucket string, key string, destPath string) error {
 	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
 		return fmt.Errorf("create download directory for %s: %w", destPath, err)
 	}
@@ -433,6 +498,11 @@ func downloadS3ObjectToFile(ctx context.Context, client *s3.Client, bucket strin
 		return fmt.Errorf("rename temp download file for %s: %w", destPath, err)
 	}
 	return nil
+}
+
+func isS3NotFound(err error) bool {
+	var responseErr *smithyhttp.ResponseError
+	return errors.As(err, &responseErr) && responseErr.HTTPStatusCode() == 404
 }
 
 func installBootstrapWrapper(path string, downloadedAgentPath string) error {

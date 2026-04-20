@@ -190,6 +190,8 @@ if [[ "${variant}" == "minimal" ]]; then
   disable_target_units ssh.service ssh.socket ldconfig.service
   mask_target_units \
     ssh.socket \
+    systemd-initctl.socket \
+    modprobe@drm.service \
     getty-static.service \
     getty@tty1.service \
     getty@tty2.service \
@@ -198,7 +200,17 @@ if [[ "${variant}" == "minimal" ]]; then
     getty@tty5.service \
     getty@tty6.service \
     systemd-binfmt.service \
-    proc-sys-fs-binfmt_misc.automount
+    proc-sys-fs-binfmt_misc.automount \
+    apt-daily.service \
+    apt-daily.timer \
+    apt-daily-upgrade.service \
+    apt-daily-upgrade.timer \
+    dpkg-db-backup.timer \
+    e2scrub_all.timer \
+    fstrim.timer \
+    man-db.timer \
+    motd-news.timer \
+    systemd-tmpfiles-clean.timer
   remove_ldconfig_symlinks
   set_default_target_unit multi-user.target
 fi

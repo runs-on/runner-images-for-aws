@@ -40,8 +40,11 @@ prepare_rootfs_for_compaction() {
     ro-run-script-in-target "${INSTALLER_SCRIPT_FOLDER}/cleanup.sh"
   fi
 
-  log "compressing target docker binaries with host-side UPX"
+  log "compressing target binaries with host-side UPX"
+  install_host_upx
+  trap cleanup_host_upx RETURN
   compress_target_docker_binaries
+  compress_target_runner_node_binaries
 }
 
 install_host_upx() {
@@ -88,15 +91,20 @@ compress_target_binary() {
 }
 
 compress_target_docker_binaries() {
-  install_host_upx
-  trap cleanup_host_upx RETURN
-
   for relative_path in \
     /usr/libexec/docker/cli-plugins/docker-buildx \
     /usr/bin/dockerd \
     /usr/libexec/docker/cli-plugins/docker-compose \
     /usr/bin/containerd \
     /usr/bin/ctr; do
+    compress_target_binary "${TARGET_ROOT_MOUNT}${relative_path}"
+  done
+}
+
+compress_target_runner_node_binaries() {
+  for relative_path in \
+    /home/runner/externals/node24/bin/node \
+    /home/runner/externals/node24_alpine/bin/node; do
     compress_target_binary "${TARGET_ROOT_MOUNT}${relative_path}"
   done
 }

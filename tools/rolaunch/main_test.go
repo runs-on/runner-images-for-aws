@@ -266,6 +266,8 @@ func TestRunExecutesUserDataOnlyAfterApplyPhaseCompletes(t *testing.T) {
 	prepareRelease := make(chan struct{})
 	prefetchCalled := make(chan struct{})
 	prefetchRelease := make(chan struct{})
+	configPrefetchCalled := make(chan struct{})
+	configPrefetchRelease := make(chan struct{})
 
 	ops.waitForInstanceIdentity = func(context.Context, config) (instanceIdentity, error) {
 		return instanceIdentity{InstanceID: "i-123", Region: "eu-west-3"}, nil
@@ -280,6 +282,11 @@ func TestRunExecutesUserDataOnlyAfterApplyPhaseCompletes(t *testing.T) {
 		close(prefetchCalled)
 		<-prefetchRelease
 		return true, nil
+	}
+	ops.prefetchAgentConfigFiles = func(context.Context, config, instanceIdentity, []byte) error {
+		close(configPrefetchCalled)
+		<-configPrefetchRelease
+		return nil
 	}
 	ops.applyLocalAptMirror = func(string) error {
 		close(mirrorCalled)
@@ -309,6 +316,7 @@ func TestRunExecutesUserDataOnlyAfterApplyPhaseCompletes(t *testing.T) {
 	waitForSignal(t, keyCalled, "authorized key install")
 	waitForSignal(t, prepareCalled, "userdata preparation")
 	waitForSignal(t, prefetchCalled, "bootstrap prefetch")
+	waitForSignal(t, configPrefetchCalled, "agent config prefetch")
 	assertNotSignaled(t, executeStarted, "userdata execution before apply completion")
 
 	close(mirrorRelease)
@@ -322,6 +330,13 @@ func TestRunExecutesUserDataOnlyAfterApplyPhaseCompletes(t *testing.T) {
 
 	close(prefetchRelease)
 	waitForSignal(t, executeStarted, "userdata execution")
+	select {
+	case err := <-runDone:
+		t.Fatalf("runWithOps returned early: %v", err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(configPrefetchRelease)
 
 	if err := <-runDone; err != nil {
 		t.Fatalf("runWithOps returned error: %v", err)
@@ -929,6 +944,9 @@ func testLauncherOps() launcherOps {
 		},
 		prefetchMatchingBootstrap: func(context.Context, config, string, []byte) (bool, error) {
 			return false, nil
+		},
+		prefetchAgentConfigFiles: func(context.Context, config, instanceIdentity, []byte) error {
+			return nil
 		},
 		markerMatchesInstance: func(string, string) (bool, error) {
 			return false, nil
