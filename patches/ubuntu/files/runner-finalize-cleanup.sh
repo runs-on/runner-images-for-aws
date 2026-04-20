@@ -32,7 +32,8 @@ shopt -s nullglob globstar
 install -d -m 0755 /etc/chrony
 echo 'server 169.254.169.123 prefer iburst minpoll 4 maxpoll 4' > /etc/chrony/chrony.conf
 
-grep -qxF 'Storage=Volatile' /etc/systemd/journald.conf || echo 'Storage=Volatile' >> /etc/systemd/journald.conf
+sed -i 's/^Storage=Volatile$/Storage=volatile/' /etc/systemd/journald.conf
+grep -qxF 'Storage=volatile' /etc/systemd/journald.conf || echo 'Storage=volatile' >> /etc/systemd/journald.conf
 grep -qxF 'RuntimeMaxUse=64M' /etc/systemd/journald.conf || echo 'RuntimeMaxUse=64M' >> /etc/systemd/journald.conf
 
 apt-get purge -y plymouth update-notifier-common multipath-tools || true

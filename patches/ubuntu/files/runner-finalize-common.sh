@@ -24,6 +24,33 @@ target_bash() {
   fi
 }
 
+runner_home() {
+  printf '%s/home/runner' "${TARGET_ROOT_MOUNT:-}"
+}
+
+trim_runner_node_runtime() {
+  local runner_root
+  runner_root="$(runner_home)"
+
+  for runtime in node24 node24_alpine; do
+    local runtime_dir
+    runtime_dir="${runner_root}/externals/${runtime}"
+    [[ -d "${runtime_dir}" ]] || continue
+
+    log "trimming bundled Node runtime ${runtime_dir}"
+    rm -rf \
+      "${runtime_dir}/include" \
+      "${runtime_dir}/share" \
+      "${runtime_dir}/lib/node_modules/npm" \
+      "${runtime_dir}/lib/node_modules/corepack"
+    rm -f \
+      "${runtime_dir}/bin/npm" \
+      "${runtime_dir}/bin/npx" \
+      "${runtime_dir}/bin/corepack" \
+      "${runtime_dir}/CHANGELOG.md"
+  done
+}
+
 log "updating base packages"
 target_bash <<'EOF'
 set -euo pipefail
@@ -99,3 +126,5 @@ fi
 
 chown -R runner:runner /home/runner
 EOF
+
+trim_runner_node_runtime

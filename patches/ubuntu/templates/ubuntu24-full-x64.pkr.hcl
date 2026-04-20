@@ -93,6 +93,11 @@ variable "volume_type" {
   default = "gp3"
 }
 
+variable "volume_throughput" {
+  type    = number
+  default = 750
+}
+
 variable "instance_type" {
   type    = string
   default = "m8a.large"
@@ -121,6 +126,15 @@ source "amazon-ebs" "build_ebs" {
   force_deregister                          = "true"
   force_delete_snapshot                     = "true"
 
+  user_data = <<EOF
+#!/bin/bash
+set -euxo pipefail
+
+systemctl unmask ssh.service || true
+systemctl enable ssh.service || true
+systemctl start ssh.service || true
+EOF
+
   ami_regions = "${var.ami_regions}"
 
   // make underlying snapshot public
@@ -130,6 +144,7 @@ source "amazon-ebs" "build_ebs" {
     device_name = "/dev/sda1"
     volume_type = "${var.volume_type}"
     volume_size = "${var.volume_size}"
+    throughput  = ${var.volume_throughput}
     delete_on_termination = "true"
     encrypted = "false"
   }
@@ -164,9 +179,24 @@ build {
   
   sources = ["source.amazon-ebs.build_ebs"]
 
+  provisioner "file" {
+    source      = "${path.root}/../custom/files/install-runs-on-bootstrap.sh"
+    destination = "/tmp/install-runs-on-bootstrap.sh"
+  }
+
+  provisioner "shell" {
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    inline          = ["bash /tmp/install-runs-on-bootstrap.sh"]
+  }
+
   provisioner "shell" {
     execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts             = ["${path.root}/../custom/files/pre.sh"]
+    scripts             = ["${path.root}/../custom/files/pre-minimal-full.sh"]
+  }
+
+  provisioner "shell" {
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    scripts         = ["${path.root}/../custom/files/grow-rootfs.sh"]
   }
 
   # Dummy file added to please Azure script compatibility
@@ -182,7 +212,7 @@ build {
 
   provisioner "shell" {
     execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    inline          = ["mkdir ${var.image_folder}", "chmod 777 ${var.image_folder}"]
+    inline          = ["mkdir -p ${var.image_folder}", "chmod 777 ${var.image_folder}"]
   }
 
   provisioner "file" {
@@ -190,20 +220,20 @@ build {
     source      = "${path.root}/../scripts/helpers"
   }
 
-  provisioner "shell" {
-    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    script          = "${path.root}/../scripts/build/configure-apt-mock.sh"
-  }
+  // provisioner "shell" {
+  //   execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+  //   script          = "${path.root}/../scripts/build/configure-apt-mock.sh"
+  // }
 
-  provisioner "shell" {
-    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}","DEBIAN_FRONTEND=noninteractive"]
-    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = [
-      "${path.root}/../scripts/build/install-ms-repos.sh",
-      "${path.root}/../scripts/build/configure-apt-sources.sh",
-      "${path.root}/../scripts/build/configure-apt.sh"
-    ]
-  }
+  // provisioner "shell" {
+  //   environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}","DEBIAN_FRONTEND=noninteractive"]
+  //   execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+  //   scripts          = [
+  //     "${path.root}/../scripts/build/install-ms-repos.sh",
+  //     "${path.root}/../scripts/build/configure-apt-sources.sh",
+  //     "${path.root}/../scripts/build/configure-apt.sh"
+  //   ]
+  // }
 
   provisioner "shell" {
     execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
@@ -254,32 +284,32 @@ build {
     scripts          = ["${path.root}/../scripts/build/configure-environment.sh"]
   }
 
-  provisioner "shell" {
-    environment_vars = ["DEBIAN_FRONTEND=noninteractive", "HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
-    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = ["${path.root}/../scripts/build/install-apt-vital.sh"]
-  }
+//   provisioner "shell" {
+//     environment_vars = ["DEBIAN_FRONTEND=noninteractive", "HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
+//     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+//     scripts          = ["${path.root}/../scripts/build/install-apt-vital.sh"]
+//   }
 
-provisioner "shell" {
-    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
-    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = ["${path.root}/../scripts/build/install-powershell.sh"]
-  }
+// provisioner "shell" {
+//     environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
+//     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+//     scripts          = ["${path.root}/../scripts/build/install-powershell.sh"]
+//   }
 
-  provisioner "shell" {
-    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
-    execute_command  = "sudo sh -c '{{ .Vars }} pwsh -f {{ .Path }}'"
-    // scripts          = ["${path.root}/../scripts/build/Install-PowerShellModules.ps1", "${path.root}/../scripts/build/Install-PowerShellAzModules.ps1"]
-    scripts          = ["${path.root}/../scripts/build/Install-PowerShellModules.ps1"]
-  }
+  // provisioner "shell" {
+  //   environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
+  //   execute_command  = "sudo sh -c '{{ .Vars }} pwsh -f {{ .Path }}'"
+  //   // scripts          = ["${path.root}/../scripts/build/Install-PowerShellModules.ps1", "${path.root}/../scripts/build/Install-PowerShellAzModules.ps1"]
+  //   scripts          = ["${path.root}/../scripts/build/Install-PowerShellModules.ps1"]
+  // }
 
   provisioner "shell" {
     environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}", "DEBIAN_FRONTEND=noninteractive"]
     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     scripts          = [
-      "${path.root}/../scripts/build/install-actions-cache.sh",
-      "${path.root}/../scripts/build/install-runner-package.sh",
-      "${path.root}/../scripts/build/install-apt-common.sh",
+      // "${path.root}/../scripts/build/install-actions-cache.sh",
+      // "${path.root}/../scripts/build/install-runner-package.sh",
+      // "${path.root}/../scripts/build/install-apt-common.sh",
       "${path.root}/../scripts/build/install-azcopy.sh",
       "${path.root}/../scripts/build/install-azure-cli.sh",
       // "${path.root}/../scripts/build/install-azure-devops-cli.sh",
@@ -323,11 +353,11 @@ provisioner "shell" {
     ]
   }
 
-  provisioner "shell" {
-    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}", "DOCKERHUB_PULL_IMAGES=NO"]
-    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = ["${path.root}/../scripts/build/install-docker.sh"]
-  }
+  // provisioner "shell" {
+  //   environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}", "DOCKERHUB_PULL_IMAGES=NO"]
+  //   execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+  //   scripts          = ["${path.root}/../scripts/build/install-docker.sh"]
+  // }
 
   provisioner "shell" {
     environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
@@ -347,15 +377,21 @@ provisioner "shell" {
   //   scripts          = ["${path.root}/../scripts/build/install-homebrew.sh"]
   // }
 
-  provisioner "shell" {
-    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}"]
-    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = ["${path.root}/../scripts/build/configure-snap.sh"]
-  }
+  // provisioner "shell" {
+  //   environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}"]
+  //   execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+  //   scripts          = ["${path.root}/../scripts/build/configure-snap.sh"]
+  // }
 
   provisioner "shell" {
-    execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts             = ["${path.root}/../custom/files/runner-user.sh"]
+    environment_vars = ["DEBIAN_FRONTEND=noninteractive", "RUNNER_FINALIZE_VARIANT=full"]
+    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    scripts          = [
+      "${path.root}/../custom/files/runner-finalize-common.sh",
+      "${path.root}/../custom/files/runner-finalize-nested-virt.sh",
+      "${path.root}/../custom/files/runner-finalize-cleanup.sh",
+      "${path.root}/../custom/files/runner-finalize-units.sh"
+    ]
   }
 
   provisioner "shell" {
@@ -366,7 +402,7 @@ provisioner "shell" {
 
   provisioner "shell" {
     execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    pause_before        = "1m0s"
+    pause_before        = "30s"
     scripts             = ["${path.root}/../scripts/build/cleanup.sh"]
     start_retry_timeout = "10m"
   }
@@ -389,9 +425,27 @@ provisioner "shell" {
   // }
 
   provisioner "shell" {
-    environment_vars = ["HELPER_SCRIPT_FOLDER=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}", "IMAGE_FOLDER=${var.image_folder}"]
-    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = ["${path.root}/../scripts/build/configure-system.sh", "${path.root}/../custom/files/after-reboot.sh"]
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    inline = [
+      "if [ ! -f /etc/needrestart/needrestart.conf ]; then mkdir -p /etc/needrestart; printf '%s\\n' '\\$nrconf{override_rc} = {' '};' > /etc/needrestart/needrestart.conf; fi"
+    ]
+  }
+
+  provisioner "shell" {
+    environment_vars = [
+      "HELPER_SCRIPT_FOLDER=${var.helper_script_folder}",
+      "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}",
+      "IMAGE_FOLDER=${var.image_folder}",
+      "ROLAUNCH_SOURCE=${var.image_folder}/rolaunch",
+      "RUNNER_FINALIZE_VARIANT=minimal"
+    ]
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    scripts = [
+      "${path.root}/../scripts/build/configure-system.sh",
+      "${path.root}/../custom/files/restore-minimal-boot-contract.sh",
+      "${path.root}/../custom/files/runner-finalize-units.sh",
+      "${path.root}/../custom/files/after-reboot.sh"
+    ]
   }
 
   // provisioner "shell" {

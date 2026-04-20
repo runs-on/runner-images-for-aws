@@ -1,0 +1,626 @@
+#!/usr/bin/env ruby
+
+require 'bundler/setup'
+require 'aws-sdk-ec2'
+require 'base64'
+require 'json'
+require 'open-uri'
+require 'open3'
+require 'shellwords'
+require 'slop'
+require 'tmpdir'
+
+TRACKED_UNITS = %w[
+  rolaunch.service
+  ssh.service
+  ssh.socket
+  docker.service
+  docker.socket
+  containerd.service
+].freeze
+
+UNIT_NAME_PATTERN = /([A-Za-z0-9_.:@-]+\.(?:service|socket|target|mount|device|slice|scope|path))/
+
+options = {}
+
+usage = Slop::Options.new do |opts|
+  opts.banner = "Usage: #{$0} CANDIDATE_AMI_NAME_OR_ID [options]"
+  opts.string '--baseline', 'Baseline AMI name prefix or ID', default: 'runs-on-dev-ubuntu24-minimal-x64'
+  opts.integer '--samples', 'Samples per AMI', default: 3
+  opts.string '--instance-type', 'Instance type override'
+  opts.string '--region', 'AWS region', default: ENV['AWS_REGION'] || ENV['AWS_DEFAULT_REGION'] || 'us-east-1'
+  opts.string '--subnet-id', 'Subnet to launch into'
+  opts.string '--ssh-user', 'SSH username', default: 'root'
+  opts.integer '--ssh-timeout', 'Max seconds to wait for SSH login', default: 600
+  opts.integer '--root-throughput', 'Override root gp3 throughput in MiB/s', default: 750
+  opts.integer '--root-volume-size', 'Override root volume size in GiB'
+  opts.bool '-h', '--help', 'Show help'
+end
+
+begin
+  options = usage.parse(ARGV).to_hash
+  options[:candidate_ami_name_or_id] = ARGV.shift
+rescue Slop::Error => e
+  warn "Error: #{e.message}"
+  warn
+  warn usage
+  exit 1
+end
+
+if options[:help] || options[:candidate_ami_name_or_id].nil?
+  puts usage
+  exit(options[:help] ? 0 : 1)
+end
+
+def linux_user_data(ssh_user:, public_key:)
+  requested_user = ssh_user.to_s.strip
+  unless requested_user.match?(/\A[a-zA-Z0-9_][a-zA-Z0-9_.-]*\z/)
+    raise "invalid ssh username #{requested_user.inspect}"
+  end
+  requested_user = requested_user.shellescape
+  <<~EOS
+    #!/bin/bash
+    set -euxo pipefail
+
+    if ! id -u '#{requested_user}' >/dev/null 2>&1; then
+      SSH_USER='root'
+    else
+      SSH_USER='#{requested_user}'
+    fi
+
+    if [ "$SSH_USER" = "root" ]; then
+      ssh_home='/root/.ssh'
+      ssh_owner='root:root'
+    else
+      ssh_home="/home/$SSH_USER/.ssh"
+      ssh_owner="$SSH_USER:$SSH_USER"
+    fi
+
+    install -d -m 700 "$ssh_home"
+    cat > "$ssh_home/authorized_keys" <<'EOF'
+    #{public_key}
+    EOF
+    chown "$ssh_owner" "$ssh_home" "$ssh_home/authorized_keys"
+    chmod 600 "$ssh_home/authorized_keys"
+
+    systemctl unmask ssh.service || true
+    systemctl enable ssh.service || true
+    systemctl start ssh.service || true
+  EOS
+end
+
+def find_latest_ami(ec2, ami_name_or_id)
+  filters = [{ name: 'state', values: ['available'] }]
+  if ami_name_or_id.start_with?('ami-')
+    filters << { name: 'image-id', values: [ami_name_or_id] }
+  else
+    filters << { name: 'name', values: ["#{ami_name_or_id}*"] }
+  end
+
+  images = ec2.describe_images(filters: filters).images
+  raise "No AMIs found matching #{ami_name_or_id.inspect}" if images.empty?
+
+  images.max_by(&:creation_date)
+end
+
+def resolve_instance_type(options, image)
+  return options[:instance_type] if options[:instance_type]
+
+  case image.architecture
+  when 'arm64'
+    'm8g.large'
+  when 'x86_64'
+    'm7a.large'
+  else
+    raise "Unsupported architecture #{image.architecture.inspect}"
+  end
+end
+
+def resolve_subnet(ec2, subnet_id)
+  return ec2.describe_subnets(subnet_ids: [subnet_id]).subnets.first if subnet_id
+
+  subnet = ec2.describe_subnets(
+    filters: [{ name: 'tag:test', values: ['true'] }]
+  ).subnets.first
+  raise 'No subnet found with tag test=true' unless subnet
+
+  subnet
+end
+
+def current_public_ip
+  URI.open('https://checkip.amazonaws.com', &:read).strip
+end
+
+def create_temp_security_group(ec2, subnet, caller_ip)
+  name = "compare-boot-amis-#{Time.now.to_i}-#{rand(1000)}"
+  sg = ec2.create_security_group(
+    group_name: name,
+    description: 'Temporary SSH ingress for AMI boot comparison',
+    vpc_id: subnet.vpc_id,
+    tag_specifications: [
+      {
+        resource_type: 'security-group',
+        tags: [
+          { key: 'Name', value: name },
+          { key: 'application', value: 'RunsOn' }
+        ]
+      }
+    ]
+  )
+  ec2.authorize_security_group_ingress(
+    group_id: sg.group_id,
+    ip_permissions: [
+      {
+        ip_protocol: 'tcp',
+        from_port: 22,
+        to_port: 22,
+        ip_ranges: [{ cidr_ip: "#{caller_ip}/32", description: 'compare-boot-amis' }]
+      }
+    ]
+  )
+  sg.group_id
+end
+
+def wait_for_public_ip(ec2, instance_id, timeout_seconds:)
+  deadline = Time.now + timeout_seconds
+  last_error = nil
+
+  loop do
+    begin
+      instance = ec2.describe_instances(instance_ids: [instance_id]).reservations.first.instances.first
+      return instance.public_ip_address if instance.public_ip_address && !instance.public_ip_address.empty?
+    rescue Aws::EC2::Errors::InvalidInstanceIDNotFound => e
+      last_error = e
+    end
+
+    raise "Timed out waiting for public IP on #{instance_id}: #{last_error}" if Time.now >= deadline
+
+    sleep 2
+  end
+end
+
+def wait_for_ssh(ip:, ssh_user:, private_key_path:, timeout_seconds:)
+  deadline = Time.now + timeout_seconds
+
+  loop do
+    ssh_cmd = [
+      'ssh',
+      '-o', 'BatchMode=yes',
+      '-o', 'IdentitiesOnly=yes',
+      '-o', 'StrictHostKeyChecking=no',
+      '-o', 'UserKnownHostsFile=/dev/null',
+      '-o', 'ConnectTimeout=5',
+      '-i', private_key_path,
+      "#{ssh_user}@#{ip}",
+      'true'
+    ]
+    return if system(*ssh_cmd, out: File::NULL, err: File::NULL)
+
+    raise "Timed out waiting for SSH on #{ip}" if Time.now >= deadline
+
+    sleep 2
+  end
+end
+
+def build_keypair(dir)
+  private_key = File.join(dir, 'compare-boot-amis')
+  public_key = "#{private_key}.pub"
+  system('ssh-keygen', '-q', '-m', 'PEM', '-t', 'rsa', '-b', '4096', '-N', '', '-f', private_key, out: File::NULL, err: File::NULL) or
+    raise 'ssh-keygen failed'
+  [private_key, File.read(public_key).strip]
+end
+
+def root_block_device_override(image, root_throughput:, root_volume_size:)
+  root = image.block_device_mappings.find do |mapping|
+    mapping.device_name == image.root_device_name && mapping.ebs
+  end
+  raise "Unable to find root block device mapping for #{image.image_id}" unless root
+
+  override = {
+    device_name: root.device_name,
+    ebs: {
+      volume_size: root_volume_size || root.ebs.volume_size,
+      volume_type: root.ebs.volume_type,
+      delete_on_termination: true
+    }
+  }
+  override[:ebs][:iops] = root.ebs.iops if root.ebs.iops
+  if root.ebs.volume_type == 'gp3' && root_throughput
+    override[:ebs][:throughput] = root_throughput
+  end
+  override
+end
+
+def additional_block_device_mappings(image)
+  image.block_device_mappings.filter_map do |mapping|
+    next if mapping.device_name == image.root_device_name
+    next unless mapping.ebs
+
+    override = {
+      device_name: mapping.device_name,
+      ebs: {
+        snapshot_id: mapping.ebs.snapshot_id,
+        volume_size: mapping.ebs.volume_size,
+        volume_type: mapping.ebs.volume_type,
+        delete_on_termination: mapping.ebs.delete_on_termination
+      }
+    }
+
+    override[:ebs][:iops] = mapping.ebs.iops if mapping.ebs.iops
+    override[:ebs][:throughput] = mapping.ebs.throughput if mapping.ebs.throughput
+    override[:ebs][:encrypted] = mapping.ebs.encrypted unless mapping.ebs.encrypted.nil?
+    override
+  end
+end
+
+def launch_instance(ec2:, image:, instance_type:, subnet:, security_group_id:, user_data:, root_throughput:, root_volume_size:, name:)
+  instance = ec2.run_instances(
+    image_id: image.image_id,
+    instance_type: instance_type,
+    min_count: 1,
+    max_count: 1,
+    instance_initiated_shutdown_behavior: 'terminate',
+    user_data: Base64.encode64(user_data),
+    block_device_mappings: [
+      root_block_device_override(
+        image,
+        root_throughput: root_throughput,
+        root_volume_size: root_volume_size
+      )
+    ] + additional_block_device_mappings(image),
+    network_interfaces: [
+      {
+        device_index: 0,
+        subnet_id: subnet.subnet_id,
+        groups: [security_group_id],
+        associate_public_ip_address: true,
+        delete_on_termination: true
+      }
+    ],
+    tag_specifications: [
+      {
+        resource_type: 'instance',
+        tags: [
+          { key: 'Name', value: name },
+          { key: 'application', value: 'RunsOn' }
+        ]
+      }
+    ]
+  ).instances.first
+  instance.instance_id
+end
+
+def capture_ssh(ip:, ssh_user:, private_key_path:, remote_script:)
+  ssh_cmd = [
+    'ssh',
+    '-o', 'BatchMode=yes',
+    '-o', 'IdentitiesOnly=yes',
+    '-o', 'StrictHostKeyChecking=no',
+    '-o', 'UserKnownHostsFile=/dev/null',
+    '-i', private_key_path,
+    "#{ssh_user}@#{ip}",
+    remote_script
+  ]
+
+  stdout, stderr, status = Open3.capture3(*ssh_cmd)
+  raise "SSH command failed: #{stderr}" unless status.success?
+
+  stdout
+end
+
+def terminate_instance(ec2, instance_id)
+  ec2.terminate_instances(instance_ids: [instance_id])
+  ec2.wait_until(:instance_terminated, instance_ids: [instance_id])
+rescue Aws::EC2::Errors::InvalidInstanceIDNotFound
+  nil
+end
+
+def delete_security_group_with_retry(ec2, security_group_id)
+  10.times do |attempt|
+    ec2.delete_security_group(group_id: security_group_id)
+    return
+  rescue Aws::EC2::Errors::ServiceError
+    raise if attempt == 9
+
+    sleep 3
+  end
+end
+
+def remote_report_script
+  <<~'EOS'
+    set -euo pipefail
+
+    section() {
+      local name="$1"
+      shift
+      echo "__SECTION_BEGIN__ ${name}"
+      "$@" 2>&1 || true
+      echo "__SECTION_END__ ${name}"
+    }
+
+    section "systemd_time" systemd-analyze time
+    section "rolaunch_chain" systemd-analyze critical-chain --no-pager rolaunch.service
+    section "critical_chain" systemd-analyze critical-chain --no-pager
+    section "blame" bash -lc 'systemd-analyze blame --no-pager | head -n 25'
+    section "enabled_units" systemctl list-unit-files --state=enabled,enabled-runtime --no-pager --no-legend
+
+    for unit in rolaunch.service ssh.service ssh.socket docker.service docker.socket containerd.service; do
+      echo "__UNIT_STATE__ ${unit} $(systemctl is-enabled "${unit}" 2>&1 || true)"
+    done
+
+    for unit in rolaunch.service ssh.service ssh.socket docker.service docker.socket containerd.service; do
+      echo "__SECTION_BEGIN__ status:${unit}"
+      systemctl status "${unit}" --no-pager 2>&1 || true
+      echo "__SECTION_END__ status:${unit}"
+    done
+  EOS
+end
+
+def parse_sections(report)
+  sections = {}
+  current = nil
+  lines = []
+  unit_states = {}
+
+  report.each_line do |line|
+    if (match = line.match(/\A__SECTION_BEGIN__ (.+)\n?\z/))
+      current = match[1]
+      lines = []
+      next
+    end
+
+    if (match = line.match(/\A__SECTION_END__ (.+)\n?\z/))
+      if current == match[1]
+        sections[current] = lines.join
+      end
+      current = nil
+      lines = []
+      next
+    end
+
+    if (match = line.match(/\A__UNIT_STATE__ (\S+) (.+)\n?\z/))
+      unit_states[match[1]] = match[2].strip
+      next
+    end
+
+    lines << line if current
+  end
+
+  [sections, unit_states]
+end
+
+def extract_chain_units(text)
+  text.each_line.filter_map { |line| line[UNIT_NAME_PATTERN, 1] }
+end
+
+def extract_enabled_units(text)
+  text.each_line.filter_map do |line|
+    fields = line.strip.split(/\s+/)
+    next if fields.empty?
+
+    fields.first
+  end
+end
+
+def capture_sample(ec2:, image:, subnet:, security_group_id:, private_key_path:, public_key:, ssh_user:, ssh_timeout:, root_throughput:, root_volume_size:, sample_name:, instance_type:)
+  instance_id = nil
+  started_at = Time.now
+  user_data = linux_user_data(ssh_user: ssh_user, public_key: public_key)
+
+  instance_id = launch_instance(
+    ec2: ec2,
+    image: image,
+    instance_type: instance_type,
+    subnet: subnet,
+    security_group_id: security_group_id,
+    user_data: user_data,
+    root_throughput: root_throughput,
+    root_volume_size: root_volume_size,
+    name: sample_name
+  )
+  ip = wait_for_public_ip(ec2, instance_id, timeout_seconds: ssh_timeout)
+  wait_for_ssh(
+    ip: ip,
+    ssh_user: ssh_user,
+    private_key_path: private_key_path,
+    timeout_seconds: ssh_timeout
+  )
+  ssh_ready_s = Time.now - started_at
+  report = capture_ssh(
+    ip: ip,
+    ssh_user: ssh_user,
+    private_key_path: private_key_path,
+    remote_script: remote_report_script
+  )
+
+  sections, unit_states = parse_sections(report)
+  {
+    instance_id: instance_id,
+    public_ip: ip,
+    ssh_ready_s: ssh_ready_s.round(2),
+    report: report,
+    sections: sections,
+    unit_states: unit_states,
+    rolaunch_chain_units: extract_chain_units(sections.fetch('rolaunch_chain', '')),
+    enabled_units: extract_enabled_units(sections.fetch('enabled_units', ''))
+  }
+ensure
+  terminate_instance(ec2, instance_id) if instance_id
+end
+
+def capture_samples(ec2:, image:, subnet:, security_group_id:, private_key_path:, public_key:, ssh_user:, ssh_timeout:, root_throughput:, root_volume_size:, samples:, instance_type:)
+  (1..samples).map do |index|
+    puts "[sample #{index}/#{samples}] #{image.name} (#{image.image_id})"
+    capture_sample(
+      ec2: ec2,
+      image: image,
+      subnet: subnet,
+      security_group_id: security_group_id,
+      private_key_path: private_key_path,
+      public_key: public_key,
+      ssh_user: ssh_user,
+      ssh_timeout: ssh_timeout,
+      root_throughput: root_throughput,
+      root_volume_size: root_volume_size,
+      sample_name: "compare-boot-amis-#{index}-#{image.image_id}",
+      instance_type: instance_type
+    )
+  end
+end
+
+def summarize_samples(samples)
+  {
+    ssh_ready: samples.map { |sample| sample[:ssh_ready_s] },
+    chain_variants: samples.map { |sample| sample[:rolaunch_chain_units] }.uniq,
+    unit_state_variants: TRACKED_UNITS.to_h do |unit|
+      [unit, samples.map { |sample| sample[:unit_states][unit] }.uniq]
+    end,
+    enabled_units: samples.flat_map { |sample| sample[:enabled_units] }.uniq.sort
+  }
+end
+
+def average(values)
+  return 0 if values.empty?
+
+  (values.sum.to_f / values.length).round(2)
+end
+
+ec2 = Aws::EC2::Client.new(region: options[:region])
+baseline_image = find_latest_ami(ec2, options[:baseline])
+candidate_image = find_latest_ami(ec2, options[:candidate_ami_name_or_id])
+raise "This helper only supports Linux AMIs for now (baseline=#{baseline_image.platform_details.inspect})" if baseline_image.platform&.downcase == 'windows'
+raise "This helper only supports Linux AMIs for now (candidate=#{candidate_image.platform_details.inspect})" if candidate_image.platform&.downcase == 'windows'
+
+subnet = resolve_subnet(ec2, options[:subnet_id])
+caller_ip = current_public_ip
+instance_type = options[:instance_type] || resolve_instance_type(options, candidate_image)
+
+puts "Baseline: #{baseline_image.name} (#{baseline_image.image_id})"
+puts "Candidate: #{candidate_image.name} (#{candidate_image.image_id})"
+puts "Instance type: #{instance_type}"
+puts "Region: #{options[:region]}"
+puts "Subnet: #{subnet.subnet_id}"
+puts "SSH user: #{options[:ssh_user]}"
+puts "Samples per AMI: #{options[:samples]}"
+
+Dir.mktmpdir('compare-boot-amis') do |dir|
+  private_key_path, public_key = build_keypair(dir)
+  security_group_id = create_temp_security_group(ec2, subnet, caller_ip)
+
+  begin
+    baseline_samples = capture_samples(
+      ec2: ec2,
+      image: baseline_image,
+      subnet: subnet,
+      security_group_id: security_group_id,
+      private_key_path: private_key_path,
+      public_key: public_key,
+      ssh_user: options[:ssh_user],
+      ssh_timeout: options[:ssh_timeout],
+      root_throughput: options[:root_throughput],
+      root_volume_size: options[:root_volume_size],
+      samples: options[:samples],
+      instance_type: instance_type
+    )
+
+    candidate_samples = capture_samples(
+      ec2: ec2,
+      image: candidate_image,
+      subnet: subnet,
+      security_group_id: security_group_id,
+      private_key_path: private_key_path,
+      public_key: public_key,
+      ssh_user: options[:ssh_user],
+      ssh_timeout: options[:ssh_timeout],
+      root_throughput: options[:root_throughput],
+      root_volume_size: options[:root_volume_size],
+      samples: options[:samples],
+      instance_type: instance_type
+    )
+
+    baseline_summary = summarize_samples(baseline_samples)
+    candidate_summary = summarize_samples(candidate_samples)
+
+    failures = []
+
+    if baseline_summary[:chain_variants].length != 1
+      failures << "baseline rolaunch chain was not stable across samples"
+    end
+
+    if candidate_summary[:chain_variants].length != 1
+      failures << "candidate rolaunch chain was not stable across samples"
+    end
+
+    baseline_chain = baseline_summary[:chain_variants].first || []
+    candidate_chain = candidate_summary[:chain_variants].first || []
+    if baseline_chain != candidate_chain
+      failures << "candidate rolaunch chain differs from baseline"
+    end
+
+    TRACKED_UNITS.each do |unit|
+      baseline_states = baseline_summary[:unit_state_variants].fetch(unit)
+      candidate_states = candidate_summary[:unit_state_variants].fetch(unit)
+
+      if baseline_states.length != 1
+        failures << "baseline unit state for #{unit} was not stable across samples"
+      end
+      if candidate_states.length != 1
+        failures << "candidate unit state for #{unit} was not stable across samples"
+      end
+
+      next unless baseline_states.length == 1 && candidate_states.length == 1
+      next if baseline_states.first == candidate_states.first
+
+      failures << "candidate unit state for #{unit} differs from baseline (baseline=#{baseline_states.first.inspect}, candidate=#{candidate_states.first.inspect})"
+    end
+
+    extra_enabled_units = candidate_summary[:enabled_units] - baseline_summary[:enabled_units]
+    missing_enabled_units = baseline_summary[:enabled_units] - candidate_summary[:enabled_units]
+
+    puts
+    puts "Baseline avg ssh_ready_s: #{average(baseline_summary[:ssh_ready])}"
+    puts "Candidate avg ssh_ready_s: #{average(candidate_summary[:ssh_ready])}"
+    puts
+    puts "Baseline rolaunch chain: #{baseline_chain.join(' -> ')}"
+    puts "Candidate rolaunch chain: #{candidate_chain.join(' -> ')}"
+    puts
+    puts "Tracked unit states:"
+    TRACKED_UNITS.each do |unit|
+      baseline_state = baseline_summary[:unit_state_variants].fetch(unit).join(', ')
+      candidate_state = candidate_summary[:unit_state_variants].fetch(unit).join(', ')
+      puts "  #{unit}: baseline=#{baseline_state} candidate=#{candidate_state}"
+    end
+    puts
+    puts "Extra enabled units on candidate (first 25): #{extra_enabled_units.first(25).join(', ')}" unless extra_enabled_units.empty?
+    puts "Enabled units missing from candidate (first 25): #{missing_enabled_units.first(25).join(', ')}" unless missing_enabled_units.empty?
+    puts
+    puts "Candidate sample 1 blame:"
+    puts candidate_samples.first.dig(:sections, 'blame').to_s
+    puts
+    puts JSON.pretty_generate(
+      {
+        baseline: {
+          ami_id: baseline_image.image_id,
+          ami_name: baseline_image.name,
+          avg_ssh_ready_s: average(baseline_summary[:ssh_ready]),
+          rolaunch_chain_units: baseline_chain,
+          tracked_unit_states: baseline_summary[:unit_state_variants].transform_values(&:first)
+        },
+        candidate: {
+          ami_id: candidate_image.image_id,
+          ami_name: candidate_image.name,
+          avg_ssh_ready_s: average(candidate_summary[:ssh_ready]),
+          rolaunch_chain_units: candidate_chain,
+          tracked_unit_states: candidate_summary[:unit_state_variants].transform_values(&:first)
+        },
+        extra_enabled_units: extra_enabled_units,
+        missing_enabled_units: missing_enabled_units,
+        failures: failures
+      }
+    )
+
+    exit(1) unless failures.empty?
+  ensure
+    delete_security_group_with_retry(ec2, security_group_id)
+  end
+end

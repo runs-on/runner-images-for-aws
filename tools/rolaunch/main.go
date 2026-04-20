@@ -117,6 +117,7 @@ type launcherOps struct {
 	fetchUserData               func(context.Context, config) ([]byte, error)
 	fetchTemporaryPublicKey     func(context.Context, config) ([]byte, error)
 	prefetchMatchingBootstrap   func(context.Context, config, string, []byte) (bool, error)
+	prefetchAgentConfigFiles    func(context.Context, config, instanceIdentity, []byte) error
 	markerMatchesInstance       func(string, string) (bool, error)
 	applyLocalAptMirror         func(string) error
 	installAuthorizedKey        func([]byte) error
@@ -148,6 +149,9 @@ func defaultLauncherOps() launcherOps {
 		},
 		prefetchMatchingBootstrap: func(ctx context.Context, cfg config, region string, raw []byte) (bool, error) {
 			return awsState.prefetchMatchingBootstrap(ctx, cfg, region, raw)
+		},
+		prefetchAgentConfigFiles: func(ctx context.Context, cfg config, identity instanceIdentity, raw []byte) error {
+			return awsState.prefetchAgentConfigFiles(ctx, cfg, identity, raw)
 		},
 		markerMatchesInstance:       markerMatchesInstance,
 		applyLocalAptMirror:         applyLocalAptMirror,
@@ -287,6 +291,16 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 		return err
 	}
 	normalizedUserData := normalizeUserData(rawUserData)
+	if len(normalizedUserData) > 0 {
+		agentConfigPrefetchTask := startAsyncTask(func() error {
+			return ops.prefetchAgentConfigFiles(ctx, cfg, identity, normalizedUserData)
+		})
+		defer func() {
+			if _, err := agentConfigPrefetchTask.wait(); err != nil {
+				log.Printf("warning: failed to prefetch agent config files: %v", err)
+			}
+		}()
+	}
 	prefetchTask := startAsync(func() (bool, error) {
 		if len(normalizedUserData) == 0 {
 			return false, nil

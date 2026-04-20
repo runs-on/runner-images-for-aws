@@ -1,11 +1,19 @@
 package main
 
 import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	aws "github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
 
 func TestDetectMonorepoBootstrapPrefetch(t *testing.T) {
@@ -15,7 +23,7 @@ func TestDetectMonorepoBootstrapPrefetch(t *testing.T) {
 	raw := []byte(`#!/bin/bash -ex
 cat <<EOF > /etc/runs-on/bootstrap.env
 RUNS_ON_BOOTSTRAP_TAG="v0.1.12"
-RUNS_ON_AGENT_S3_BUCKET="s3://config-bucket/agents/v2.12.3"
+RUNS_ON_AGENT_S3_BUCKET="s3://cache-bucket/agents/v2.12.3"
 EOF
 
 cat <<'EOF' > /usr/local/bin/runs-on-bootstrap.sh
@@ -40,7 +48,7 @@ EOF
 	if spec.BootstrapTag != "v0.1.12" {
 		t.Fatalf("unexpected bootstrap tag %q", spec.BootstrapTag)
 	}
-	if spec.S3Bucket != "config-bucket" {
+	if spec.S3Bucket != "cache-bucket" {
 		t.Fatalf("unexpected s3 bucket %q", spec.S3Bucket)
 	}
 
@@ -84,6 +92,102 @@ func TestParseS3URL(t *testing.T) {
 	if bucket != "runs-on-dev" || prefix != "agents/v2.12.3" {
 		t.Fatalf("unexpected parse result bucket=%q prefix=%q", bucket, prefix)
 	}
+}
+
+func TestExtractBootstrapEnvValues(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`#!/bin/bash -ex
+cat <<EOF > /etc/runs-on/bootstrap.env
+RUNS_ON_S3_BUCKET_CACHE="cache-bucket"
+RUNS_ON_ROLE_ID="role-123"
+EOF
+`)
+
+	values, ok := extractBootstrapEnvValues(raw)
+	if !ok {
+		t.Fatal("expected bootstrap env values to be extracted")
+	}
+	if values.S3BucketCache != "cache-bucket" {
+		t.Fatalf("unexpected bucket cache %q", values.S3BucketCache)
+	}
+	if values.RoleID != "role-123" {
+		t.Fatalf("unexpected role id %q", values.RoleID)
+	}
+}
+
+func TestPrefetchAgentConfigFilesWithClientBestEffort(t *testing.T) {
+	t.Parallel()
+
+	raw := []byte(`#!/bin/bash -ex
+cat <<EOF > /etc/runs-on/bootstrap.env
+RUNS_ON_S3_BUCKET_CACHE="cache-bucket"
+RUNS_ON_ROLE_ID="role-123"
+EOF
+`)
+	identity := instanceIdentity{InstanceID: "i-123", Region: "eu-west-3"}
+	instancePath := filepath.Join(t.TempDir(), "instance-config.json")
+	runnerPath := filepath.Join(t.TempDir(), "config.json")
+	client := &fakeS3ObjectGetter{
+		objects: map[string]string{
+			"runners/role-123:i-123/instance-config.json": `{"stackName":"runs-on"}`,
+		},
+		notFound: map[string]bool{
+			"runners/role-123:i-123/runner-config.json": true,
+		},
+	}
+
+	if err := prefetchAgentConfigFilesWithClient(context.Background(), client, identity, raw, instancePath, runnerPath); err != nil {
+		t.Fatalf("prefetchAgentConfigFilesWithClient returned error: %v", err)
+	}
+
+	if got := client.requests; len(got) != 2 {
+		t.Fatalf("unexpected request count %d: %v", len(got), got)
+	}
+	if client.requests[0] != "runners/role-123:i-123/instance-config.json" {
+		t.Fatalf("unexpected first request %q", client.requests[0])
+	}
+	if client.requests[1] != "runners/role-123:i-123/runner-config.json" {
+		t.Fatalf("unexpected second request %q", client.requests[1])
+	}
+
+	rawInstance, err := os.ReadFile(instancePath)
+	if err != nil {
+		t.Fatalf("read instance config: %v", err)
+	}
+	if got := string(rawInstance); got != `{"stackName":"runs-on"}` {
+		t.Fatalf("unexpected instance config contents %q", got)
+	}
+	if _, err := os.Stat(runnerPath); !os.IsNotExist(err) {
+		t.Fatalf("expected runner config to remain absent, stat err=%v", err)
+	}
+}
+
+type fakeS3ObjectGetter struct {
+	objects  map[string]string
+	notFound map[string]bool
+	requests []string
+}
+
+func (f *fakeS3ObjectGetter) GetObject(_ context.Context, input *s3.GetObjectInput, _ ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
+	if input == nil || input.Key == nil {
+		return nil, fmt.Errorf("missing key")
+	}
+
+	key := aws.ToString(input.Key)
+	f.requests = append(f.requests, key)
+	if f.notFound[key] {
+		return nil, &smithyhttp.ResponseError{
+			Response: &smithyhttp.Response{Response: &http.Response{StatusCode: 404}},
+			Err:      fmt.Errorf("not found"),
+		}
+	}
+
+	body, ok := f.objects[key]
+	if !ok {
+		return nil, fmt.Errorf("unexpected key %s", key)
+	}
+	return &s3.GetObjectOutput{Body: io.NopCloser(strings.NewReader(body))}, nil
 }
 
 func TestInstallBootstrapWrapper(t *testing.T) {
