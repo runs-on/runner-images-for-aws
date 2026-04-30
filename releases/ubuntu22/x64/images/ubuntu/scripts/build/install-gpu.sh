@@ -8,8 +8,10 @@ source $HELPER_SCRIPTS/etc-environment.sh
 DIST_SLUG=""
 if is_ubuntu24; then
     DIST_SLUG="ubuntu2404"
+    CUDA_DRIVER_PACKAGE="cuda-drivers"
 elif is_ubuntu22; then
     DIST_SLUG="ubuntu2204"
+    CUDA_DRIVER_PACKAGE="cuda-drivers-575"
 else
     echo "Unsupported ubuntu version"
     exit 1
@@ -22,7 +24,7 @@ if [ -f /root/cuda-installed.txt ]; then
     echo "=== CUDA Installation Verification ==="
     su - runner -c "nvcc --version"
     nvidia-smi
-    nvidia-smi | grep "CUDA Version: 12"
+    su - runner -c "nvcc --version" | grep "release 12"
     rm /root/cuda-installed.txt
     exit 0
 fi
@@ -53,7 +55,7 @@ apt-get update -qq
 # - cuda-toolkit is NVIDIA's official package from their repository
 # - nvidia-cuda-toolkit is Ubuntu's packaged version of CUDA toolkit (often outdated version)
 # So using cuda-toolkit here:
-apt install -y --no-install-recommends cuda-drivers-575 cuda-12-9 cuda-toolkit-12-9 nvidia-container-toolkit
+apt install -y --no-install-recommends "$CUDA_DRIVER_PACKAGE" cuda-12-9 cuda-toolkit-12-9 nvidia-container-toolkit
 
 ( dpkg -l | grep -E "(nvidia-driver|cuda)" | head -10 ) || true
 
