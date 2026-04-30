@@ -6,12 +6,14 @@ source $HELPER_SCRIPTS/os.sh
 source $HELPER_SCRIPTS/etc-environment.sh
 
 DIST_SLUG=""
+NVIDIA_DRIVER_PACKAGES=""
+CUDA_PACKAGES="cuda-12-9 cuda-toolkit-12-9"
 if is_ubuntu24; then
     DIST_SLUG="ubuntu2404"
-    CUDA_DRIVER_PACKAGE="cuda-drivers"
+    NVIDIA_DRIVER_PACKAGES="linux-modules-nvidia-580-aws nvidia-driver-580"
 elif is_ubuntu22; then
     DIST_SLUG="ubuntu2204"
-    CUDA_DRIVER_PACKAGE="cuda-drivers-575"
+    NVIDIA_DRIVER_PACKAGES="cuda-drivers-575"
 else
     echo "Unsupported ubuntu version"
     exit 1
@@ -50,12 +52,23 @@ echo "deb [signed-by=$GPG_KEY] $REPO_URL /" > $REPO_PATH
 
 apt-get update -qq
 
+if is_ubuntu24; then
+    # Noble's 575 driver packages transition to Ubuntu's 580 driver stack, which
+    # has prebuilt modules for the AWS kernel. Prefer those over CUDA repo DKMS
+    # packages so cuda-12-9 stays installed without compiling nvidia-dkms.
+    cat >/etc/apt/preferences.d/ubuntu-nvidia-driver <<'EOF'
+Package: nvidia-driver* nvidia-dkms* nvidia-headless* nvidia-kernel* nvidia-utils* nvidia-compute-utils* nvidia-firmware* nvidia-modprobe nvidia-persistenced libnvidia* xserver-xorg-video-nvidia* linux-modules-nvidia*
+Pin: release o=Ubuntu
+Pin-Priority: 1001
+EOF
+fi
+
 # Pin CUDA version to 12
 # cuda-toolkit vs nvidia-cuda-toolkit:
 # - cuda-toolkit is NVIDIA's official package from their repository
 # - nvidia-cuda-toolkit is Ubuntu's packaged version of CUDA toolkit (often outdated version)
 # So using cuda-toolkit here:
-apt install -y --no-install-recommends "$CUDA_DRIVER_PACKAGE" cuda-12-9 cuda-toolkit-12-9 nvidia-container-toolkit
+apt install -y --no-install-recommends $NVIDIA_DRIVER_PACKAGES $CUDA_PACKAGES nvidia-container-toolkit
 
 ( dpkg -l | grep -E "(nvidia-driver|cuda)" | head -10 ) || true
 
