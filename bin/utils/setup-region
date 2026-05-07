@@ -5,7 +5,7 @@ require 'aws-sdk-servicequotas'
 require 'yaml'
 
 REGIONS = YAML.load_file(File.expand_path("../../config.yml", __dir__)).fetch("regions")
-PUBLIC_AMI_QUOTA = 70
+PUBLIC_AMI_QUOTA = 100
 
 def enable_public_amis_for_region(region)
   ec2 = Aws::EC2::Client.new(region: region)
