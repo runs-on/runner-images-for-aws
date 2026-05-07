@@ -33,14 +33,12 @@ jobs:
       - uses: actions/checkout@v6
         with:
           ref: ${{ github.ref_name }}
-      - uses: webfactory/ssh-agent@72c0bfd31ab22a2e11716951e3f107a9647dc97e
+      - uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
         with:
           ssh-private-key: ${{ secrets.PRIVATE_KEY_FOR_INTEGRATIONS }}
       - run: git log --oneline -n 1
-      - name: Setup Packer
-        uses: hashicorp/setup-packer@v3
-        with:
-          version: 1.15.0
+      - name: Show Packer version
+        run: packer version
       - name: Setup Go (windows25 custom plugin)
         if: ${{ startsWith(inputs.image_id, 'windows25-') }}
         uses: actions/setup-go@v5
