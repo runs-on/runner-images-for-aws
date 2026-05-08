@@ -183,11 +183,35 @@ function Set-RunsOnServicePolicy {
     }
 }
 
-Write-Host "Applying final Windows service policy"
+function Start-RunsOnRequiredService {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
 
-$manualServices = @(
-    "docker"
-)
+        [scriptblock]$Validation
+    )
+
+    $service = Get-Service -Name $Name -ErrorAction SilentlyContinue
+    if (-not $service) {
+        throw "Required service '$Name' not present"
+    }
+
+    Write-Host "Setting required service '$Name' startup type to Automatic"
+    Set-Service -Name $Name -StartupType Automatic -ErrorAction Stop
+
+    if ($service.Status -ne "Running") {
+        Write-Host "Starting required service '$Name'"
+        Start-Service -Name $Name -ErrorAction Stop
+    }
+
+    (Get-Service -Name $Name).WaitForStatus("Running", "00:01:00")
+
+    if ($Validation) {
+        & $Validation
+    }
+}
+
+Write-Host "Applying final Windows service policy"
 
 $disabledServices = @(
     "W3SVC",
@@ -202,10 +226,13 @@ $disabledServices = @(
     "SQLWriter"
 )
 
-$manualServices | ForEach-Object {
-    Set-RunsOnServicePolicy -Name $_ -StartupType Manual
-}
-
 $disabledServices | ForEach-Object {
     Set-RunsOnServicePolicy -Name $_ -StartupType Disabled
+}
+
+Start-RunsOnRequiredService -Name "docker" -Validation {
+    docker version
+    if ($LASTEXITCODE -ne 0) {
+        throw "docker version failed with exit code $LASTEXITCODE"
+    }
 }
