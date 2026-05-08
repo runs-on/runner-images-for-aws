@@ -62,6 +62,10 @@ jobs:
       - name: Check env
         run: |
           Get-ChildItem env: | Where-Object { $_.Name -like 'RUNS_ON*' } | Sort-Object Name | ForEach-Object { "$($_.Name)=$($_.Value)" }
+      - name: Check Docker daemon
+        run: |
+          Get-Service docker | Format-Table -AutoSize Name,Status,StartType
+          docker version
       - name: Check disk usage for windows
         run: |
           dir .
