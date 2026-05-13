@@ -8,3 +8,4 @@ ec2-boot-bench
 /releases/**/*.hcl
 /integrations
 /dist
+/vendor/
