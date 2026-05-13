@@ -1,0 +1,867 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: RunsOn AMI vulnerability scanner using Amazon Inspector, Step Functions, Lambda, and temporary EC2 instances.
+
+Parameters:
+  NotificationEmail:
+    Type: String
+    Default: security@runs-on.com
+    Description: Email address subscribed to scanner run summaries.
+  ScannerScheduleExpression:
+    Type: String
+    Default: cron(0 2 * * ? *)
+    Description: EventBridge schedule expression for scanner runs.
+  InspectorReportFormat:
+    Type: String
+    Default: JSON
+    AllowedValues:
+      - JSON
+      - CSV
+    Description: Inspector findings report format.
+  AmiScanTagName:
+    Type: String
+    Default: inspector_scan
+    Description: AMI tag name owned by this scanner.
+  AmiScanTagValue:
+    Type: String
+    Default: "true"
+    Description: AMI tag value owned by this scanner.
+  ProdPrefix:
+    Type: String
+    Default: runs-on-v2.2
+    Description: Published AMI name prefix.
+  DevPrefix:
+    Type: String
+    Default: runs-on-dev
+    Description: Development AMI name prefix.
+  ScannerConfigJson:
+    Type: String
+    Default: "[]"
+    Description: JSON array of opted-in image IDs and instance types generated from config.yml.
+
+Rules:
+  UsEast1Only:
+    Assertions:
+      - Assert: !Equals [!Ref AWS::Region, us-east-1]
+        AssertDescription: This stack is intended to run only in us-east-1.
+
+Resources:
+  ScannerVpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.82.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-vpc
+
+  ScannerInternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-igw
+
+  ScannerVpcGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref ScannerInternetGateway
+      VpcId: !Ref ScannerVpc
+
+  ScannerSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.82.0.0/24
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref ScannerVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-public-a
+
+  ScannerSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: 10.82.1.0/24
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref ScannerVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-public-b
+
+  ScannerRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref ScannerVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-public
+
+  ScannerDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: ScannerVpcGatewayAttachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref ScannerInternetGateway
+      RouteTableId: !Ref ScannerRouteTable
+
+  ScannerSubnetARouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref ScannerRouteTable
+      SubnetId: !Ref ScannerSubnetA
+
+  ScannerSubnetBRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref ScannerRouteTable
+      SubnetId: !Ref ScannerSubnetB
+
+  ScannerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Outbound-only security group for temporary Inspector scan instances.
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      SecurityGroupIngress: []
+      VpcId: !Ref ScannerVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-scan-instance
+
+  ScanInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-scan-instance
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  ScanInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub ${AWS::StackName}-scan-instance
+      Roles:
+        - !Ref ScanInstanceRole
+
+  ReportKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub KMS key for ${AWS::StackName} Inspector findings reports.
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: EnableAccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: "*"
+          - Sid: AllowInspectorReportEncryption
+            Effect: Allow
+            Principal:
+              Service: inspector2.amazonaws.com
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:GenerateDataKey
+            Resource: "*"
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  ReportKeyAlias:
+    Type: AWS::KMS::Alias
+    Properties:
+      AliasName: !Sub alias/${AWS::StackName}-reports
+      TargetKeyId: !Ref ReportKey
+
+  ReportBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              KMSMasterKeyID: !GetAtt ReportKey.Arn
+              SSEAlgorithm: aws:kms
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireInspectorReports
+            Status: Enabled
+            ExpirationInDays: 90
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  ReportBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ReportBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowInspectorReportExport
+            Effect: Allow
+            Principal:
+              Service: inspector2.amazonaws.com
+            Action:
+              - s3:PutObject
+              - s3:PutObjectAcl
+            Resource: !Sub ${ReportBucket.Arn}/inspector/*
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+          - Sid: AllowInspectorBucketLocation
+            Effect: Allow
+            Principal:
+              Service: inspector2.amazonaws.com
+            Action: s3:GetBucketLocation
+            Resource: !GetAtt ReportBucket.Arn
+            Condition:
+              StringEquals:
+                aws:SourceAccount: !Ref AWS::AccountId
+
+  ScannerTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: !Sub ${AWS::StackName}-summaries
+
+  ScannerTopicSubscription:
+    Type: AWS::SNS::Subscription
+    Properties:
+      Endpoint: !Ref NotificationEmail
+      Protocol: email
+      TopicArn: !Ref ScannerTopic
+
+  ScannerLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-lambda
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ScannerLambdaAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: DescribeEc2ScannerTargets
+                Effect: Allow
+                Action:
+                  - ec2:DescribeImages
+                  - ec2:DescribeInstances
+                Resource: "*"
+              - Sid: RotateAmiScanTags
+                Effect: Allow
+                Action:
+                  - ec2:CreateTags
+                  - ec2:DeleteTags
+                Resource: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}::image/*
+              - Sid: TagLaunchedScanInstances
+                Effect: Allow
+                Action: ec2:CreateTags
+                Resource: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                Condition:
+                  StringEquals:
+                    ec2:CreateAction: RunInstances
+              - Sid: LaunchScanInstances
+                Effect: Allow
+                Action: ec2:RunInstances
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}::image/*
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:network-interface/*
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:security-group/*
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:subnet/*
+                  - !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:volume/*
+              - Sid: TerminateScanInstances
+                Effect: Allow
+                Action: ec2:TerminateInstances
+                Resource: !Sub arn:${AWS::Partition}:ec2:${AWS::Region}:${AWS::AccountId}:instance/*
+              - Sid: PassScanInstanceRole
+                Effect: Allow
+                Action: iam:PassRole
+                Resource: !GetAtt ScanInstanceRole.Arn
+              - Sid: InspectorScanReports
+                Effect: Allow
+                Action:
+                  - inspector2:CreateFindingsReport
+                  - inspector2:GetFindingsReportStatus
+                  - inspector2:ListCoverage
+                  - inspector2:ListFindings
+                Resource: "*"
+              - Sid: WriteReportBucket
+                Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:PutObject
+                Resource:
+                  - !GetAtt ReportBucket.Arn
+                  - !Sub ${ReportBucket.Arn}/*
+              - Sid: UseReportKey
+                Effect: Allow
+                Action:
+                  - kms:Decrypt
+                  - kms:DescribeKey
+                  - kms:GenerateDataKey
+                Resource: !GetAtt ReportKey.Arn
+              - Sid: PublishScanSummaries
+                Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref ScannerTopic
+
+  ScannerFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub ${AWS::StackName}-scanner
+      Description: Discovers opted-in AMIs, rotates scan tags, launches scan instances, exports reports, and publishes summaries.
+      Handler: index.handler
+      Role: !GetAtt ScannerLambdaRole.Arn
+      Runtime: python3.12
+      Timeout: 900
+      MemorySize: 256
+      Environment:
+        Variables:
+          AMI_SCAN_TAG_NAME: !Ref AmiScanTagName
+          AMI_SCAN_TAG_VALUE: !Ref AmiScanTagValue
+          DEV_PREFIX: !Ref DevPrefix
+          PROD_PREFIX: !Ref ProdPrefix
+          INSTANCE_PROFILE_NAME: !Ref ScanInstanceProfile
+          REPORT_BUCKET: !Ref ReportBucket
+          REPORT_FORMAT: !Ref InspectorReportFormat
+          REPORT_KMS_KEY_ARN: !GetAtt ReportKey.Arn
+          SCANNER_CONFIG_JSON: !Ref ScannerConfigJson
+          SECURITY_GROUP_ID: !Ref ScannerSecurityGroup
+          SNS_TOPIC_ARN: !Ref ScannerTopic
+          SUBNET_IDS: !Sub ${ScannerSubnetA},${ScannerSubnetB}
+      Code:
+        ZipFile: |
+          import datetime
+          import json
+          import os
+          import traceback
+          import boto3
+          from botocore.exceptions import ClientError
+
+          ec2 = boto3.client("ec2")
+          inspector = boto3.client("inspector2")
+          sns = boto3.client("sns")
+
+          def handler(event, _context):
+              action = event.get("Action", "Discover")
+              try:
+                  if action == "Discover":
+                      return discover()
+                  if action == "Launch":
+                      return launch(event["Item"], event["RunId"])
+                  if action == "Poll":
+                      return poll(event["Item"])
+                  if action == "Export":
+                      return export_report(event["Item"])
+                  if action == "PollReport":
+                      return poll_report(event["Item"])
+                  if action == "Notify":
+                      return notify(event["Item"])
+                  if action == "Cleanup":
+                      return cleanup(event.get("Item", event))
+                  raise ValueError(f"unsupported action: {action}")
+              except Exception as exc:
+                  failed = event.get("Item", {})
+                  failed["error"] = str(exc)
+                  failed["traceback"] = traceback.format_exc()
+                  cleanup(failed)
+                  raise
+
+          def scanner_config():
+              return json.loads(os.environ["SCANNER_CONFIG_JSON"])
+
+          def tags_to_dict(tags):
+              return {tag["Key"]: tag["Value"] for tag in tags or []}
+
+          def discover():
+              tag_name = os.environ["AMI_SCAN_TAG_NAME"]
+              tag_value = os.environ["AMI_SCAN_TAG_VALUE"]
+              selected = []
+              selected_ids = set()
+              opted_in_ids = {item["image_id"] for item in scanner_config()}
+
+              # The scan tag is distributed scanner-owned state on AMIs; rotate it before launch so stale AMIs are not scanned.
+              for item in scanner_config():
+                  image_id = item["image_id"]
+                  for channel, prefix in (("dev", os.environ["DEV_PREFIX"]), ("prod", os.environ["PROD_PREFIX"])):
+                      images = describe_named_images(f"{prefix}-{image_id}-*")
+                      if not images:
+                          continue
+                      latest = sorted(images, key=lambda image: image["CreationDate"])[-1]
+                      tags = tags_to_dict(latest.get("Tags", []))
+                      if tags.get(tag_name) != tag_value:
+                          ec2.create_tags(Resources=[latest["ImageId"]], Tags=[{"Key": tag_name, "Value": tag_value}])
+                      selected_ids.add(latest["ImageId"])
+                      selected.append({
+                          "ami_id": latest["ImageId"],
+                          "ami_name": latest["Name"],
+                          "channel": channel,
+                          "image_id": image_id,
+                          "instance_type": item["instance_type"]
+                      })
+
+                      for stale in images:
+                          if stale["ImageId"] != latest["ImageId"] and tags_to_dict(stale.get("Tags", [])).get(tag_name) == tag_value:
+                              ec2.delete_tags(Resources=[stale["ImageId"]], Tags=[{"Key": tag_name}])
+
+              for tagged in describe_tagged_images(tag_name, tag_value):
+                  name = tagged.get("Name", "")
+                  still_opted_in = any(
+                      name.startswith(f"{prefix}-{image_id}-")
+                      for image_id in opted_in_ids
+                      for prefix in (os.environ["DEV_PREFIX"], os.environ["PROD_PREFIX"])
+                  )
+                  if tagged["ImageId"] not in selected_ids and not still_opted_in:
+                      ec2.delete_tags(Resources=[tagged["ImageId"]], Tags=[{"Key": tag_name}])
+
+              return {"Items": selected}
+
+          def describe_named_images(pattern):
+              response = ec2.describe_images(
+                  Owners=["self"],
+                  Filters=[
+                      {"Name": "name", "Values": [pattern]},
+                      {"Name": "state", "Values": ["available"]}
+                  ]
+              )
+              return response.get("Images", [])
+
+          def describe_tagged_images(tag_name, tag_value):
+              response = ec2.describe_images(
+                  Owners=["self"],
+                  Filters=[
+                      {"Name": f"tag:{tag_name}", "Values": [tag_value]},
+                      {"Name": "state", "Values": ["available"]}
+                  ]
+              )
+              return response.get("Images", [])
+
+          def launch(item, run_id):
+              subnets = os.environ["SUBNET_IDS"].split(",")
+              preferred_index = sum(ord(char) for char in item["ami_id"]) % len(subnets)
+              ordered_subnets = subnets[preferred_index:] + subnets[:preferred_index]
+              launched_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+              last_error = None
+
+              # Instance-type availability is AZ-specific; try every scanner subnet before failing this AMI scan.
+              for subnet_id in ordered_subnets:
+                  try:
+                      response = ec2.run_instances(
+                          ImageId=item["ami_id"],
+                          InstanceType=item["instance_type"],
+                          MinCount=1,
+                          MaxCount=1,
+                          IamInstanceProfile={"Name": os.environ["INSTANCE_PROFILE_NAME"]},
+                          NetworkInterfaces=[{
+                              "AssociatePublicIpAddress": True,
+                              "DeviceIndex": 0,
+                              "Groups": [os.environ["SECURITY_GROUP_ID"]],
+                              "SubnetId": subnet_id
+                          }],
+                          TagSpecifications=[{
+                              "ResourceType": "instance",
+                              "Tags": [
+                                  {"Key": "Name", "Value": f"inspector-scan-{item['image_id']}-{item['channel']}"},
+                                  {"Key": "InspectorScannerRunId", "Value": run_id},
+                                  {"Key": "InspectorScannerAmiId", "Value": item["ami_id"]},
+                                  {"Key": "InspectorScannerAmiName", "Value": item["ami_name"][:256]},
+                                  {"Key": "InspectorScannerChannel", "Value": item["channel"]},
+                                  {"Key": "InspectorScannerImageId", "Value": item["image_id"]},
+                                  {"Key": "InspectorScannerSubnetId", "Value": subnet_id},
+                                  {"Key": os.environ["AMI_SCAN_TAG_NAME"], "Value": os.environ["AMI_SCAN_TAG_VALUE"]}
+                              ]
+                          }]
+                      )
+                      item["instance_id"] = response["Instances"][0]["InstanceId"]
+                      item["subnet_id"] = subnet_id
+                      item["launched_at"] = launched_at
+                      item["scan_attempts"] = 0
+                      return item
+                  except ClientError as exc:
+                      code = exc.response.get("Error", {}).get("Code")
+                      if code not in ("Unsupported", "InsufficientInstanceCapacity", "InsufficientCapacity"):
+                          raise
+                      last_error = exc
+                      item.setdefault("launch_failures", []).append({"subnet_id": subnet_id, "error": str(exc)})
+
+              raise last_error
+
+          def poll(item):
+              item["scan_attempts"] = item.get("scan_attempts", 0) + 1
+              launched_at = datetime.datetime.fromisoformat(item["launched_at"])
+              coverage = inspector.list_coverage(
+                  filterCriteria={
+                      "resourceId": [{"comparison": "EQUALS", "value": item["instance_id"]}],
+                      "resourceType": [{"comparison": "EQUALS", "value": "AWS_EC2_INSTANCE"}]
+                  }
+              ).get("coveredResources", [])
+
+              for resource in coverage:
+                  scanned_at = resource.get("lastScannedAt")
+                  if scanned_at and scanned_at >= launched_at:
+                      item["scan_complete"] = True
+                      item["scan_status"] = resource.get("scanStatus", {})
+                      return item
+
+              item["scan_complete"] = False
+              item["scan_timed_out"] = item["scan_attempts"] >= 12
+              return item
+
+          def export_report(item):
+              prefix = f"inspector/{item['image_id']}/{item['channel']}/{item['ami_id']}/{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+              item["report_export_attempts"] = item.get("report_export_attempts", 0) + 1
+              item["report_export_wait"] = False
+              try:
+                  response = inspector.create_findings_report(
+                      filterCriteria={
+                          "resourceId": [{"comparison": "EQUALS", "value": item["instance_id"]}]
+                      },
+                      reportFormat=os.environ["REPORT_FORMAT"],
+                      s3Destination={
+                          "bucketName": os.environ["REPORT_BUCKET"],
+                          "keyPrefix": prefix,
+                          "kmsKeyArn": os.environ["REPORT_KMS_KEY_ARN"]
+                      }
+                  )
+              except ClientError as exc:
+                  error = exc.response.get("Error", {})
+                  if error.get("Code") == "ValidationException" and "multiple reports in-progress" in error.get("Message", ""):
+                      item["report_export_wait"] = True
+                      item["report_export_wait_reason"] = error.get("Message")
+                      return item
+                  raise
+
+              item["report_id"] = response["reportId"]
+              item["report_s3_prefix"] = f"s3://{os.environ['REPORT_BUCKET']}/{prefix}"
+              item["finding_counts"] = finding_counts(item["instance_id"])
+              return item
+
+          def poll_report(item):
+              item["report_attempts"] = item.get("report_attempts", 0) + 1
+              response = inspector.get_findings_report_status(reportId=item["report_id"])
+              item["report_status"] = response.get("status")
+              item["report_error_code"] = response.get("errorCode")
+              item["report_error_message"] = response.get("errorMessage")
+              item["report_complete"] = item["report_status"] == "SUCCEEDED"
+              item["report_failed"] = item["report_status"] in ("FAILED", "CANCELLED")
+              item["report_timed_out"] = item["report_attempts"] >= 30
+              return item
+
+          def finding_counts(instance_id):
+              counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "INFORMATIONAL": 0, "UNTRIAGED": 0}
+              paginator = inspector.get_paginator("list_findings")
+              for page in paginator.paginate(filterCriteria={"resourceId": [{"comparison": "EQUALS", "value": instance_id}]}):
+                  for finding in page.get("findings", []):
+                      counts[finding.get("severity", "UNTRIAGED")] = counts.get(finding.get("severity", "UNTRIAGED"), 0) + 1
+              return counts
+
+          def notify(item):
+              update_ami_metadata(item)
+              counts = item.get("finding_counts", {})
+              subject = f"Inspector AMI scan {item['channel']} {item['image_id']}"
+              body = "\n".join([
+                  f"AMI: {item['ami_name']} ({item['ami_id']})",
+                  f"Instance: {item.get('instance_id', 'n/a')}",
+                  f"Channel: {item['channel']}",
+                  f"Image ID: {item['image_id']}",
+                  f"Scan complete: {item.get('scan_complete', False)}",
+                  f"Timed out: {item.get('scan_timed_out', False)}",
+                  f"Report status: {item.get('report_status', 'not checked')}",
+                  f"Report: {item.get('report_s3_prefix', 'not exported')}",
+                  f"Report error: {item.get('report_error_message', 'n/a')}",
+                  f"Findings: {json.dumps(counts, sort_keys=True)}"
+              ])
+              sns.publish(TopicArn=os.environ["SNS_TOPIC_ARN"], Subject=subject[:100], Message=body)
+              return item
+
+          def update_ami_metadata(item):
+              # These AMI tags are operational metadata for humans and later scanner runs, not build or release inputs.
+              status = "complete" if item.get("scan_complete") else "timeout" if item.get("scan_timed_out") else "failed"
+              tags = [
+                  {"Key": "inspector_last_scan_at", "Value": datetime.datetime.now(datetime.timezone.utc).isoformat()},
+                  {"Key": "inspector_last_scan_status", "Value": status},
+                  {"Key": "inspector_last_scan_instance_id", "Value": item.get("instance_id", "n/a")}
+              ]
+              if item.get("report_id"):
+                  tags.append({"Key": "inspector_last_report_id", "Value": item["report_id"]})
+              ec2.create_tags(Resources=[item["ami_id"]], Tags=tags)
+
+          def cleanup(item):
+              # Cleanup must be idempotent because both Lambda error handling and Step Functions catch paths can reach it.
+              instance_id = item.get("instance_id")
+              if instance_id:
+                  ec2.terminate_instances(InstanceIds=[instance_id])
+              if item.get("error"):
+                  sns.publish(
+                      TopicArn=os.environ["SNS_TOPIC_ARN"],
+                      Subject=f"Inspector AMI scanner failure {item.get('image_id', 'unknown')}"[:100],
+                      Message=f"{item.get('error')}\n\n{item.get('traceback', '')}"
+                  )
+              return item
+
+  ScannerStateMachineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-states
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeScannerLambda
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt ScannerFunction.Arn
+
+  ScannerStateMachine:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      StateMachineName: !Sub ${AWS::StackName}
+      RoleArn: !GetAtt ScannerStateMachineRole.Arn
+      DefinitionString: !Sub
+        - |
+          {
+            "StartAt": "Discover",
+            "States": {
+              "Discover": {
+                "Type": "Task",
+                "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+                "Parameters": {
+                  "FunctionName": "${ScannerFunctionArn}",
+                  "Payload": { "Action": "Discover" }
+                },
+                "OutputPath": "$.Payload",
+                "Next": "ScanImages"
+              },
+              "ScanImages": {
+                "Type": "Map",
+                "ItemsPath": "$.Items",
+                "MaxConcurrency": 1,
+                "Iterator": {
+                  "StartAt": "Launch",
+                  "States": {
+                    "Launch": {
+                      "Type": "Task",
+                      "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+                      "Parameters": {
+                        "FunctionName": "${ScannerFunctionArn}",
+                        "Payload": {
+                          "Action": "Launch",
+                          "Item.$": "$",
+                          "RunId.$": "$$.Execution.Name"
+                        }
+                      },
+                      "OutputPath": "$.Payload",
+                      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "CleanupFailure" }],
+                      "Next": "WaitForInspector"
+                    },
+                    "WaitForInspector": {
+                      "Type": "Wait",
+                      "Seconds": 900,
+                      "Next": "Poll"
+                    },
+                    "Poll": {
+                      "Type": "Task",
+                      "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+                      "Parameters": {
+                        "FunctionName": "${ScannerFunctionArn}",
+                        "Payload": {
+                          "Action": "Poll",
+                          "Item.$": "$"
+                        }
+                      },
+                      "OutputPath": "$.Payload",
+                      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "CleanupFailure" }],
+                      "Next": "ScanComplete?"
+                    },
+                    "ScanComplete?": {
+                      "Type": "Choice",
+                      "Choices": [
+                        { "Variable": "$.scan_complete", "BooleanEquals": true, "Next": "ExportReport" },
+                        { "Variable": "$.scan_timed_out", "BooleanEquals": true, "Next": "NotifyTimeout" }
+                      ],
+                      "Default": "WaitForInspector"
+                    },
+                    "ExportReport": {
+                      "Type": "Task",
+                      "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+                      "Parameters": {
+                        "FunctionName": "${ScannerFunctionArn}",
+                        "Payload": {
+                          "Action": "Export",
+                          "Item.$": "$"
+                        }
+                      },
+                      "OutputPath": "$.Payload",
+                      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "CleanupFailure" }],
+                      "Next": "ExportStarted?"
+                    },
+                    "ExportStarted?": {
+                      "Type": "Choice",
+                      "Choices": [
+                        { "Variable": "$.report_export_wait", "BooleanEquals": true, "Next": "WaitForReportSlot" }
+                      ],
+                      "Default": "WaitForReportExport"
+                    },
+                    "WaitForReportSlot": {
+                      "Type": "Wait",
+                      "Seconds": 60,
+                      "Next": "ExportReport"
+                    },
+                    "WaitForReportExport": {
+                      "Type": "Wait",
+                      "Seconds": 60,
+                      "Next": "PollReport"
+                    },
+                    "PollReport": {
+                      "Type": "Task",
+                      "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+                      "Parameters": {
+                        "FunctionName": "${ScannerFunctionArn}",
+                        "Payload": {
+                          "Action": "PollReport",
+                          "Item.$": "$"
+                        }
+                      },
+                      "OutputPath": "$.Payload",
+                      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "CleanupFailure" }],
+                      "Next": "ReportComplete?"
+                    },
+                    "ReportComplete?": {
+                      "Type": "Choice",
+                      "Choices": [
+                        { "Variable": "$.report_complete", "BooleanEquals": true, "Next": "NotifySuccess" },
+                        { "Variable": "$.report_failed", "BooleanEquals": true, "Next": "NotifySuccess" },
+                        { "Variable": "$.report_timed_out", "BooleanEquals": true, "Next": "NotifySuccess" }
+                      ],
+                      "Default": "WaitForReportExport"
+                    },
+                    "NotifySuccess": {
+                      "Type": "Task",
+                      "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+                      "Parameters": {
+                        "FunctionName": "${ScannerFunctionArn}",
+                        "Payload": {
+                          "Action": "Notify",
+                          "Item.$": "$"
+                        }
+                      },
+                      "OutputPath": "$.Payload",
+                      "Catch": [{ "ErrorEquals": ["States.ALL"], "ResultPath": "$.error", "Next": "CleanupFailure" }],
+                      "Next": "CleanupSuccess"
+                    },
+                    "NotifyTimeout": {
+                      "Type": "Task",
+                      "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+                      "Parameters": {
+                        "FunctionName": "${ScannerFunctionArn}",
+                        "Payload": {
+                          "Action": "Notify",
+                          "Item.$": "$"
+                        }
+                      },
+                      "OutputPath": "$.Payload",
+                      "Next": "CleanupSuccess"
+                    },
+                    "CleanupSuccess": {
+                      "Type": "Task",
+                      "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+                      "Parameters": {
+                        "FunctionName": "${ScannerFunctionArn}",
+                        "Payload": {
+                          "Action": "Cleanup",
+                          "Item.$": "$"
+                        }
+                      },
+                      "OutputPath": "$.Payload",
+                      "End": true
+                    },
+                    "CleanupFailure": {
+                      "Type": "Task",
+                      "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
+                      "Parameters": {
+                        "FunctionName": "${ScannerFunctionArn}",
+                        "Payload": {
+                          "Action": "Cleanup",
+                          "Item.$": "$"
+                        }
+                      },
+                      "End": true
+                    }
+                  }
+                },
+                "End": true
+              }
+            }
+          }
+        - ScannerFunctionArn: !GetAtt ScannerFunction.Arn
+
+  ScannerScheduleRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-events
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StartScannerStateMachine
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: states:StartExecution
+                Resource: !Ref ScannerStateMachine
+
+  ScannerSchedule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Nightly RunsOn AMI Inspector scanner.
+      ScheduleExpression: !Ref ScannerScheduleExpression
+      State: ENABLED
+      Targets:
+        - Arn: !Ref ScannerStateMachine
+          Id: RunsOnInspectorAmiScanner
+          RoleArn: !GetAtt ScannerScheduleRole.Arn
+
+Outputs:
+  ReportBucketName:
+    Description: S3 bucket where Inspector findings reports are exported.
+    Value: !Ref ReportBucket
+  ScannerTopicArn:
+    Description: SNS topic that publishes scanner summaries.
+    Value: !Ref ScannerTopic
+  ScannerStateMachineArn:
+    Description: Step Functions state machine that runs AMI scans.
+    Value: !Ref ScannerStateMachine

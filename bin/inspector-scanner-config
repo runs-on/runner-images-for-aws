@@ -1,0 +1,7 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative "../lib/inspector_scanner_config"
+
+config_path = ARGV.fetch(0, File.expand_path("../config.yml", __dir__))
+puts InspectorScannerConfig.json_for_file(config_path)

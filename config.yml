@@ -35,6 +35,7 @@ images:
 
   # Ubuntu24
   - id: ubuntu24-full-x64
+    inspect: true
     instance_type: m8a.large
     volume_size: 30
     source_ami_name: ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*
@@ -42,6 +43,7 @@ images:
     description: RunsOn Ubuntu24 x64
 
   - id: ubuntu24-full-arm64
+    inspect: true
     instance_type: m8g.large
     volume_size: 30
     source_ami_name: ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-arm64-server-*

@@ -63,3 +63,28 @@ For instance, for the `ubuntu22-full-x64` image, search for:
 ## Notes
 
 * SSH daemon is disabled by default, so be sure to enable it in a user-data script if needed.
+
+## Inspector AMI scanning
+
+Deploy the AWS-native Inspector scanner stack from this repo:
+
+```sh
+AWS_PROFILE=<profile> make inspector-stack-deploy
+```
+
+The target defaults to `us-east-1`, stack name `runs-on-inspector-ami-scanner`, and notification email `security@runs-on.com`. Optional overrides:
+
+```sh
+AWS_REGION=us-east-1 \
+INSPECTOR_STACK_NAME=runs-on-inspector-ami-scanner \
+INSPECTOR_NOTIFICATION_EMAIL=security@runs-on.com \
+make inspector-stack-deploy
+```
+
+The stack creates the scanner VPC, outbound-only temporary scan instances, IAM roles, encrypted S3 report bucket, SNS topic, EventBridge schedule, Lambda orchestration, and Step Functions workflow. Confirm the SNS email subscription before expecting notifications.
+
+Amazon Inspector EC2 scanning must be enabled in `us-east-1` for the account. Reports are exported under `s3://<stack-report-bucket>/inspector/<image-id>/<channel>/<ami-id>/`.
+
+AMI scanning is opt-in from `config.yml`. Add `inspect: true` to an image entry to scan the latest dev and prod AMIs matching `runs-on-dev-<image_id>-*` and `runs-on-v2.2-<image_id>-*`. Missing `inspect` defaults to `false`. The `inspector_scan` AMI tag is scanner-owned state; do not manage it from Packer templates or `bin/copy-ami`.
+
+See [docs/inspector-ami-scanner.md](docs/inspector-ami-scanner.md) for operational details.
