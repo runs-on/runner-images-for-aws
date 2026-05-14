@@ -1,6 +1,6 @@
 IMAGE_IDS := $(shell yq e '.images[].id' config.yml)
 .DEFAULT_GOAL := help
-.PHONY: help $(addprefix sync-,$(IMAGE_IDS)) $(addprefix build-,$(IMAGE_IDS)) $(addprefix debug-,$(IMAGE_IDS)) inspector-stack-deploy inspector-stack-run inspector-stack-watch
+.PHONY: help $(addprefix sync-,$(IMAGE_IDS)) $(addprefix build-,$(IMAGE_IDS)) $(addprefix debug-,$(IMAGE_IDS)) inspector-report inspector-stack-deploy inspector-stack-run inspector-stack-watch
 
 SHELL:=/bin/bash
 export AMI_PREFIX=runs-on-dev
@@ -24,6 +24,7 @@ help:
 	@printf "  cleanup-dev                 Clean up development AMIs\n"
 	@printf "  cleanup-prod                Clean up production AMIs\n"
 	@printf "  inspector-stack-deploy      Deploy the Inspector AMI scanner stack\n"
+	@printf "  inspector-report            Show CRITICAL and HIGH findings for an Inspector report\n"
 	@printf "  inspector-stack-run         Start a manual Inspector scanner execution\n"
 	@printf "  inspector-stack-watch       List recent Inspector scanner executions\n"
 	@printf "  setup-roles                 Create the legacy SSM instance profile\n"
@@ -81,6 +82,13 @@ inspector-stack-deploy:
 	    ProdPrefix='$(INSPECTOR_PROD_PREFIX)' \
 	    DevPrefix='$(INSPECTOR_DEV_PREFIX)' \
 	    ScannerConfigJson='$(INSPECTOR_SCANNER_CONFIG_JSON)'
+
+inspector-report:
+	@if [ -z "$(S3_URI)" ]; then \
+	  echo "Usage: AWS_PROFILE=... make inspector-report S3_URI=s3://bucket/report-prefix-or-file.json" >&2; \
+	  exit 1; \
+	fi
+	@./scripts/inspector-report-findings.sh "$(S3_URI)"
 
 inspector-stack-run:
 	@state_machine_arn="$$(aws cloudformation describe-stacks --region $(AWS_REGION) --stack-name $(INSPECTOR_STACK_NAME) --query 'Stacks[0].Outputs[?OutputKey==`ScannerStateMachineArn`].OutputValue' --output text)"; \
