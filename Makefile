@@ -24,7 +24,7 @@ help:
 	@printf "  cleanup-dev                 Clean up development AMIs\n"
 	@printf "  cleanup-prod                Clean up production AMIs\n"
 	@printf "  inspector-stack-deploy      Deploy the Inspector AMI scanner stack\n"
-	@printf "  inspector-report            Show CRITICAL and HIGH findings for an Inspector report\n"
+	@printf "  inspector-report            Show CVE findings for an Inspector report\n"
 	@printf "  inspector-stack-run         Start a manual Inspector scanner execution\n"
 	@printf "  inspector-stack-watch       List recent Inspector scanner executions\n"
 	@printf "  setup-roles                 Create the legacy SSM instance profile\n"

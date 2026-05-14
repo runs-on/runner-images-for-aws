@@ -40,6 +40,13 @@ resolve_report_uri() {
   printf '%s/%s\n' "$uri" "$json_files"
 }
 
+ami_id_from_uri() {
+  local uri="$1"
+  if [[ "$uri" =~ (ami-[0-9a-f]+) ]]; then
+    echo "${BASH_REMATCH[1]}"
+  fi
+}
+
 format_table() {
   if command -v column >/dev/null 2>&1; then
     column -t -s $'\t'
@@ -69,6 +76,14 @@ aws s3 cp "$REPORT_URI" "$REPORT_FILE" >/dev/null
 
 AMI_NAME="$(jq -r '[.findings[]?.resources[]?.tags.InspectorScannerAmiName? // empty] | unique | first // "unknown"' "$REPORT_FILE")"
 AMI_ID="$(jq -r '[.findings[]?.resources[]? | .tags.InspectorScannerAmiId? // .details.awsEc2Instance.imageId? // empty] | unique | join(", ")' "$REPORT_FILE")"
+AMI_ID="${AMI_ID:-$(ami_id_from_uri "$S3_URI")}"
+
+if [ "$AMI_NAME" = "unknown" ] && [ -n "$AMI_ID" ] && [[ "$AMI_ID" != *,* ]]; then
+  EC2_AMI_NAME="$(aws ec2 describe-images --image-ids "$AMI_ID" --query 'Images[0].Name' --output text 2>/dev/null || true)"
+  if [ -n "$EC2_AMI_NAME" ] && [ "$EC2_AMI_NAME" != "None" ]; then
+    AMI_NAME="$EC2_AMI_NAME"
+  fi
+fi
 
 if [ -n "$AMI_ID" ]; then
   printf 'AMI: %s (%s)\n\n' "$AMI_NAME" "$AMI_ID"
@@ -76,9 +91,23 @@ else
   printf 'AMI: %s\n\n' "$AMI_NAME"
 fi
 
+if ! jq -e '.findings[]? | select(.packageVulnerabilityDetails.vulnerabilityId? | startswith("CVE-"))' "$REPORT_FILE" >/dev/null; then
+  echo "No CVE findings found."
+  exit 0
+fi
+
 {
   printf 'Severity\tCVE\tScore\tAffected package(s)\tFix\tExploit\n'
   jq -r '
+    def severity_rank:
+      if .severity == "CRITICAL" then 0
+      elif .severity == "HIGH" then 1
+      elif .severity == "MEDIUM" then 2
+      elif .severity == "LOW" then 3
+      elif .severity == "INFORMATIONAL" then 4
+      else 5
+      end;
+
     def installed_version:
       (.version // "")
       + (if .release then "-" + .release else "" end);
@@ -93,10 +122,10 @@ fi
 
     [
       .findings[]?
-      | select(.severity == "CRITICAL" or .severity == "HIGH")
+      | select(.packageVulnerabilityDetails.vulnerabilityId? | startswith("CVE-"))
     ]
     | sort_by(
-        (if .severity == "CRITICAL" then 0 else 1 end),
+        severity_rank,
         -(.inspectorScore // 0),
         (.packageVulnerabilityDetails.vulnerabilityId // .title)
       )
