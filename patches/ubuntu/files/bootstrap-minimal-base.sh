@@ -5,6 +5,7 @@ set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 
 TARGET_VOLUME_SIZE_GB="${TARGET_VOLUME_SIZE_GB:-2}"
+TARGET_ARCH="${TARGET_ARCH:-amd64}"
 UBUNTU_RELEASE="${UBUNTU_RELEASE:-noble}"
 UBUNTU_MIRROR="${UBUNTU_MIRROR:-http://archive.ubuntu.com/ubuntu}"
 UBUNTU_SECURITY_MIRROR="${UBUNTU_SECURITY_MIRROR:-http://security.ubuntu.com/ubuntu}"
@@ -43,6 +44,7 @@ cleanup_root() {
 
   set +e
   for mountpoint in \
+    "$root/boot/efi" \
     "$root/dev/pts" \
     "$root/dev" \
     "$root/proc" \
@@ -72,6 +74,11 @@ trap cleanup_on_error ERR
 root_source="$(findmnt -n -o SOURCE /)"
 root_parent_disk="/dev/$(lsblk -nro PKNAME "$root_source" | head -n1)"
 target_bytes=$((TARGET_VOLUME_SIZE_GB * 1024 * 1024 * 1024))
+
+if [[ "${TARGET_ARCH}" != "amd64" && "${TARGET_ARCH}" != "arm64" ]]; then
+  echo "Unsupported TARGET_ARCH=${TARGET_ARCH}; expected amd64 or arm64" >&2
+  exit 1
+fi
 
 find_target_disk() {
   while read -r name type size; do
@@ -268,7 +275,7 @@ fi
 step "target disk: $target_disk (${TARGET_VOLUME_SIZE_GB} GiB)"
 
 run_logged_timeout "installing bootstrap dependencies" "$BOOTSTRAP_APT_TIMEOUT_SECONDS" apt-get update
-run_logged_timeout "installing bootstrap packages" "$BOOTSTRAP_APT_TIMEOUT_SECONDS" apt-get install -y debootstrap parted rsync
+run_logged_timeout "installing bootstrap packages" "$BOOTSTRAP_APT_TIMEOUT_SECONDS" apt-get install -y debootstrap parted rsync dosfstools
 if ! command -v ddpt >/dev/null 2>&1; then
   run_logged_timeout "installing ddpt" "$BOOTSTRAP_APT_TIMEOUT_SECONDS" apt-get install -y ddpt || \
     run_logged_timeout "installing sg3-utils fallback" "$BOOTSTRAP_APT_TIMEOUT_SECONDS" apt-get install -y sg3-utils
@@ -284,25 +291,49 @@ truncate -s "${TARGET_VOLUME_SIZE_GB}G" "$SPARSE_IMAGE"
 
 LOOP_DISK="$(losetup --find --show -P "$SPARSE_IMAGE")"
 loop_partition="$(partition_path "$LOOP_DISK")"
+efi_partition=""
+root_partition="$loop_partition"
 
 run_logged "partitioning sparse loop disk $LOOP_DISK" wipefs -af "$LOOP_DISK"
-run_logged "creating partition table on $LOOP_DISK" parted -s "$LOOP_DISK" mklabel msdos
-run_logged "creating root partition on $LOOP_DISK" parted -s -a optimal "$LOOP_DISK" mkpart primary ext4 1MiB 100%
-run_logged "marking partition bootable on $LOOP_DISK" parted -s "$LOOP_DISK" set 1 boot on
+if [[ "${TARGET_ARCH}" == "arm64" ]]; then
+  efi_partition="$loop_partition"
+  root_partition="${LOOP_DISK}p2"
+  run_logged "creating GPT partition table on $LOOP_DISK" parted -s "$LOOP_DISK" mklabel gpt
+  run_logged "creating EFI partition on $LOOP_DISK" parted -s -a optimal "$LOOP_DISK" mkpart ESP fat32 1MiB 261MiB
+  run_logged "marking EFI partition on $LOOP_DISK" parted -s "$LOOP_DISK" set 1 esp on
+  run_logged "creating root partition on $LOOP_DISK" parted -s -a optimal "$LOOP_DISK" mkpart primary ext4 261MiB 100%
+else
+  run_logged "creating partition table on $LOOP_DISK" parted -s "$LOOP_DISK" mklabel msdos
+  run_logged "creating root partition on $LOOP_DISK" parted -s -a optimal "$LOOP_DISK" mkpart primary ext4 1MiB 100%
+  run_logged "marking partition bootable on $LOOP_DISK" parted -s "$LOOP_DISK" set 1 boot on
+fi
 partprobe "$LOOP_DISK" || true
 udevadm settle
-ROOT_PARTUUID="$(blkid -s PARTUUID -o value "$loop_partition")"
-if [[ -z "$ROOT_PARTUUID" ]]; then
-  echo "Failed to determine PARTUUID for $loop_partition" >&2
+if [[ ! -b "${root_partition}" ]]; then
+  echo "Failed to find root partition ${root_partition}" >&2
+  lsblk "$LOOP_DISK" >&2
   exit 1
 fi
 
-run_logged "formatting $loop_partition as ext4" mkfs.ext4 -F -i 65536 -m 0 -E lazy_itable_init=0,lazy_journal_init=0 -L cloudimg-rootfs "$loop_partition"
+ROOT_PARTUUID="$(blkid -s PARTUUID -o value "$root_partition")"
+if [[ -z "$ROOT_PARTUUID" ]]; then
+  echo "Failed to determine PARTUUID for $root_partition" >&2
+  exit 1
+fi
+
+run_logged "formatting $root_partition as ext4" mkfs.ext4 -F -i 65536 -m 0 -E lazy_itable_init=0,lazy_journal_init=0 -L cloudimg-rootfs "$root_partition"
+if [[ "${TARGET_ARCH}" == "arm64" ]]; then
+  run_logged "formatting $efi_partition as EFI system partition" mkfs.vfat -F 32 "$efi_partition"
+fi
 mkdir -p "$TARGET_ROOT_MOUNT"
-run_logged "mounting sparse root filesystem" mount -o discard "$loop_partition" "$TARGET_ROOT_MOUNT"
+run_logged "mounting sparse root filesystem" mount -o discard "$root_partition" "$TARGET_ROOT_MOUNT"
+if [[ "${TARGET_ARCH}" == "arm64" ]]; then
+  mkdir -p "$TARGET_ROOT_MOUNT/boot/efi"
+  run_logged "mounting EFI system partition" mount "$efi_partition" "$TARGET_ROOT_MOUNT/boot/efi"
+fi
 
 run_logged_timeout "debootstrap $UBUNTU_RELEASE rootfs" "$DEBOOTSTRAP_TIMEOUT_SECONDS" \
-  debootstrap --arch=amd64 --variant=minbase "$UBUNTU_RELEASE" "$TARGET_ROOT_MOUNT" "$UBUNTU_MIRROR"
+  debootstrap --arch="$TARGET_ARCH" --variant=minbase "$UBUNTU_RELEASE" "$TARGET_ROOT_MOUNT" "$UBUNTU_MIRROR"
 
 cat > "$TARGET_ROOT_MOUNT/etc/apt/sources.list" <<EOF
 deb $UBUNTU_MIRROR $UBUNTU_RELEASE main restricted universe multiverse
@@ -334,11 +365,22 @@ mount_chroot_root "$TARGET_ROOT_MOUNT"
 
 run_logged_timeout "updating apt inside target rootfs" "$CHROOT_APT_TIMEOUT_SECONDS" \
   chroot "$TARGET_ROOT_MOUNT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get update
+boot_packages=(
+  grub-pc-bin
+  grub2-common
+)
+if [[ "${TARGET_ARCH}" == "arm64" ]]; then
+  boot_packages=(
+    grub-efi-arm64
+    grub-efi-arm64-bin
+    grub2-common
+  )
+fi
+
 run_logged_timeout "installing minimal runtime packages" "$CHROOT_APT_TIMEOUT_SECONDS" \
   chroot "$TARGET_ROOT_MOUNT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     linux-image-aws \
-    grub-pc-bin \
-    grub2-common \
+    "${boot_packages[@]}" \
     cloud-guest-utils \
     openssh-server \
     ca-certificates \
@@ -477,9 +519,14 @@ blacklist parport_pc
 blacklist parport
 EOF
 
-run_logged "installing grub to $LOOP_DISK" chroot_exec "$TARGET_ROOT_MOUNT" grub-install --target=i386-pc "$LOOP_DISK"
+if [[ "${TARGET_ARCH}" == "arm64" ]]; then
+  run_logged "installing arm64 EFI grub to $LOOP_DISK" \
+    chroot_exec "$TARGET_ROOT_MOUNT" grub-install --target=arm64-efi --efi-directory=/boot/efi --bootloader-id=ubuntu --removable --no-nvram
+else
+  run_logged "installing grub to $LOOP_DISK" chroot_exec "$TARGET_ROOT_MOUNT" grub-install --target=i386-pc "$LOOP_DISK"
+fi
 run_logged "generating grub config" chroot_exec "$TARGET_ROOT_MOUNT" update-grub
-run_logged "rewriting grub root device to partition uuid" sed -E -i "s#root=/dev/loop[0-9]+p1#root=PARTUUID=$ROOT_PARTUUID#g" "$TARGET_ROOT_MOUNT/boot/grub/grub.cfg"
+run_logged "rewriting grub root device to partition uuid" sed -E -i "s#root=/dev/loop[0-9]+p[0-9]+#root=PARTUUID=$ROOT_PARTUUID#g" "$TARGET_ROOT_MOUNT/boot/grub/grub.cfg"
 
 write_target_state "$target_disk" "$LOOP_DISK" "$ROOT_PARTUUID"
 install_target_helpers

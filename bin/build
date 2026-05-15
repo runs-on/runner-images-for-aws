@@ -26,6 +26,7 @@ usage = Slop::Options.new do |opts|
   opts.string '--region', 'Region', default: ENV.fetch('AWS_DEFAULT_REGION', "us-east-1")
   opts.boolean '--debug', 'Debug mode', default: false
   opts.boolean '--sync', 'Run bin/sync for the selected image before patching/building', default: false
+  opts.bool '-h', '--help', 'Show help'
 end
 
 begin
@@ -37,6 +38,21 @@ rescue Slop::Error => e
   exit 1
 end
 
+if options[:help]
+  puts usage
+  exit 0
+end
+
+%w[
+  AWS_ACCESS_KEY_ID
+  AWS_SECRET_ACCESS_KEY
+  AWS_SESSION_TOKEN
+  AWS_PROFILE
+  AWS_DEFAULT_PROFILE
+].each do |name|
+  ENV.delete(name) if ENV[name]&.empty?
+end
+
 def tagged_subnets(ec2_client:, tag_key:, tag_value:)
   ec2_client.describe_subnets(
     filters: [
@@ -44,6 +60,59 @@ def tagged_subnets(ec2_client:, tag_key:, tag_value:)
       { name: "tag:#{tag_key}", values: [tag_value] }
     ]
   ).subnets
+end
+
+def subnet_route_tables(ec2_client:, subnet:)
+  route_tables = ec2_client.describe_route_tables(
+    filters: [{ name: "association.subnet-id", values: [subnet.subnet_id] }]
+  ).route_tables
+  return route_tables unless route_tables.empty?
+
+  ec2_client.describe_route_tables(
+    filters: [
+      { name: "vpc-id", values: [subnet.vpc_id] },
+      { name: "association.main", values: ["true"] }
+    ]
+  ).route_tables
+end
+
+def subnet_has_public_ipv4_route?(ec2_client:, subnet:)
+  subnet_route_tables(ec2_client: ec2_client, subnet: subnet).any? do |route_table|
+    route_table.routes.any? do |route|
+      route.state == "active" &&
+        route.destination_cidr_block == "0.0.0.0/0" &&
+        route.gateway_id&.start_with?("igw-")
+    end
+  end
+end
+
+def instance_type_offered_in_subnet?(ec2_client:, instance_type:, subnet:)
+  ec2_client.describe_instance_type_offerings(
+    location_type: "availability-zone",
+    filters: [
+      { name: "location", values: [subnet.availability_zone] },
+      { name: "instance-type", values: [instance_type] }
+    ]
+  ).instance_type_offerings.any?
+end
+
+def subnet_rejection_reasons(ec2_client:, subnet:, instance_type:)
+  reasons = []
+
+  # Packer needs inbound SSH from this machine to the temporary instance, so only use public subnets.
+  reasons << "does not auto-assign public IPv4 addresses" unless subnet.map_public_ip_on_launch
+  unless subnet_has_public_ipv4_route?(ec2_client: ec2_client, subnet: subnet)
+    reasons << "has no active 0.0.0.0/0 route to an internet gateway"
+  end
+  unless instance_type_offered_in_subnet?(ec2_client: ec2_client, instance_type: instance_type, subnet: subnet)
+    reasons << "#{instance_type} is not offered in #{subnet.availability_zone}"
+  end
+
+  reasons
+end
+
+def subnet_summary(subnet)
+  "#{subnet.subnet_id} (#{subnet.availability_zone}, vpc #{subnet.vpc_id})"
 end
 
 def ensure_subnet_tag(ec2_client:, subnet_id:, tag_key:, tag_value:)
@@ -65,39 +134,52 @@ rescue Aws::EC2::Errors::InvalidSubnetIDNotFound
   fail("Fallback subnet not found: #{subnet_id}")
 end
 
-def resolve_subnet_id(ec2_client:, tag_key:, tag_value:, fallback_subnet_id: nil)
+def resolve_subnet_id(ec2_client:, tag_key:, tag_value:, instance_type:, fallback_subnet_id: nil)
   subnets = tagged_subnets(ec2_client: ec2_client, tag_key: tag_key, tag_value: tag_value)
 
-  if subnets.length == 1
-    subnet_id = subnets.first.subnet_id
-    puts "Using tagged subnet #{subnet_id} (#{tag_key}=#{tag_value})"
-    return subnet_id
-  end
-
-  if subnets.length > 1
-    if fallback_subnet_id
-      matching = subnets.find { |subnet| subnet.subnet_id == fallback_subnet_id }
-      if matching
-        puts "Multiple tagged subnets found; using fallback subnet #{fallback_subnet_id}"
-        return matching.subnet_id
-      end
-    end
-
-    subnet_ids = subnets.map(&:subnet_id).sort.join(", ")
-    fail("Multiple tagged subnets found for #{tag_key}=#{tag_value}: #{subnet_ids}. Pass --subnet-id to disambiguate.")
-  end
-
-  if fallback_subnet_id
-    puts "No tagged subnet found for #{tag_key}=#{tag_value}; tagging fallback subnet #{fallback_subnet_id}"
-    return ensure_subnet_tag(
+  if fallback_subnet_id && !subnets.any? { |subnet| subnet.subnet_id == fallback_subnet_id }
+    puts "No tagged subnet found for #{tag_key}=#{tag_value} matching fallback #{fallback_subnet_id}; tagging fallback subnet"
+    fallback_id = ensure_subnet_tag(
       ec2_client: ec2_client,
       subnet_id: fallback_subnet_id,
       tag_key: tag_key,
       tag_value: tag_value
     )
+    subnets = ec2_client.describe_subnets(subnet_ids: [fallback_id]).subnets
   end
 
-  fail("No subnet found with #{tag_key}=#{tag_value}. Tag a subnet or pass --subnet-id once to auto-tag it.")
+  fail("No subnet found with #{tag_key}=#{tag_value}. Tag a public subnet or pass --subnet-id once to auto-tag it.") if subnets.empty?
+
+  candidates = subnets.map do |subnet|
+    [subnet, subnet_rejection_reasons(ec2_client: ec2_client, subnet: subnet, instance_type: instance_type)]
+  end
+  valid_subnets = candidates.select { |_subnet, reasons| reasons.empty? }.map(&:first)
+
+  if fallback_subnet_id
+    matching = valid_subnets.find { |subnet| subnet.subnet_id == fallback_subnet_id }
+    if matching
+      puts "Using fallback subnet #{subnet_summary(matching)} (#{tag_key}=#{tag_value})"
+      return matching.subnet_id
+    end
+  end
+
+  if valid_subnets.length == 1
+    subnet = valid_subnets.first
+    puts "Using tagged subnet #{subnet_summary(subnet)} (#{tag_key}=#{tag_value})"
+    return subnet.subnet_id
+  end
+
+  details = candidates.map do |subnet, reasons|
+    status = reasons.empty? ? "valid" : reasons.join("; ")
+    "- #{subnet_summary(subnet)}: #{status}"
+  end.join("\n")
+
+  if valid_subnets.empty?
+    fail("No tagged subnet can launch #{instance_type} with public SSH access:\n#{details}")
+  end
+
+  valid_ids = valid_subnets.map(&:subnet_id).sort.join(", ")
+  fail("Multiple valid tagged subnets found for #{tag_key}=#{tag_value}: #{valid_ids}. Pass --subnet-id to disambiguate.\n#{details}")
 end
 
 def run_command_with_log(label:, command:, env:, log_file:, stdout_to_console: false)
@@ -166,6 +248,7 @@ resolved_subnet_id = resolve_subnet_id(
   ec2_client: network_ec2_client,
   tag_key: SUBNET_TAG_KEY,
   tag_value: SUBNET_TAG_VALUE,
+  instance_type: image.fetch('instance_type'),
   fallback_subnet_id: legacy_subnet_id
 )
 packer_template_relative_path = "#{dist.sub(/\d+$/, '')}/templates/#{image['id']}.pkr.hcl"
@@ -194,7 +277,7 @@ end
 unless run_command_with_log(
   label: "Patch release tree #{release_dir}",
   command: [patch_script, release_dir],
-  env: {},
+  env: { "IMAGE_ID" => options[:image_id] },
   log_file: log_file_path
 ) 
   fail("Failed to patch #{release_dir}")

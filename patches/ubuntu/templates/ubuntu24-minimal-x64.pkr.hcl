@@ -113,6 +113,14 @@ source "amazon-ebssurrogate" "build_ebs" {
   force_deregister                          = true
   force_delete_snapshot                     = true
 
+  user_data = <<EOF
+#!/bin/bash
+set -euxo pipefail
+systemctl unmask ssh.service || true
+systemctl enable ssh.service || true
+systemctl start ssh.service || true
+EOF
+
   ami_regions = var.ami_regions
 
   launch_block_device_mappings {
@@ -184,7 +192,7 @@ build {
 
   provisioner "shell" {
     execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    inline          = ["mkdir ${var.image_folder}", "chmod 777 ${var.image_folder}"]
+    inline          = ["mkdir -p ${var.image_folder}", "chmod 777 ${var.image_folder}"]
   }
 
   provisioner "file" {
@@ -234,6 +242,7 @@ build {
   provisioner "shell" {
     environment_vars = [
       "TARGET_VOLUME_SIZE_GB=${var.volume_size}",
+      "TARGET_ARCH=amd64",
       "UBUNTU_RELEASE=noble",
       "UBUNTU_MIRROR=http://${var.region}.ec2.archive.ubuntu.com/ubuntu",
       "UBUNTU_SECURITY_MIRROR=http://security.ubuntu.com/ubuntu",
@@ -336,6 +345,7 @@ build {
       "IMAGE_FOLDER=${var.image_folder}",
       "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}",
       "ROOTFS_COMPACTION_HELPER=/tmp/rootfs-compaction.sh",
+      "UPX_ARCH=amd64",
       "MINIMAL_TARGET_STATE_FILE=/var/lib/runs-on/minimal-target/state.env",
       "DEBIAN_FRONTEND=noninteractive",
       "TARGET_ROOT_MOUNT=/mnt/minimal-root"

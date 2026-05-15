@@ -53,13 +53,6 @@ disable_matching_units() {
 
 variant_allowlist_units() {
   case "${variant}" in
-    bootfast)
-      printf '%s\n' \
-        docker.socket \
-        getty@.service \
-        remote-fs.target \
-        rolaunch.service
-      ;;
     minimal)
       printf '%s\n' \
         docker.socket \
@@ -182,10 +175,6 @@ disable_target_units \
   systemd-machined.service
 disable_target_units mono-xsp4.service
 
-if [[ "${variant}" == "bootfast" ]]; then
-  disable_target_units ssh.service
-fi
-
 if [[ "${variant}" == "minimal" ]]; then
   disable_target_units ssh.service ssh.socket ldconfig.service
   mask_target_units \
@@ -218,7 +207,7 @@ fi
 disable_matching_units 'podman*'
 disable_matching_units 'php*'
 
-if [[ "${variant}" == "bootfast" || "${variant}" == "minimal" ]]; then
+if [[ "${variant}" == "minimal" ]]; then
   mapfile -t allowed_units < <(variant_allowlist_units)
   enforce_allowlist "${allowed_units[@]}"
 fi

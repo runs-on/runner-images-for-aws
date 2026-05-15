@@ -7,6 +7,7 @@ MINIMAL_TARGET_STATE_FILE="${MINIMAL_TARGET_STATE_FILE:-/var/lib/runs-on/minimal
 INSTALLER_SCRIPT_FOLDER="${INSTALLER_SCRIPT_FOLDER:-/imagegeneration/installers}"
 IMAGE_FOLDER="${IMAGE_FOLDER:-/imagegeneration}"
 HELPER_SCRIPTS="${HELPER_SCRIPTS:-${IMAGE_FOLDER}/helpers}"
+UPX_ARCH="${UPX_ARCH:-amd64}"
 
 source "${ROOTFS_COMPACTION_HELPER}"
 source "${HELPER_SCRIPTS}/install.sh"
@@ -50,7 +51,7 @@ prepare_rootfs_for_compaction() {
 install_host_upx() {
   local upx_url=""
 
-  upx_url="$(resolve_github_release_asset_url "upx/upx" "endswith(\"amd64_linux.tar.xz\")" "latest")"
+  upx_url="$(resolve_github_release_asset_url "upx/upx" "endswith(\"${UPX_ARCH}_linux.tar.xz\")" "latest")"
   download_with_retry "${upx_url}" "/tmp/upx.tar.xz" >/dev/null
   python3 - <<'PY'
 import tarfile

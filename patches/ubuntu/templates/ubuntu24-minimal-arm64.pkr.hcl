@@ -32,6 +32,15 @@ variable "image_folder" {
   default = "/imagegeneration"
 }
 
+variable "region" {
+  type    = string
+  default = "${env("AWS_DEFAULT_REGION")}"
+}
+
+variable "ami_regions" {
+  type = list(string)
+}
+
 variable "image_os" {
   type    = string
   default = "${env("IMAGE_OS")}"
@@ -42,28 +51,14 @@ variable "image_version" {
   default = "${env("IMAGE_VERSION")}"
 }
 
-variable "installer_script_folder" {
-  type    = string
-  default = "/imagegeneration/installers"
-}
-
-variable "region" {
-  type    = string
-  default = "${env("AWS_DEFAULT_REGION")}"
-}
-
-variable "ami_regions" {
-  type = list(string)
-}
-
 variable "source_ami_owner" {
   type    = string
-  default = "966509368716"
+  default = "099720109477"
 }
 
 variable "source_ami_name" {
   type    = string
-  default = "runs-on-dev-ubuntu24-minimal-x64-*"
+  default = "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-arm64-server-*"
 }
 
 variable "subnet_id" {
@@ -73,7 +68,7 @@ variable "subnet_id" {
 
 variable "volume_size" {
   type    = number
-  default = 30
+  default = 4
 }
 
 variable "volume_throughput" {
@@ -88,7 +83,12 @@ variable "volume_type" {
 
 variable "instance_type" {
   type    = string
-  default = "m8azn.large"
+  default = "m8g.large"
+}
+
+variable "installer_script_folder" {
+  type    = string
+  default = "/imagegeneration/installers"
 }
 
 source "amazon-ebssurrogate" "build_ebs" {
@@ -101,10 +101,11 @@ source "amazon-ebssurrogate" "build_ebs" {
   ami_name                                  = var.ami_name
   ami_description                           = var.ami_description
   ami_virtualization_type                   = "hvm"
-  ami_architecture                          = "x86_64"
+  ami_architecture                          = "arm64"
   ena_support                               = true
   ebs_optimized                             = true
   instance_type                             = var.instance_type
+  iam_instance_profile                      = "SSMInstanceProfile"
   region                                    = var.region
   ssh_username                              = "ubuntu"
   subnet_id                                 = var.subnet_id
@@ -191,37 +192,7 @@ build {
 
   provisioner "shell" {
     execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    inline          = ["mv /tmp/waagent.conf /etc"]
-  }
-
-  provisioner "shell" {
-    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     inline          = ["mkdir -p ${var.image_folder}", "chmod 777 ${var.image_folder}"]
-  }
-
-  provisioner "file" {
-    destination = "${var.image_folder}/bootfast-runner-user.sh"
-    source      = "${path.root}/../custom/files/bootfast-runner-user.sh"
-  }
-
-  provisioner "file" {
-    destination = "${var.image_folder}/runner-finalize-common.sh"
-    source      = "${path.root}/../custom/files/runner-finalize-common.sh"
-  }
-
-  provisioner "file" {
-    destination = "${var.image_folder}/runner-finalize-nested-virt.sh"
-    source      = "${path.root}/../custom/files/runner-finalize-nested-virt.sh"
-  }
-
-  provisioner "file" {
-    destination = "${var.image_folder}/runner-finalize-cleanup.sh"
-    source      = "${path.root}/../custom/files/runner-finalize-cleanup.sh"
-  }
-
-  provisioner "file" {
-    destination = "${var.image_folder}/runner-finalize-units.sh"
-    source      = "${path.root}/../custom/files/runner-finalize-units.sh"
   }
 
   provisioner "file" {
@@ -253,28 +224,38 @@ build {
     source      = "${path.root}/../toolsets/toolset-2404.json"
   }
 
-  provisioner "shell" {
-    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    inline = [
-      "mv ${var.image_folder}/docs-gen ${var.image_folder}/SoftwareReport",
-      "mv ${var.image_folder}/post-gen ${var.image_folder}/post-generation"
-    ]
+  provisioner "file" {
+    destination = "${var.image_folder}/minimal-install-target-tooling.sh"
+    source      = "${path.root}/../custom/files/minimal-install-target-tooling.sh"
+  }
+
+  provisioner "file" {
+    destination = "${var.image_folder}/minimal-install-target-docker.sh"
+    source      = "${path.root}/../custom/files/minimal-install-target-docker.sh"
+  }
+
+  provisioner "file" {
+    destination = "${var.image_folder}/grow-rootfs.sh"
+    source      = "${path.root}/../custom/files/grow-rootfs.sh"
   }
 
   provisioner "shell" {
     environment_vars = [
       "TARGET_VOLUME_SIZE_GB=${var.volume_size}",
+      "TARGET_ARCH=arm64",
       "UBUNTU_RELEASE=noble",
       "UBUNTU_MIRROR=http://${var.region}.ec2.archive.ubuntu.com/ubuntu",
       "UBUNTU_SECURITY_MIRROR=http://security.ubuntu.com/ubuntu",
       "ROLAUNCH_SOURCE=/tmp/rolaunch",
-      "ROOTFS_COMPACTION_HELPER=/tmp/rootfs-compaction.sh",
+      "GROW_ROOTFS_SCRIPT_SOURCE=${var.image_folder}/grow-rootfs.sh",
+      "TARGET_ROOT_MOUNT=/mnt/minimal-root",
+      "MINIMAL_TARGET_STATE_FILE=/var/lib/runs-on/minimal-target/state.env",
       "BOOTSTRAP_APT_TIMEOUT_SECONDS=900",
       "DEBOOTSTRAP_TIMEOUT_SECONDS=1200",
       "CHROOT_APT_TIMEOUT_SECONDS=900"
     ]
     execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    script          = "${path.root}/../custom/files/bootstrap-minimal-rootfs.sh"
+    script          = "${path.root}/../custom/files/bootstrap-minimal-base.sh"
     timeout         = "30m"
   }
 
@@ -286,12 +267,93 @@ build {
       "IMAGEDATA_FILE=${var.imagedata_file}",
       "HELPER_SCRIPTS=${var.helper_script_folder}",
       "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}",
-      "ROOTFS_COMPACTION_HELPER=/tmp/rootfs-compaction.sh",
-      "MINIMAL_INCLUDE_FULL_INSTALLERS=true",
+      "DEBIAN_FRONTEND=noninteractive",
+      "TARGET_ROOT_MOUNT=/mnt/minimal-root",
+      "TARGET_UBUNTU_MIRROR=http://${var.region}.ec2.archive.ubuntu.com/ubuntu/",
+      "TARGET_UBUNTU_SECURITY_MIRROR=http://security.ubuntu.com/ubuntu/",
+      "WAAGENT_CONFIG_SOURCE=/tmp/waagent.conf"
+    ]
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    script          = "${path.root}/../custom/files/stage-minimal-target.sh"
+  }
+
+  provisioner "shell" {
+    environment_vars = [
+      "IMAGE_VERSION=${var.image_version}",
+      "IMAGE_OS=${var.image_os}",
+      "IMAGE_FOLDER=${var.image_folder}",
+      "IMAGEDATA_FILE=${var.imagedata_file}",
+      "HELPER_SCRIPTS=${var.helper_script_folder}",
+      "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}",
+      "MINIMAL_INCLUDE_FULL_INSTALLERS=false",
       "DEBIAN_FRONTEND=noninteractive",
       "TARGET_ROOT_MOUNT=/mnt/minimal-root"
     ]
     execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    script          = "${path.root}/../custom/files/apply-minimal-installers.sh"
+    inline = [
+      "ro-run-script-in-target ${var.installer_script_folder}/configure-image-data.sh",
+      "ro-run-script-in-target ${var.installer_script_folder}/configure-environment.sh",
+      "ro-run-script-in-target ${var.installer_script_folder}/configure-apt-mock.sh",
+      "ro-run-script-in-target ${var.installer_script_folder}/configure-apt-sources.sh",
+      "ro-run-script-in-target ${var.installer_script_folder}/configure-apt.sh",
+      "ro-run-script-in-target ${var.installer_script_folder}/configure-limits.sh"
+    ]
+  }
+
+  provisioner "shell" {
+    environment_vars = [
+      "IMAGE_VERSION=${var.image_version}",
+      "IMAGE_OS=${var.image_os}",
+      "IMAGE_FOLDER=${var.image_folder}",
+      "IMAGEDATA_FILE=${var.imagedata_file}",
+      "HELPER_SCRIPTS=${var.helper_script_folder}",
+      "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}",
+      "MINIMAL_INCLUDE_FULL_INSTALLERS=false",
+      "DEBIAN_FRONTEND=noninteractive",
+      "TARGET_ROOT_MOUNT=/mnt/minimal-root"
+    ]
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    inline = [
+      "ro-run-script-in-target ${var.installer_script_folder}/install-runner-package.sh",
+      "ro-run-script-in-target ${var.image_folder}/minimal-install-target-tooling.sh",
+      "ro-run-script-in-target ${var.image_folder}/minimal-install-target-docker.sh"
+    ]
+  }
+
+  provisioner "shell" {
+    environment_vars = [
+      "IMAGE_FOLDER=${var.image_folder}",
+      "DEBIAN_FRONTEND=noninteractive",
+      "TARGET_ROOT_MOUNT=/mnt/minimal-root"
+    ]
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    script          = "${path.root}/../custom/files/runner-finalize-common.sh"
+  }
+
+  provisioner "shell" {
+    environment_vars = [
+      "DEBIAN_FRONTEND=noninteractive",
+      "RUNNER_FINALIZE_VARIANT=minimal",
+      "TARGET_ROOT_MOUNT=/mnt/minimal-root"
+    ]
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    script          = "${path.root}/../custom/files/runner-finalize-units.sh"
+  }
+
+  provisioner "shell" {
+    environment_vars = [
+      "IMAGE_FOLDER=${var.image_folder}",
+      "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}",
+      "ROOTFS_COMPACTION_HELPER=/tmp/rootfs-compaction.sh",
+      "UPX_ARCH=arm64",
+      "MINIMAL_TARGET_STATE_FILE=/var/lib/runs-on/minimal-target/state.env",
+      "DEBIAN_FRONTEND=noninteractive",
+      "TARGET_ROOT_MOUNT=/mnt/minimal-root"
+    ]
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    scripts = [
+      "${path.root}/../custom/files/runner-finalize-cleanup.sh",
+      "${path.root}/../custom/files/finalize-minimal-rootfs.sh"
+    ]
   }
 }

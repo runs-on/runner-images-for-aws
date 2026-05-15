@@ -164,16 +164,6 @@ build {
   
   sources = ["source.amazon-ebs.build_ebs"]
 
-  provisioner "file" {
-    source      = "${path.root}/../custom/files/install-runs-on-bootstrap.sh"
-    destination = "/tmp/install-runs-on-bootstrap.sh"
-  }
-
-  provisioner "shell" {
-    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    inline          = ["bash /tmp/install-runs-on-bootstrap.sh"]
-  }
-
   provisioner "shell" {
     execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     scripts             = ["${path.root}/../custom/files/pre.sh"]
@@ -383,14 +373,8 @@ build {
   }
 
   provisioner "shell" {
-    environment_vars = ["DEBIAN_FRONTEND=noninteractive", "RUNNER_FINALIZE_VARIANT=full"]
-    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = [
-      "${path.root}/../custom/files/runner-finalize-common.sh",
-      "${path.root}/../custom/files/runner-finalize-nested-virt.sh",
-      "${path.root}/../custom/files/runner-finalize-cleanup.sh",
-      "${path.root}/../custom/files/runner-finalize-units.sh"
-    ]
+    execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    scripts             = ["${path.root}/../custom/files/runner-user.sh"]
   }
 
   provisioner "shell" {

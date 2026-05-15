@@ -11,9 +11,10 @@ REPO_URL="https://download.docker.com/linux/ubuntu"
 GPG_KEY="/usr/share/keyrings/docker.gpg"
 REPO_PATH="/etc/apt/sources.list.d/docker.list"
 os_codename="$(lsb_release -cs)"
+docker_arch="$(dpkg --print-architecture)"
 
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o "${GPG_KEY}"
-echo "deb [arch=amd64 signed-by=${GPG_KEY}] ${REPO_URL} ${os_codename} stable" > "${REPO_PATH}"
+echo "deb [arch=${docker_arch} signed-by=${GPG_KEY}] ${REPO_URL} ${os_codename} stable" > "${REPO_PATH}"
 apt-get update
 
 components="$(get_toolset_value '.docker.components[] .package')"
