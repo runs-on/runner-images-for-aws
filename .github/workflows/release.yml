@@ -45,4 +45,9 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
       - name: Copy dev AMI to prod
-        run: bundle exec bin/copy-ami --force ${{ inputs.ami_name }}
+        run: bundle exec bin/copy-ami --force --summary-json release-summary/${{ inputs.image_id }}.json ${{ inputs.ami_name }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: released-ami-${{ inputs.image_id }}
+          path: release-summary/${{ inputs.image_id }}.json
+          retention-days: 7

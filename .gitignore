@@ -7,5 +7,6 @@ ec2-boot-bench
 *.pem
 /releases/**/*.hcl
 /integrations
-/dist
+# locally built artifacts
+/dist/
 /vendor/

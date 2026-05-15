@@ -7,20 +7,26 @@ require 'fileutils'
 require 'yaml'
 require 'aws-sdk-ec2'
 require 'timeout'
+require 'tmpdir'
 
 IMAGES = YAML.load_file(File.expand_path("../config.yml", __dir__)).fetch("images")
+SUBNET_TAG_KEY = "runner-image-for-aws"
+SUBNET_TAG_VALUE = "true"
 
 options = {}
 
 usage = Slop::Options.new do |opts|
-  opts.banner = "Usage: #{$0} --image-id [IMAGE_ID]"
+  opts.banner = "Usage: #{$0} --image-id [IMAGE_ID] [--sync]"
 
   opts.string '--image-id', 'Image ID', required: true
   opts.string '--image-prefix', 'Image Prefix', default: ENV.fetch('AMI_PREFIX', "runs-on-dev")
   opts.string '--image-version', 'Image Version', default: Time.now.strftime("%Y%m%d%H%M%S")
-  opts.string '--subnet-id', 'Subnet ID', default: ENV.fetch('SUBNET_ID', nil)
+  opts.string '--subnet-id', 'Legacy subnet ID fallback used only if no tagged subnet exists', default: nil
+  opts.string '--log-file', 'Path to write Packer output (defaults to a temporary file)', default: nil
   opts.string '--region', 'Region', default: ENV.fetch('AWS_DEFAULT_REGION', "us-east-1")
   opts.boolean '--debug', 'Debug mode', default: false
+  opts.boolean '--sync', 'Run bin/sync for the selected image before patching/building', default: false
+  opts.bool '-h', '--help', 'Show help'
 end
 
 begin
@@ -32,23 +38,250 @@ rescue Slop::Error => e
   exit 1
 end
 
+if options[:help]
+  puts usage
+  exit 0
+end
+
+%w[
+  AWS_ACCESS_KEY_ID
+  AWS_SECRET_ACCESS_KEY
+  AWS_SESSION_TOKEN
+  AWS_PROFILE
+  AWS_DEFAULT_PROFILE
+].each do |name|
+  ENV.delete(name) if ENV[name]&.empty?
+end
+
+def tagged_subnets(ec2_client:, tag_key:, tag_value:)
+  ec2_client.describe_subnets(
+    filters: [
+      { name: "state", values: ["available"] },
+      { name: "tag:#{tag_key}", values: [tag_value] }
+    ]
+  ).subnets
+end
+
+def subnet_route_tables(ec2_client:, subnet:)
+  route_tables = ec2_client.describe_route_tables(
+    filters: [{ name: "association.subnet-id", values: [subnet.subnet_id] }]
+  ).route_tables
+  return route_tables unless route_tables.empty?
+
+  ec2_client.describe_route_tables(
+    filters: [
+      { name: "vpc-id", values: [subnet.vpc_id] },
+      { name: "association.main", values: ["true"] }
+    ]
+  ).route_tables
+end
+
+def subnet_has_public_ipv4_route?(ec2_client:, subnet:)
+  subnet_route_tables(ec2_client: ec2_client, subnet: subnet).any? do |route_table|
+    route_table.routes.any? do |route|
+      route.state == "active" &&
+        route.destination_cidr_block == "0.0.0.0/0" &&
+        route.gateway_id&.start_with?("igw-")
+    end
+  end
+end
+
+def instance_type_offered_in_subnet?(ec2_client:, instance_type:, subnet:)
+  ec2_client.describe_instance_type_offerings(
+    location_type: "availability-zone",
+    filters: [
+      { name: "location", values: [subnet.availability_zone] },
+      { name: "instance-type", values: [instance_type] }
+    ]
+  ).instance_type_offerings.any?
+end
+
+def subnet_rejection_reasons(ec2_client:, subnet:, instance_type:)
+  reasons = []
+
+  # Packer needs inbound SSH from this machine to the temporary instance, so only use public subnets.
+  reasons << "does not auto-assign public IPv4 addresses" unless subnet.map_public_ip_on_launch
+  unless subnet_has_public_ipv4_route?(ec2_client: ec2_client, subnet: subnet)
+    reasons << "has no active 0.0.0.0/0 route to an internet gateway"
+  end
+  unless instance_type_offered_in_subnet?(ec2_client: ec2_client, instance_type: instance_type, subnet: subnet)
+    reasons << "#{instance_type} is not offered in #{subnet.availability_zone}"
+  end
+
+  reasons
+end
+
+def subnet_summary(subnet)
+  "#{subnet.subnet_id} (#{subnet.availability_zone}, vpc #{subnet.vpc_id})"
+end
+
+def ensure_subnet_tag(ec2_client:, subnet_id:, tag_key:, tag_value:)
+  subnet = ec2_client.describe_subnets(subnet_ids: [subnet_id]).subnets.first
+  existing_value = subnet.tags&.find { |tag| tag.key == tag_key }&.value
+
+  if existing_value == tag_value
+    puts "Subnet #{subnet_id} already tagged #{tag_key}=#{tag_value}"
+  else
+    ec2_client.create_tags(
+      resources: [subnet_id],
+      tags: [{ key: tag_key, value: tag_value }]
+    )
+    puts "Tagged subnet #{subnet_id} with #{tag_key}=#{tag_value}"
+  end
+
+  subnet.subnet_id
+rescue Aws::EC2::Errors::InvalidSubnetIDNotFound
+  fail("Fallback subnet not found: #{subnet_id}")
+end
+
+def resolve_subnet_id(ec2_client:, tag_key:, tag_value:, instance_type:, fallback_subnet_id: nil)
+  subnets = tagged_subnets(ec2_client: ec2_client, tag_key: tag_key, tag_value: tag_value)
+
+  if fallback_subnet_id && !subnets.any? { |subnet| subnet.subnet_id == fallback_subnet_id }
+    puts "No tagged subnet found for #{tag_key}=#{tag_value} matching fallback #{fallback_subnet_id}; tagging fallback subnet"
+    fallback_id = ensure_subnet_tag(
+      ec2_client: ec2_client,
+      subnet_id: fallback_subnet_id,
+      tag_key: tag_key,
+      tag_value: tag_value
+    )
+    subnets = ec2_client.describe_subnets(subnet_ids: [fallback_id]).subnets
+  end
+
+  fail("No subnet found with #{tag_key}=#{tag_value}. Tag a public subnet or pass --subnet-id once to auto-tag it.") if subnets.empty?
+
+  candidates = subnets.map do |subnet|
+    [subnet, subnet_rejection_reasons(ec2_client: ec2_client, subnet: subnet, instance_type: instance_type)]
+  end
+  valid_subnets = candidates.select { |_subnet, reasons| reasons.empty? }.map(&:first)
+
+  if fallback_subnet_id
+    matching = valid_subnets.find { |subnet| subnet.subnet_id == fallback_subnet_id }
+    if matching
+      puts "Using fallback subnet #{subnet_summary(matching)} (#{tag_key}=#{tag_value})"
+      return matching.subnet_id
+    end
+  end
+
+  if valid_subnets.length == 1
+    subnet = valid_subnets.first
+    puts "Using tagged subnet #{subnet_summary(subnet)} (#{tag_key}=#{tag_value})"
+    return subnet.subnet_id
+  end
+
+  details = candidates.map do |subnet, reasons|
+    status = reasons.empty? ? "valid" : reasons.join("; ")
+    "- #{subnet_summary(subnet)}: #{status}"
+  end.join("\n")
+
+  if valid_subnets.empty?
+    fail("No tagged subnet can launch #{instance_type} with public SSH access:\n#{details}")
+  end
+
+  valid_ids = valid_subnets.map(&:subnet_id).sort.join(", ")
+  fail("Multiple valid tagged subnets found for #{tag_key}=#{tag_value}: #{valid_ids}. Pass --subnet-id to disambiguate.\n#{details}")
+end
+
+def run_command_with_log(label:, command:, env:, log_file:, stdout_to_console: false)
+  FileUtils.mkdir_p(File.dirname(log_file))
+  separator = "=" * 80
+  timestamp = Time.now.utc.iso8601
+  label_line = "[#{timestamp}] #{label}"
+  log_line = "  log: #{log_file}"
+
+  puts label_line
+  puts log_line
+
+  success = false
+  File.open(log_file, "a") do |io|
+    io.puts("#{separator}\n#{timestamp} #{label}\n#{separator}")
+    io.puts("command: #{command.join(' ')}")
+    io.flush
+    success = system(env, *command, out: io, err: io)
+  end
+
+  return true if success
+
+  puts "[ERROR] #{label} failed"
+  if File.exist?(log_file)
+    puts "Last 100 lines from #{log_file}:"
+    tail_output = File.readlines(log_file).last(100).join
+    puts tail_output.empty? ? "[No output captured]" : tail_output
+  end
+
+  puts "[TIP] Full log remains in #{log_file}" unless stdout_to_console
+  return false
+ensure
+  unless stdout_to_console
+    # Keep a concise marker in the console for successful runs
+    puts "[OK] #{label}" if success
+  end
+end
+
+def default_log_file
+  options_log = ENV["RUNS_ON_PACKER_LOG"] || ENV["PACKER_LOG_FILE"]
+  return options_log unless options_log.nil? || options_log.empty?
+
+  File.join(Dir.tmpdir, "packer-build-#{Time.now.strftime('%Y%m%d-%H%M%S')}-#{Process.pid}.log")
+end
+
 image = IMAGES.find do |i|
   i['id'] == options[:image_id]
 end
 fail("Image not found: #{options[:image_id]}") unless image
 
-dist, variant, arch = image['id'].split('-', 3)
+image_id_parts = image['id'].split('-')
+fail("Invalid image id: #{image['id']}") if image_id_parts.length < 3
+
+dist = image_id_parts.first
+arch = image_id_parts.last
+variant = image_id_parts[1..-2].join('-')
 release_dir = "releases/#{dist}/#{arch}"
 fail "Skipping #{release_dir}, not found" unless Dir.exist?(release_dir)
+patch_script = File.expand_path("../bin/patch/#{dist}-#{arch}", __dir__)
+fail "Patch script not found: #{patch_script}" unless File.exist?(patch_script)
 
 ami_name = [options[:image_prefix], image['id'], options[:image_version]].join('-')
+legacy_subnet_id = options[:subnet_id] || ENV.fetch('SUBNET_ID', nil)
+network_ec2_client = Aws::EC2::Client.new(region: options[:region])
+resolved_subnet_id = resolve_subnet_id(
+  ec2_client: network_ec2_client,
+  tag_key: SUBNET_TAG_KEY,
+  tag_value: SUBNET_TAG_VALUE,
+  instance_type: image.fetch('instance_type'),
+  fallback_subnet_id: legacy_subnet_id
+)
 packer_template_relative_path = "#{dist.sub(/\d+$/, '')}/templates/#{image['id']}.pkr.hcl"
 packer_template_path = "#{release_dir}/images/#{packer_template_relative_path}"
+log_file_path = options[:log_file] || default_log_file
+puts "Using Packer command log file: #{log_file_path}"
 custom_amazon_plugin_binary = ENV.fetch('PACKER_AMAZON_PLUGIN_BINARY', '').strip
 custom_plugin_path = ""
 
 # Ensure template directory exists
 FileUtils.mkdir_p(File.dirname(packer_template_path))
+
+if options[:sync]
+  sync_script = File.expand_path("../bin/sync", __dir__)
+  unless run_command_with_log(
+    label: "Sync generated files for #{options[:image_id]} before build",
+    command: [sync_script, "--image-id", options[:image_id]],
+    env: {},
+    log_file: log_file_path
+  )
+    fail("Failed to sync #{options[:image_id]}")
+  end
+end
+
+# Refresh the generated release tree from the repo patches before every build.
+unless run_command_with_log(
+  label: "Patch release tree #{release_dir}",
+  command: [patch_script, release_dir],
+  env: { "IMAGE_ID" => options[:image_id] },
+  log_file: log_file_path
+) 
+  fail("Failed to patch #{release_dir}")
+end
 
 # Copy template to destination
 FileUtils.cp("patches/#{packer_template_relative_path}", packer_template_path)
@@ -59,9 +292,24 @@ FileUtils.rm_rf("integrations") && Dir.mkdir("integrations")
 }.each do |repo, path|
   if options[:debug]
     puts "debug mode: copying local repo #{repo} to #{path}"
-    system("cp -r ~/dev/#{repo} #{path}")
+    puts "debug mode copy skipped from helper logging (requires shell expansion)"
+    system("cp -r ~/dev/#{repo} #{path}") or fail("Failed to copy local repo #{repo}")
   else
-    system("git clone git@github.com:#{repo}.git #{path}")
+    clone_urls = [
+      "git@github.com:#{repo}.git",
+      "https://github.com/#{repo}.git"
+    ]
+    cloned = clone_urls.any? do |clone_url|
+      run_command_with_log(
+        label: "Clone #{repo} via #{clone_url}",
+        command: ["git", "clone", clone_url, path],
+        env: {},
+        log_file: log_file_path
+      )
+    end
+    unless cloned
+      fail("Failed to clone #{repo}")
+    end
   end
 end
 
@@ -92,8 +340,14 @@ else
   plugin_env = { "PACKER_PLUGIN_PATH" => custom_plugin_path }
 
   puts "Installing custom amazon plugin from #{custom_amazon_plugin_binary}"
-  puts "Running Packer plugin install command: #{plugin_install_cmd.join(' ')}"
-  system(plugin_env, *plugin_install_cmd) or fail("Packer plugin install failed")
+  unless run_command_with_log(
+    label: "Packer plugin install",
+    command: plugin_install_cmd,
+    env: plugin_env,
+    log_file: log_file_path
+  )
+    fail("Packer plugin install failed")
+  end
 
   packer_init_cmd = [
     "packer", "init",
@@ -107,13 +361,19 @@ packer_build_cmd = [
   "-var", "ami_name=#{ami_name}",
   "-var", "image_os=#{dist}",
   "-var", "image_version=#{options[:image_version]}",
-  "-var", "subnet_id=#{options[:subnet_id]}",
+  "-var", "subnet_id=#{resolved_subnet_id}",
   "-var", "region=#{options[:region]}",
   "-var", "source_ami_name=#{image.fetch('source_ami_name')}",
   "-var", "source_ami_owner=#{image.fetch('source_ami_owner')}",
   ("-var" if image.key?('instance_type')),
   ("instance_type=#{image.fetch('instance_type')}" if image.key?('instance_type')),
   "-var", "volume_size=#{image.fetch('volume_size')}",
+  ("-var" if image.key?('volume_throughput')),
+  ("volume_throughput=#{image.fetch('volume_throughput')}" if image.key?('volume_throughput')),
+  ("-var" if image.key?('payload_volume_size')),
+  ("payload_volume_size=#{image.fetch('payload_volume_size')}" if image.key?('payload_volume_size')),
+  ("-var" if ENV.key?("INCLUDE_FULL_INSTALLERS")),
+  ("include_full_installers=#{ENV.fetch('INCLUDE_FULL_INSTALLERS')}" if ENV.key?("INCLUDE_FULL_INSTALLERS")),
   "-var", "ami_description=#{image.fetch('description')}",
   packer_template_path
 ].compact
@@ -123,15 +383,22 @@ unless custom_plugin_path.empty?
   packer_init_env["PACKER_PLUGIN_PATH"] = custom_plugin_path
 end
 
-puts "Running Packer init command: #{packer_init_cmd.join(' ')}"
-system(packer_init_env, *packer_init_cmd) or fail("Packer init failed")
+puts "Running Packer init command..."
+unless run_command_with_log(
+  label: "Packer init",
+  command: packer_init_cmd,
+  env: packer_init_env,
+  log_file: log_file_path
+)
+  fail("Packer init failed")
+end
 
 packer_build_env = { "PROJECT_ROOT" => File.expand_path("..", __dir__) }
 unless custom_plugin_path.empty?
   packer_build_env["PACKER_PLUGIN_PATH"] = custom_plugin_path
 end
 
-puts "Running Packer build command: #{packer_build_cmd.join(' ')}"
+puts "Running Packer build command..."
 
 windows_disk_monitor_pid = nil
 if options[:image_id].start_with?("windows")
@@ -159,7 +426,13 @@ end
 
 build_succeeded = false
 begin
-  build_succeeded = system(packer_build_env, *packer_build_cmd)
+  build_succeeded = run_command_with_log(
+    label: "Packer build",
+    command: packer_build_cmd,
+    env: packer_build_env,
+    log_file: log_file_path
+  )
+  raise("Packer build failed") unless build_succeeded
 ensure
   unless windows_disk_monitor_pid.nil?
     begin

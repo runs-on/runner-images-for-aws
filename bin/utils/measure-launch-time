@@ -1,0 +1,388 @@
+#!/usr/bin/env ruby
+
+require 'bundler/setup'
+require 'aws-sdk-ec2'
+require 'base64'
+require 'fileutils'
+require 'json'
+require 'open-uri'
+require 'slop'
+require 'socket'
+require 'tempfile'
+require 'tmpdir'
+require 'timeout'
+require 'shellwords'
+
+options = {}
+
+usage = Slop::Options.new do |opts|
+  opts.banner = "Usage: #{$0} AMI_NAME_OR_ID [options]"
+  opts.string '--instance-type', 'Instance type override'
+  opts.string '--region', 'AWS region', default: ENV['AWS_REGION'] || ENV['AWS_DEFAULT_REGION'] || 'us-east-1'
+  opts.string '--subnet-id', 'Subnet to launch into'
+  opts.string '--ssh-user', 'SSH username', default: 'ubuntu'
+  opts.integer '--ssh-timeout', 'Max seconds to wait for SSH login', default: 600
+  opts.integer '--root-throughput', 'Override root gp3 throughput in MiB/s', default: 750
+  opts.integer '--warm-runs', 'Warm-up launches before measurement', default: 2
+  opts.integer '--measure-runs', 'Measured launches after warm-up', default: 2
+  opts.bool '-h', '--help', 'Show help'
+end
+
+begin
+  options = usage.parse(ARGV).to_hash
+  options[:ami_name_or_id] = ARGV.shift
+rescue Slop::Error => e
+  warn "Error: #{e.message}"
+  warn
+  warn usage
+  exit 1
+end
+
+if options[:help] || options[:ami_name_or_id].nil?
+  puts usage
+  exit(options[:help] ? 0 : 1)
+end
+
+def linux_user_data(ssh_user:, public_key:)
+  requested_user = ssh_user.to_s.strip
+  unless requested_user.match?(/\A[a-zA-Z0-9_][a-zA-Z0-9_.-]*\z/)
+    raise "invalid ssh username #{requested_user.inspect}"
+  end
+  requested_user = requested_user.shellescape
+  <<~EOS
+    #!/bin/bash
+    set -euxo pipefail
+
+    if ! id -u '#{requested_user}' >/dev/null 2>&1; then
+      SSH_USER='root'
+    else
+      SSH_USER='#{requested_user}'
+    fi
+
+    if [ "$SSH_USER" = "root" ]; then
+      ssh_home='/root/.ssh'
+      ssh_owner='root:root'
+    else
+      ssh_home="/home/$SSH_USER/.ssh"
+      ssh_owner="$SSH_USER:$SSH_USER"
+    fi
+
+    install -d -m 700 "$ssh_home"
+    cat > "$ssh_home/authorized_keys" <<'EOF'
+    #{public_key}
+    EOF
+    chown "$ssh_owner" "$ssh_home" "$ssh_home/authorized_keys"
+    chmod 600 "$ssh_home/authorized_keys"
+
+    systemctl unmask ssh.service || true
+    systemctl enable ssh.service || true
+    systemctl start ssh.service || true
+  EOS
+end
+
+def find_latest_ami(ec2, ami_name_or_id)
+  filters = [{ name: 'state', values: ['available'] }]
+  if ami_name_or_id.start_with?('ami-')
+    filters << { name: 'image-id', values: [ami_name_or_id] }
+  else
+    filters << { name: 'name', values: ["#{ami_name_or_id}*"] }
+  end
+
+  images = ec2.describe_images(filters: filters).images
+  raise "No AMIs found matching #{ami_name_or_id.inspect}" if images.empty?
+
+  images.max_by(&:creation_date)
+end
+
+def resolve_instance_type(options, image)
+  return options[:instance_type] if options[:instance_type]
+
+  case image.architecture
+  when 'arm64'
+    'm8g.large'
+  when 'x86_64'
+    'm7a.large'
+  else
+    raise "Unsupported architecture #{image.architecture.inspect}"
+  end
+end
+
+def resolve_subnet(ec2, subnet_id)
+  return ec2.describe_subnets(subnet_ids: [subnet_id]).subnets.first if subnet_id
+
+  subnet = ec2.describe_subnets(
+    filters: [{ name: 'tag:test', values: ['true'] }]
+  ).subnets.first
+  raise 'No subnet found with tag test=true' unless subnet
+
+  subnet
+end
+
+def current_public_ip
+  URI.open('https://checkip.amazonaws.com', &:read).strip
+end
+
+def create_temp_security_group(ec2, subnet, caller_ip)
+  name = "measure-launch-time-#{Time.now.to_i}-#{rand(1000)}"
+  sg = ec2.create_security_group(
+    group_name: name,
+    description: 'Temporary SSH ingress for AMI launch timing',
+    vpc_id: subnet.vpc_id,
+    tag_specifications: [
+      {
+        resource_type: 'security-group',
+        tags: [
+          { key: 'Name', value: name },
+          { key: 'application', value: 'RunsOn' }
+        ]
+      }
+    ]
+  )
+  ec2.authorize_security_group_ingress(
+    group_id: sg.group_id,
+    ip_permissions: [
+      {
+        ip_protocol: 'tcp',
+        from_port: 22,
+        to_port: 22,
+        ip_ranges: [{ cidr_ip: "#{caller_ip}/32", description: 'measure-launch-time' }]
+      }
+    ]
+  )
+  sg.group_id
+end
+
+def wait_for_public_ip(ec2, instance_id, timeout_seconds:)
+  deadline = Time.now + timeout_seconds
+  last_error = nil
+  loop do
+    begin
+      instance = ec2.describe_instances(instance_ids: [instance_id]).reservations.first.instances.first
+      return instance.public_ip_address if instance.public_ip_address && !instance.public_ip_address.empty?
+    rescue Aws::EC2::Errors::InvalidInstanceIDNotFound => e
+      last_error = e
+    end
+
+    raise "Timed out waiting for public IP on #{instance_id}: #{last_error}" if Time.now >= deadline
+
+    sleep 2
+  end
+end
+
+def wait_for_ssh(ip:, ssh_user:, private_key_path:, timeout_seconds:)
+  deadline = Time.now + timeout_seconds
+  last_error = nil
+
+  loop do
+    begin
+      ssh_cmd = [
+        'ssh',
+        '-o', 'BatchMode=yes',
+        '-o', 'IdentitiesOnly=yes',
+        '-o', 'StrictHostKeyChecking=no',
+        '-o', 'UserKnownHostsFile=/dev/null',
+        '-o', 'ConnectTimeout=5',
+        '-i', private_key_path,
+        "#{ssh_user}@#{ip}",
+        'true'
+      ]
+      ok = system(*ssh_cmd, out: File::NULL, err: File::NULL)
+      return if ok
+      last_error = 'ssh exited non-zero'
+    rescue StandardError => e
+      last_error = e
+    end
+
+    raise "Timed out waiting for SSH on #{ip}: #{last_error}" if Time.now >= deadline
+
+    sleep 2
+  end
+end
+
+def build_keypair(dir)
+  private_key = File.join(dir, 'measure-launch-time')
+  public_key = "#{private_key}.pub"
+  system('ssh-keygen', '-q', '-m', 'PEM', '-t', 'rsa', '-b', '4096', '-N', '', '-f', private_key, out: File::NULL, err: File::NULL) or
+    raise 'ssh-keygen failed'
+  [private_key, File.read(public_key).strip]
+end
+
+def root_block_device_override(image, root_throughput:)
+  root = image.block_device_mappings.find do |mapping|
+    mapping.device_name == image.root_device_name && mapping.ebs
+  end
+  raise "Unable to find root block device mapping for #{image.image_id}" unless root
+
+  override = {
+    device_name: root.device_name,
+    ebs: {
+      volume_size: root.ebs.volume_size,
+      volume_type: root.ebs.volume_type,
+      delete_on_termination: true
+    }
+  }
+  override[:ebs][:iops] = root.ebs.iops if root.ebs.iops
+  if root.ebs.volume_type == 'gp3' && root_throughput
+    override[:ebs][:throughput] = root_throughput
+  end
+  override
+end
+
+def launch_instance(ec2:, image:, instance_type:, subnet:, security_group_id:, user_data:, root_throughput:)
+  instance = ec2.run_instances(
+    image_id: image.image_id,
+    instance_type: instance_type,
+    min_count: 1,
+    max_count: 1,
+    instance_initiated_shutdown_behavior: 'terminate',
+    user_data: Base64.encode64(user_data),
+    block_device_mappings: [
+      root_block_device_override(image, root_throughput: root_throughput)
+    ],
+    network_interfaces: [
+      {
+        device_index: 0,
+        subnet_id: subnet.subnet_id,
+        groups: [security_group_id],
+        associate_public_ip_address: true,
+        delete_on_termination: true
+      }
+    ],
+    tag_specifications: [
+      {
+        resource_type: 'instance',
+        tags: [
+          { key: 'Name', value: 'measure-launch-time' },
+          { key: 'application', value: 'RunsOn' }
+        ]
+      }
+    ]
+  ).instances.first
+  instance.instance_id
+end
+
+def measure_instance_ssh_ready(ec2:, instance_id:, ssh_user:, private_key_path:, ssh_timeout:)
+  launched_at = Time.now
+  ip = wait_for_public_ip(ec2, instance_id, timeout_seconds: ssh_timeout)
+  wait_for_ssh(
+    ip: ip,
+    ssh_user: ssh_user,
+    private_key_path: private_key_path,
+    timeout_seconds: ssh_timeout
+  )
+
+  [ip, Time.now - launched_at]
+end
+
+def terminate_instance(ec2, instance_id)
+  ec2.terminate_instances(instance_ids: [instance_id])
+  ec2.wait_until(:instance_terminated, instance_ids: [instance_id])
+rescue Aws::EC2::Errors::InvalidInstanceIDNotFound
+  nil
+end
+
+def delete_security_group_with_retry(ec2, security_group_id)
+  10.times do |attempt|
+    ec2.delete_security_group(group_id: security_group_id)
+    return
+  rescue Aws::EC2::Errors::ServiceError => e
+    raise if attempt == 9
+
+    sleep 3
+  end
+end
+
+ec2 = Aws::EC2::Client.new(region: options[:region])
+image = find_latest_ami(ec2, options[:ami_name_or_id])
+raise "This helper only supports Linux AMIs for now (platform=#{image.platform_details.inspect})" if image.platform&.downcase == 'windows'
+
+instance_type = resolve_instance_type(options, image)
+subnet = resolve_subnet(ec2, options[:subnet_id])
+caller_ip = current_public_ip
+
+Dir.mktmpdir('measure-launch-time') do |dir|
+  private_key_path, public_key = build_keypair(dir)
+  security_group_id = create_temp_security_group(ec2, subnet, caller_ip)
+
+  begin
+    user_data = linux_user_data(
+      ssh_user: options[:ssh_user],
+      public_key: public_key
+    )
+
+    total_runs = options[:warm_runs] + options[:measure_runs]
+    results = []
+
+    puts "AMI: #{image.name} (#{image.image_id})"
+    puts "Architecture: #{image.architecture}"
+    puts "Instance type: #{instance_type}"
+    puts "Region: #{options[:region]}"
+    puts "Subnet: #{subnet.subnet_id}"
+    puts "Security group: #{security_group_id}"
+    puts "Root throughput override: #{options[:root_throughput]} MiB/s"
+    puts "Warm-up runs: #{options[:warm_runs]}"
+    puts "Measured runs: #{options[:measure_runs]}"
+    puts "SSH timeout: #{options[:ssh_timeout]}s"
+
+    total_runs.times do |idx|
+      phase = idx < options[:warm_runs] ? 'warm' : 'measure'
+      run_number = idx + 1
+      puts
+      puts "[#{phase}] launch #{run_number}/#{total_runs}"
+
+      instance_id = nil
+      begin
+        instance_id = launch_instance(
+          ec2: ec2,
+          image: image,
+          instance_type: instance_type,
+          subnet: subnet,
+          security_group_id: security_group_id,
+          user_data: user_data,
+          root_throughput: options[:root_throughput]
+        )
+        ip, elapsed = measure_instance_ssh_ready(
+          ec2: ec2,
+          instance_id: instance_id,
+          ssh_user: options[:ssh_user],
+          private_key_path: private_key_path,
+          ssh_timeout: options[:ssh_timeout]
+        )
+        puts "  instance_id: #{instance_id}"
+        puts "  public_ip:   #{ip}"
+        puts format("  ssh_ready_s: %.2f", elapsed)
+        results << {
+          phase: phase,
+          instance_id: instance_id,
+          ip: ip,
+          ssh_ready_s: elapsed
+        }
+      ensure
+        terminate_instance(ec2, instance_id) if instance_id
+      end
+    end
+
+    measured = results.select { |r| r[:phase] == 'measure' }
+    average = measured.sum { |r| r[:ssh_ready_s] } / measured.length
+
+    puts
+    puts JSON.pretty_generate(
+      {
+        ami_id: image.image_id,
+        ami_name: image.name,
+        instance_type: instance_type,
+        subnet_id: subnet.subnet_id,
+        warm_runs: options[:warm_runs],
+        measured_runs: options[:measure_runs],
+        average_ssh_ready_s: average.round(2),
+        results: results
+      }
+    )
+  ensure
+    begin
+      delete_security_group_with_retry(ec2, security_group_id)
+    rescue Aws::EC2::Errors::ServiceError => e
+      warn "Failed to delete temporary security group #{security_group_id}: #{e.message}"
+    end
+  end
+end

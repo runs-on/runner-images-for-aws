@@ -1,0 +1,50 @@
+name: Build Test Release Minimal
+run-name: ${{ inputs.image_id }}
+
+on:
+  workflow_call:
+    inputs:
+      # e.g. ubuntu24-minimal-x64
+      image_id:
+        required: true
+        type: string
+    outputs:
+      ami_name:
+        description: "The name of the built AMI"
+        value: ${{ jobs.build.outputs.ami_name }}
+      ami_id:
+        description: "The ID of the built AMI"
+        value: ${{ jobs.build.outputs.ami_id }}
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      image_id: ${{ inputs.image_id }}
+    secrets: inherit
+
+  test:
+    name: Test
+    needs:
+      - build
+    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/family=m7/cpu=2+4/ami=${{ needs.build.outputs.ami_id }}
+    steps:
+      - name: Node.js
+        run: |
+          node --version
+          npm --version
+      - name: Docker
+        run: |
+          docker version
+          docker run hello-world
+
+  release:
+    if: ${{ !failure() && !cancelled() }}
+    needs:
+      - build
+      - test
+    uses: ./.github/workflows/release.yml
+    secrets: inherit
+    with:
+      image_id: ${{ inputs.image_id }}
+      ami_name: ${{ needs.build.outputs.ami_name }}
