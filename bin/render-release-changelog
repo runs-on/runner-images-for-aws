@@ -1,0 +1,58 @@
+#!/usr/bin/env ruby
+
+require "json"
+require "yaml"
+
+module ReleaseChangelog
+  module_function
+
+  CONFIG = YAML.load_file(File.expand_path("../config.yml", __dir__))
+  REGION_ORDER = CONFIG.fetch("regions")
+
+  def render(paths)
+    summaries = load_summaries(paths).sort_by { |summary| summary.fetch("image_id") }
+    raise "no release summaries found" if summaries.empty?
+
+    lines = ["## Available images", ""]
+    summaries.each_with_index do |summary, index|
+      lines << "" unless index.zero?
+      lines << "### `#{summary.fetch("image_id")}`"
+      lines << ""
+      lines << "| Region | AMI ID |"
+      lines << "| --- | --- |"
+
+      ordered_regions(summary).each do |region|
+        lines << "| #{region.fetch("region")} | `#{region.fetch("ami_id")}` |"
+      end
+    end
+
+    lines.join("\n") + "\n"
+  end
+
+  def load_summaries(paths)
+    paths.flat_map { |path| summary_files(path) }.map do |path|
+      JSON.parse(File.read(path))
+    end
+  end
+
+  def summary_files(path)
+    if File.directory?(path)
+      Dir.glob(File.join(path, "**", "*.json")).sort
+    else
+      [path]
+    end
+  end
+
+  def ordered_regions(summary)
+    summary.fetch("regions").sort_by do |region|
+      index = REGION_ORDER.index(region.fetch("region"))
+      index || REGION_ORDER.length
+    end
+  end
+end
+
+if __FILE__ == $PROGRAM_NAME
+  abort "Usage: #{$PROGRAM_NAME} SUMMARY_JSON_OR_DIR..." if ARGV.empty?
+
+  puts ReleaseChangelog.render(ARGV)
+end

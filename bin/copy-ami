@@ -1,9 +1,11 @@
 #!/usr/bin/env ruby
 
 require 'aws-sdk-ec2' # v3
+require 'json'
 require 'yaml'
 require 'slop'
 require 'io/console'
+require 'fileutils'
 
 module CopyAmi
   module_function
@@ -26,6 +28,7 @@ module CopyAmi
       opts.banner = "Usage: #{$0} [--force] [--region <region>] ami_id_or_name"
       opts.bool '-f', '--force', 'Do not ask for confirmation'
       opts.string '-r', '--region', 'Copy to a specific region'
+      opts.string '--summary-json', 'Write machine-readable release summary JSON'
       opts.bool '-h', '--help', 'Show help'
     end
   end
@@ -54,7 +57,7 @@ module CopyAmi
     force = options.force?
     regions_to_copy = options.region? ? [options[:region]] : REGIONS
 
-    results = copy_ami_to_regions(ami_id_or_name, regions_to_copy, force, out: out)
+    results = copy_ami_to_regions(ami_id_or_name, regions_to_copy, force, summary_json: options[:summary_json], out: out)
     results.all? { |result| result[:success] }
   rescue Slop::Error
     false
@@ -64,7 +67,7 @@ module CopyAmi
     Aws::EC2::Client.new(region: region)
   end
 
-  def copy_ami_to_regions(ami_id_or_name, regions, force = false, source_client: nil, client_factory: nil, out: $stdout)
+  def copy_ami_to_regions(ami_id_or_name, regions, force = false, source_client: nil, client_factory: nil, summary_json: nil, out: $stdout)
     source_client ||= ec2_client(SOURCE_REGION)
     client_factory ||= method(:ec2_client)
 
@@ -94,7 +97,35 @@ module CopyAmi
     end
 
     print_summary(results, waiter_options, out)
+    write_release_summary(summary_json, ami_name: name, results: results) if summary_json
     results
+  end
+
+  def write_release_summary(path, ami_name:, results:)
+    FileUtils.mkdir_p(File.dirname(path))
+    File.write(path, JSON.pretty_generate(release_summary(ami_name: ami_name, results: results)) + "\n")
+  end
+
+  def release_summary(ami_name:, results:)
+    {
+      image_id: infer_image_id(ami_name),
+      ami_name: ami_name,
+      regions: results.filter_map do |result|
+        next unless result[:success] && result[:public] && result[:image_id]
+
+        {
+          region: result.fetch(:region),
+          ami_id: result.fetch(:image_id)
+        }
+      end
+    }
+  end
+
+  def infer_image_id(ami_name)
+    ami_name
+      .sub(/\A#{Regexp.escape(AMI_PROD_PREFIX)}-/, "")
+      .sub(/\A#{Regexp.escape(AMI_DEV_PREFIX)}-/, "")
+      .sub(/-\d+\z/, "")
   end
 
   def find_source_image(ec2, ami_id_or_name)

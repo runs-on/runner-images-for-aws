@@ -1,4 +1,4 @@
-name: Windows images
+name: Minimal images
 
 on:
   workflow_dispatch:
@@ -7,9 +7,9 @@ on:
         type: string
         required: true
         description: 'Distribution(s) to build'
-        default: '["windows22-full-x64", "windows25-full-x64", "windows25-gpu-x64"]'
+        default: '["ubuntu24-minimal-x64", "ubuntu24-minimal-arm64"]'
   schedule:
-    - cron: '0 6 2,17 * *'
+    - cron: '0 8 2,17 * *'
 
 jobs:
   sync:
@@ -22,7 +22,7 @@ jobs:
     steps:
       - name: Generate release name
         id: generate-release-name
-        run: echo "release_name=windows-$(date +%Y%m%d%H%M%S)" >> $GITHUB_OUTPUT
+        run: echo "release_name=minimal-$(date +%Y%m%d%H%M%S)" >> $GITHUB_OUTPUT
       - uses: actions/checkout@v6
       - uses: ruby/setup-ruby@v1
         with:
@@ -36,14 +36,14 @@ jobs:
           aws-region: us-east-1
       - name: Cleanup dev AMIs
         env:
-          AMI_PREFIX: runs-on-dev-windows
+          AMI_PREFIX: runs-on-dev-ubuntu24-minimal
         run: bundle exec bin/utils/cleanup-amis --force
       - name: Synchronize with upstream repository
         run: bundle exec bin/sync
       - uses: stefanzweifel/git-auto-commit-action@v7
         with:
-          tagging_message: ""
           commit_message: "Sync from upstream"
+          tagging_message: ""
 
   build-test-release:
     name: Build/Test/Release ${{ matrix.image_id }}
@@ -51,12 +51,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image_id: ${{ fromJSON(github.event.inputs.images || '["windows22-full-x64", "windows25-full-x64"]') }}
-    uses: ./.github/workflows/build-test-release.yml
+        image_id: ${{ fromJSON(github.event.inputs.images || '["ubuntu24-minimal-x64", "ubuntu24-minimal-arm64"]') }}
+    uses: ./.github/workflows/build-test-release-minimal.yml
     secrets: inherit
     with:
       image_id: ${{ matrix.image_id }}
-      platform: windows
 
   generate-release:
     name: Generate release

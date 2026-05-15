@@ -1,5 +1,7 @@
 require "minitest/autorun"
+require "json"
 require "stringio"
+require "tmpdir"
 load File.expand_path("../bin/copy-ami", __dir__)
 
 FakeEbs = Struct.new(:snapshot_id)
@@ -146,6 +148,47 @@ class CopyAmiTest < Minitest::Test
     assert_equal ["timed out", "published"], results.map { |result| result[:status] }
     assert_equal [false, true], results.map { |result| result[:success] }
     assert_includes out.string, "Region summary:"
+  end
+
+  def test_summary_json_contains_image_name_image_id_and_region_ami_ids
+    source_image = build_image(image_id: "ami-source", name: "runs-on-dev-ubuntu24-full-x64-123", state: "available", public: false)
+    first_region_image = build_image(image_id: "ami-us-east-1", name: "runs-on-v2.2-ubuntu24-full-x64-123", state: "available", public: false)
+    second_region_image = build_image(image_id: "ami-eu-west-1", name: "runs-on-v2.2-ubuntu24-full-x64-123", state: "available", public: false)
+
+    source_client = FakeEc2Client.new(images_by_name: { source_image.name => source_image }, images_by_id: { source_image.image_id => source_image })
+    first_region_client = FakeEc2Client.new(images_by_name: { first_region_image.name => first_region_image }, images_by_id: { first_region_image.image_id => first_region_image })
+    second_region_client = FakeEc2Client.new(images_by_name: { second_region_image.name => second_region_image }, images_by_id: { second_region_image.image_id => second_region_image })
+    out = StringIO.new
+
+    Dir.mktmpdir do |dir|
+      summary_path = File.join(dir, "summary.json")
+      CopyAmi.copy_ami_to_regions(
+        source_image.name,
+        %w[us-east-1 eu-west-1],
+        true,
+        source_client: source_client,
+        client_factory: lambda { |region|
+          region == "us-east-1" ? first_region_client : second_region_client
+        },
+        summary_json: summary_path,
+        out: out
+      )
+
+      summary = JSON.parse(File.read(summary_path))
+      assert_equal "ubuntu24-full-x64", summary.fetch("image_id")
+      assert_equal "runs-on-v2.2-ubuntu24-full-x64-123", summary.fetch("ami_name")
+      assert_equal(
+        [
+          ["us-east-1", "ami-us-east-1"],
+          ["eu-west-1", "ami-eu-west-1"]
+        ],
+        summary.fetch("regions").map { |region| [region.fetch("region"), region.fetch("ami_id")] }
+      )
+      refute_includes summary.keys, "source_region"
+      refute_includes summary.keys, "source_ami_id"
+      refute_includes summary.fetch("regions").first.keys, "snapshot_id"
+      refute_includes summary.fetch("regions").first.keys, "status"
+    end
   end
 
   private
