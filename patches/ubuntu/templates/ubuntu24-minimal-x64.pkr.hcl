@@ -102,16 +102,18 @@ source "amazon-ebssurrogate" "build_ebs" {
   ami_description                           = var.ami_description
   ami_virtualization_type                   = "hvm"
   ami_architecture                          = "x86_64"
-  ena_support                               = true
-  ebs_optimized                             = true
-  instance_type                             = var.instance_type
-  iam_instance_profile                      = "SSMInstanceProfile"
-  region                                    = var.region
-  ssh_username                              = "ubuntu"
-  subnet_id                                 = var.subnet_id
-  associate_public_ip_address               = true
-  force_deregister                          = true
-  force_delete_snapshot                     = true
+  # make AMIs publicly accessible
+  ami_groups                  = ["all"]
+  ena_support                 = true
+  ebs_optimized               = true
+  instance_type               = var.instance_type
+  iam_instance_profile        = "SSMInstanceProfile"
+  region                      = var.region
+  ssh_username                = "ubuntu"
+  subnet_id                   = var.subnet_id
+  associate_public_ip_address = true
+  force_deregister            = true
+  force_delete_snapshot       = true
 
   user_data = <<EOF
 #!/bin/bash
@@ -122,6 +124,9 @@ systemctl start ssh.service || true
 EOF
 
   ami_regions = var.ami_regions
+
+  // make underlying snapshot public
+  snapshot_groups = ["all"]
 
   launch_block_device_mappings {
     device_name           = "/dev/sdf"
