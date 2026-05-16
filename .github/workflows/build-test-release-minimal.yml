@@ -29,14 +29,21 @@ jobs:
       - build
     runs-on: runs-on=${{ github.run_id }}/env=bootstrap/family=m7/cpu=2+4/ami=${{ needs.build.outputs.ami_id }}
     steps:
-      - name: Node.js
-        run: |
-          node --version
-          npm --version
+      - name: Ensure apt-get update is working
+        run: sudo apt-get update
+      - name: Ensure code can be checked out
+        uses: actions/checkout@v6
       - name: Docker
         run: |
           docker version
           docker run hello-world
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Node.js
+        run: |
+          node --version
+          npm --version
 
   release:
     if: ${{ !failure() && !cancelled() }}
