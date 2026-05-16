@@ -106,6 +106,12 @@ compress_target_runner_node_binaries() {
   for relative_path in \
     /home/runner/externals/node24/bin/node \
     /home/runner/externals/node24_alpine/bin/node; do
+    # Runner releases can omit optional externals such as node24_alpine.
+    if [[ ! -f "${TARGET_ROOT_MOUNT}${relative_path}" ]]; then
+      log "skipping missing runner Node binary ${TARGET_ROOT_MOUNT}${relative_path}"
+      continue
+    fi
+
     compress_target_binary "${TARGET_ROOT_MOUNT}${relative_path}"
   done
 }
