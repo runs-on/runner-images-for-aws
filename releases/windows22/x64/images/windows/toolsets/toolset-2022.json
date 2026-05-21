@@ -45,7 +45,6 @@
       "arch": "x64",
       "platform": "win32",
       "versions": [
-        "20.*",
         "22.*",
         "24.*"
       ]
@@ -357,7 +356,7 @@
     ]
   },
   "node": {
-    "default": "20.*"
+    "default": "22.*"
   },
   "maven": {
     "version": "3.9"
