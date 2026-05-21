@@ -33,7 +33,7 @@ variable "image_folder" {
 }
 
 variable "image_os" {
-  type    = string
+  type = string
   // ex: ubuntu22
   default = "${env("IMAGE_OS")}"
 }
@@ -54,7 +54,7 @@ variable "region" {
 }
 
 variable "ami_regions" {
-  type    = list(string)
+  type = list(string)
 }
 
 variable "source_ami_owner" {
@@ -99,17 +99,17 @@ source "amazon-ebs" "build_ebs" {
   ami_description                           = "${var.ami_description}"
   ami_virtualization_type                   = "hvm"
   # make AMIs publicly accessible
-  ami_groups                                = ["all"]
-  ebs_optimized                             = true
+  ami_groups    = ["all"]
+  ebs_optimized = true
   # spot_instance_types                       = ["r7g.large", "c7g.xlarge", "m7g.xlarge", "c7g.2xlarge", "m7g.2xlarge"]
   # spot_price                                = "1.00"
-  instance_type                             = var.instance_type
-  region                                    = "${var.region}"
-  ssh_username                              = "ubuntu"
-  subnet_id                                 = "${var.subnet_id}"
-  associate_public_ip_address               = "true"
-  force_deregister                          = "true"
-  force_delete_snapshot                     = "true"
+  instance_type               = var.instance_type
+  region                      = "${var.region}"
+  ssh_username                = "ubuntu"
+  subnet_id                   = "${var.subnet_id}"
+  associate_public_ip_address = "true"
+  force_deregister            = "true"
+  force_delete_snapshot       = "true"
 
   ami_regions = "${var.ami_regions}"
 
@@ -117,27 +117,27 @@ source "amazon-ebs" "build_ebs" {
   snapshot_groups = ["all"]
 
   launch_block_device_mappings {
-    device_name = "/dev/sda1"
-    volume_type = "${var.volume_type}"
-    volume_size = "${var.volume_size}"
+    device_name           = "/dev/sda1"
+    volume_type           = "${var.volume_type}"
+    volume_size           = "${var.volume_size}"
     delete_on_termination = "true"
-    encrypted = "false"
+    encrypted             = "false"
   }
 
   run_tags = {
-    creator     = "RunsOn"
-    contact     = "ops@runs-on.com"
-    ami_name    = "${var.ami_name}"
+    creator  = "RunsOn"
+    contact  = "ops@runs-on.com"
+    ami_name = "${var.ami_name}"
   }
 
   tags = {
-    creator     = "RunsOn"
-    contact     = "ops@runs-on.com"
+    creator = "RunsOn"
+    contact = "ops@runs-on.com"
   }
 
   snapshot_tags = {
-    creator     = "RunsOn"
-    contact     = "ops@runs-on.com"
+    creator = "RunsOn"
+    contact = "ops@runs-on.com"
   }
 
   source_ami_filter {
@@ -151,12 +151,12 @@ source "amazon-ebs" "build_ebs" {
   }
 }
 build {
-  
+
   sources = ["source.amazon-ebs.build_ebs"]
 
   provisioner "shell" {
-    execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts             = ["${path.root}/../custom/files/pre.sh"]
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    scripts         = ["${path.root}/../custom/files/pre.sh"]
   }
 
   # Dummy file added to please Azure script compatibility
@@ -186,9 +186,9 @@ build {
   }
 
   provisioner "shell" {
-    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}","DEBIAN_FRONTEND=noninteractive"]
+    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "DEBIAN_FRONTEND=noninteractive"]
     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/install-ms-repos.sh",
       "${path.root}/../scripts/build/configure-apt-sources.sh",
       "${path.root}/../scripts/build/configure-apt.sh"
@@ -207,7 +207,7 @@ build {
 
   provisioner "file" {
     destination = "${var.image_folder}"
-    sources     = [
+    sources = [
       "${path.root}/../assets/post-gen",
       "${path.root}/../scripts/tests",
       "${path.root}/../scripts/docs-gen"
@@ -221,19 +221,19 @@ build {
 
   provisioner "file" {
     destination = "${var.installer_script_folder}/toolset.json"
-    source      = "${path.root}/../toolsets/toolset-2204.json"
+    source      = "${path.root}/../toolsets/toolset-2204-arm64.json"
   }
 
   provisioner "shell" {
     execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    inline          = [
+    inline = [
       "mv ${var.image_folder}/docs-gen ${var.image_folder}/SoftwareReport",
       "mv ${var.image_folder}/post-gen ${var.image_folder}/post-generation"
     ]
   }
 
   provisioner "shell" {
-    environment_vars = ["IMAGE_VERSION=${var.image_version}", "IMAGEDATA_FILE=${var.imagedata_file}"]
+    environment_vars = ["IMAGE_VERSION=${var.image_version}", "IMAGEDATA_FILE=${var.imagedata_file}", "HELPER_SCRIPTS=${var.helper_script_folder}"]
     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     scripts          = ["${path.root}/../scripts/build/configure-image-data.sh"]
   }
@@ -265,7 +265,7 @@ build {
   provisioner "shell" {
     environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}", "DEBIAN_FRONTEND=noninteractive"]
     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/install-actions-cache.sh",
       "${path.root}/../scripts/build/install-runner-package.sh",
       "${path.root}/../scripts/build/install-apt-common.sh",
@@ -303,11 +303,11 @@ build {
     scripts          = ["${path.root}/../scripts/build/install-docker.sh"]
   }
 
-  # provisioner "shell" {
-  #   environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
-  #   execute_command  = "sudo sh -c '{{ .Vars }} pwsh -f {{ .Path }}'"
-  #   scripts          = ["${path.root}/../scripts/build/Install-Toolset.ps1", "${path.root}/../scripts/build/Configure-Toolset.ps1"]
-  # }
+  provisioner "shell" {
+    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
+    execute_command  = "sudo sh -c '{{ .Vars }} pwsh -f {{ .Path }}'"
+    scripts          = ["${path.root}/../scripts/build/Install-Toolset.ps1", "${path.root}/../scripts/build/Configure-Toolset.ps1"]
+  }
 
   // provisioner "shell" {
   //   environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
@@ -328,8 +328,8 @@ build {
   }
 
   provisioner "shell" {
-    execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts             = ["${path.root}/../custom/files/runner-user.sh"]
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    scripts         = ["${path.root}/../custom/files/runner-user.sh"]
   }
 
   provisioner "shell" {
