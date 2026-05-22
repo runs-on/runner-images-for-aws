@@ -67,7 +67,7 @@ chmod +x $chromedriver_bin
 ln -s "$chromedriver_bin" /usr/bin/
 set_etc_environment_variable "CHROMEWEBDRIVER" "${CHROMEDRIVER_DIR}"
 
-invoke_tests "Browsers" "Chrome" # Download and unpack Chromium# Download and unpack Chromium exit 0
+invoke_tests "Browsers" "Chrome" && exit 0
 chrome_revision=$(echo "${chrome_versions_json}" | jq -r '.builds["'"$chrome_version"'"].revision')
 chromium_revision=$(get_chromium_revision $chrome_revision)
 chromium_url="https://www.googleapis.com/download/storage/v1/b/chromium-browser-snapshots/o/Linux_x64%2F${chromium_revision}%2Fchrome-linux.zip?alt=media"
