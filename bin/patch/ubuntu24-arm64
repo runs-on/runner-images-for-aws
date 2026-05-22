@@ -108,4 +108,8 @@ yq -oj -i 'del(.azureModules[])' $TOOLSET_PATH
 # Remove chromium since chrome already installed. 500MB saved
 # https://github.com/actions/runner-images/issues/2388
 # might need to add symlinks if causing issues, but let's see
-gnu_sed -i 's|# Download and unpack Chromium|invoke_tests "Browsers" "Chrome" && exit 0|' $release_dir/images/ubuntu/scripts/build/install-google-chrome.sh
+gnu_sed -i 's|# Download and unpack Chromium|invoke_tests "Browsers" "Chrome" \&\& exit 0|' $release_dir/images/ubuntu/scripts/build/install-google-chrome.sh
+
+gnu_sed -i 's|download_url="https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"|kustomize_url=$(resolve_github_release_asset_url "kubernetes-sigs/kustomize" "endswith(\\"linux_${tools_arch}.tar.gz\\")" "latest")|' $release_dir/images/ubuntu/scripts/build/install-kubernetes-tools.sh
+gnu_sed -i 's#curl -fsSL "$download_url" | bash#kustomize_archive_path=$(download_with_retry "$kustomize_url")#' $release_dir/images/ubuntu/scripts/build/install-kubernetes-tools.sh
+gnu_sed -i '/mv kustomize \/usr\/local\/bin/i tar -xzf "$kustomize_archive_path"' $release_dir/images/ubuntu/scripts/build/install-kubernetes-tools.sh

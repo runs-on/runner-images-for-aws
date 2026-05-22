@@ -69,8 +69,9 @@ use_checksum_comparison "${minikube_binary_path}" "${minikube_hash}"
 install "${minikube_binary_path}" /usr/local/bin/minikube
 
 # Install kustomize
-download_url="https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"
-curl -fsSL "$download_url" | bash
+kustomize_url=$(resolve_github_release_asset_url "kubernetes-sigs/kustomize" "endswith(\"linux_${tools_arch}.tar.gz\")" "latest")
+kustomize_archive_path=$(download_with_retry "$kustomize_url")
+tar -xzf "$kustomize_archive_path"
 mv kustomize /usr/local/bin
 
 invoke_tests "Tools" "Kubernetes tools"
