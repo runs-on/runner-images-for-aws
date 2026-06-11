@@ -14,7 +14,7 @@ php_versions=$(get_toolset_value '.php.versions[]')
 
 for version in $php_versions; do
     echo "Installing PHP $version"
-    apt-get install --no-install-recommends \
+    /usr/bin/apt-get -qq install --no-install-recommends \
         php$version \
         php$version-amqp \
         php$version-apcu \
@@ -61,29 +61,29 @@ for version in $php_versions; do
         # https://php.watch/versions/8.4/imap-unbundled
         # https://php.watch/articles/php-8-5-installation-upgrade-guide-debian-ubuntu
         if [[ $version == "8.1" || $version == "8.3" ]]; then
-            apt-get install --no-install-recommends \
+            /usr/bin/apt-get -qq install --no-install-recommends \
                 php$version-imap \
                 php$version-opcache
         fi
 
-        apt-get install --no-install-recommends php$version-pcov
+        /usr/bin/apt-get -qq install --no-install-recommends php$version-pcov
 
         # Disable PCOV, as Xdebug is enabled by default
         # https://github.com/krakjoe/pcov#interoperability
         phpdismod -v $version pcov
 
     if [[ $version == "7.2" || $version == "7.3" || $version == "7.4" ]]; then
-        apt-get install --no-install-recommends php$version-recode
+        /usr/bin/apt-get -qq install --no-install-recommends php$version-recode
     fi
 
     if [[ $version != "8.0" && $version != "8.1" && $version != "8.2" && $version != "8.3" && $version != "8.5" ]]; then
-        apt-get install --no-install-recommends php$version-xmlrpc php$version-json
+        /usr/bin/apt-get -qq install --no-install-recommends php$version-xmlrpc php$version-json
     fi
 done
 
-apt-get install --no-install-recommends php-pear
+/usr/bin/apt-get -qq install --no-install-recommends php-pear
 
-apt-get install --no-install-recommends snmp
+/usr/bin/apt-get -qq install --no-install-recommends snmp
 
 # Install composer
 php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
