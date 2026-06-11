@@ -39,7 +39,7 @@ aws_sam_cli_hash=$(get_checksum_from_github_release "aws/aws-sam-cli" "${aws_sam
 use_checksum_comparison "$aws_sam_cli_archive_path" "$aws_sam_cli_hash"
 
 # Install the latest aws sam cli release
-unzip "$aws_sam_cli_archive_path" -d /tmp
+unzip -qq "$aws_sam_cli_archive_path" -d /tmp
 /tmp/install
 
 invoke_tests "CLI.Tools" "AWS"
