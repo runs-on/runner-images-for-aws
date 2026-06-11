@@ -21,7 +21,7 @@ usage = Slop::Options.new do |opts|
   opts.string '--image-id', 'Image ID', required: true
   opts.string '--image-prefix', 'Image Prefix', default: ENV.fetch('AMI_PREFIX', "runs-on-dev")
   opts.string '--image-version', 'Image Version', default: Time.now.strftime("%Y%m%d%H%M%S")
-  opts.string '--subnet-id', 'Legacy subnet ID fallback used only if no tagged subnet exists', default: nil
+  opts.string '--subnet-id', 'Subnet ID to use, or legacy fallback to tag when no tagged subnet exists', default: nil
   opts.string '--log-file', 'Path to write Packer output (defaults to a temporary file)', default: nil
   opts.string '--region', 'Region', default: ENV.fetch('AWS_DEFAULT_REGION', "us-east-1")
   opts.boolean '--debug', 'Debug mode', default: false
@@ -178,8 +178,12 @@ def resolve_subnet_id(ec2_client:, tag_key:, tag_value:, instance_type:, fallbac
     fail("No tagged subnet can launch #{instance_type} with public SSH access:\n#{details}")
   end
 
-  valid_ids = valid_subnets.map(&:subnet_id).sort.join(", ")
-  fail("Multiple valid tagged subnets found for #{tag_key}=#{tag_value}: #{valid_ids}. Pass --subnet-id to disambiguate.\n#{details}")
+  subnet = valid_subnets.first
+  valid_ids = valid_subnets.map(&:subnet_id).join(", ")
+  puts "Multiple valid tagged subnets found for #{tag_key}=#{tag_value}: #{valid_ids}"
+  puts "Using first valid tagged subnet #{subnet_summary(subnet)}"
+  puts details
+  subnet.subnet_id
 end
 
 def run_command_with_log(label:, command:, env:, log_file:, stdout_to_console: false)
