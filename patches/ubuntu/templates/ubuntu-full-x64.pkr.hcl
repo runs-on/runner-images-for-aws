@@ -1,7 +1,6 @@
 // Shared template for ubuntu{22,24,26}-full-x64. Version-specific bits are
-// injected by bin/build: toolset_file (derived from the image id) and
-// install_scripts (from the image's install_scripts list in config.yml),
-// which run after the common local.base_scripts.
+// injected by bin/build: toolset_file (derived from the image id) and the full
+// ordered install_scripts list from config.yml.
 packer {
   required_plugins {
     amazon = {
@@ -74,7 +73,7 @@ variable "toolset_file" {
   type = string
 }
 
-// extra build scripts (basenames) to run after local.base_scripts
+// Full ordered build script list (basenames) from config.yml.
 variable "install_scripts" {
   type    = list(string)
   default = []
@@ -99,45 +98,6 @@ variable "volume_type" {
 variable "instance_type" {
   type    = string
   default = "m8a.large"
-}
-
-locals {
-  // Build scripts common to every ubuntu version; version-specific extras live
-  // in the install_scripts lists in config.yml and run after these.
-  base_scripts = [
-    "${path.root}/../scripts/build/install-actions-cache.sh",
-    "${path.root}/../scripts/build/install-runner-package.sh",
-    "${path.root}/../scripts/build/install-apt-common.sh",
-    "${path.root}/../scripts/build/install-azcopy.sh",
-    "${path.root}/../scripts/build/install-azure-cli.sh",
-    "${path.root}/../scripts/build/install-bicep.sh",
-    "${path.root}/../scripts/build/install-apache.sh",
-    "${path.root}/../scripts/build/install-aws-tools.sh",
-    "${path.root}/../scripts/build/install-clang.sh",
-    "${path.root}/../scripts/build/install-cmake.sh",
-    "${path.root}/../scripts/build/install-dotnetcore-sdk.sh",
-    "${path.root}/../scripts/build/install-gcc-compilers.sh",
-    "${path.root}/../scripts/build/install-gfortran.sh",
-    "${path.root}/../scripts/build/install-git.sh",
-    "${path.root}/../scripts/build/install-git-lfs.sh",
-    "${path.root}/../scripts/build/install-github-cli.sh",
-    "${path.root}/../scripts/build/install-google-chrome.sh",
-    "${path.root}/../scripts/build/install-java-tools.sh",
-    "${path.root}/../scripts/build/install-kubernetes-tools.sh",
-    "${path.root}/../scripts/build/install-mysql.sh",
-    "${path.root}/../scripts/build/install-nodejs.sh",
-    "${path.root}/../scripts/build/install-oras-cli.sh",
-    "${path.root}/../scripts/build/install-php.sh",
-    "${path.root}/../scripts/build/install-postgresql.sh",
-    "${path.root}/../scripts/build/install-ruby.sh",
-    "${path.root}/../scripts/build/install-rust.sh",
-    "${path.root}/../scripts/build/install-selenium.sh",
-    "${path.root}/../scripts/build/configure-dpkg.sh",
-    "${path.root}/../scripts/build/install-yq.sh",
-    "${path.root}/../scripts/build/install-pypy.sh",
-    "${path.root}/../scripts/build/install-python.sh",
-    "${path.root}/../scripts/build/install-zstd.sh"
-  ]
 }
 
 source "amazon-ebs" "build_ebs" {
@@ -318,7 +278,7 @@ build {
   provisioner "shell" {
     environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}", "DEBIAN_FRONTEND=noninteractive"]
     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = concat(local.base_scripts, [for s in var.install_scripts : "${path.root}/../scripts/build/${s}"])
+    scripts          = [for s in var.install_scripts : "${path.root}/../scripts/build/${s}"]
   }
 
   provisioner "shell" {
