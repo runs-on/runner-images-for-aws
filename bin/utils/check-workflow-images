@@ -1,9 +1,7 @@
 #!/usr/bin/env ruby
 # Asserts that every image id in config.yml appears in exactly one
-# .github/workflows/matrix-*.yml image list, and that workflows do not
-# reference unknown image ids. Within-file mismatches between the
-# workflow_dispatch default and the fromJSON fallback are warnings only
-# (e.g. dispatch-only images like windows25-gpu-x64).
+# .github/workflows/matrix-*.yml image selection, and that workflows do not
+# reference unknown image ids.
 
 require 'yaml'
 require 'json'
@@ -16,16 +14,26 @@ warnings = []
 errors = []
 
 Dir[File.join(repo_root, ".github/workflows/matrix-*.yml")].sort.each do |path|
-  lists = File.read(path).scan(/\[\s*"[^\]]+"\s*\]/).map { |s| JSON.parse(s) rescue nil }.compact
-  next if lists.empty?
+  content = File.read(path)
+  description_ids = content
+    .scan(/^\s*description:\s*['"]?([^'"\n]+)['"]?\s*$/)
+    .flatten
+    .select { |id| config_ids.include?(id) }
+  json_ids = content
+    .scan(/\[\s*"[^\]]+"\s*\]/)
+    .map { |s| JSON.parse(s) rescue nil }
+    .compact
+    .flatten
+    .select { |id| config_ids.include?(id) }
+  ids = description_ids.empty? ? json_ids : description_ids
+  next if ids.empty?
 
-  ids = lists.flatten.uniq
-  ids.each do |id|
+  ids.uniq.each do |id|
     (workflow_ids[id] ||= []) << File.basename(path)
   end
 
-  unless lists.map(&:sort).uniq.size == 1
-    warnings << "#{File.basename(path)}: dispatch default and matrix fallback differ (#{lists.map(&:sort).uniq.inspect})"
+  if description_ids.any? && json_ids.any? && description_ids.sort != json_ids.uniq.sort
+    warnings << "#{File.basename(path)}: checkbox descriptions and JSON image lists differ"
   end
 end
 

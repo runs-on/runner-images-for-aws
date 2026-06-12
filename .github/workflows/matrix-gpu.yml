@@ -3,11 +3,14 @@ name: GPU images
 on:
   workflow_dispatch:
     inputs:
-      images:
-        type: string
-        required: true
-        description: 'Distribution(s) to build'
-        default: '["ubuntu22-gpu-x64", "ubuntu24-gpu-x64"]'
+      ubuntu22_gpu_x64:
+        type: boolean
+        description: ubuntu22-gpu-x64
+        default: true
+      ubuntu24_gpu_x64:
+        type: boolean
+        description: ubuntu24-gpu-x64
+        default: true
   workflow_run:
     workflows: ['Linux images']
     branches: [main]
@@ -15,13 +18,36 @@ on:
       - completed
 
 jobs:
+  select-images:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
+    name: Select images
+    runs-on: ubuntu-latest
+    outputs:
+      image_ids: ${{ steps.select.outputs.image_ids }}
+    steps:
+      - id: select
+        env:
+          UBUNTU22_GPU_X64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu22_gpu_x64 }}
+          UBUNTU24_GPU_X64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu24_gpu_x64 }}
+        run: |
+          images=()
+          [ "$UBUNTU22_GPU_X64" = "true" ] && images+=("ubuntu22-gpu-x64")
+          [ "$UBUNTU24_GPU_X64" = "true" ] && images+=("ubuntu24-gpu-x64")
+          if [ "${#images[@]}" -eq 0 ]; then
+            echo "No images selected" >&2
+            exit 1
+          fi
+          image_ids="$(printf '%s\n' "${images[@]}" | jq -R . | jq -s -c .)"
+          echo "image_ids=$image_ids" >> "$GITHUB_OUTPUT"
+
   build-test-release:
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
     name: Build/Test/Release ${{ matrix.image_id }}
+    needs: select-images
     strategy:
       fail-fast: false
       matrix:
-        image_id: ${{ fromJSON(github.event.inputs.images || '["ubuntu22-gpu-x64", "ubuntu24-gpu-x64"]') }}
+        image_id: ${{ fromJSON(needs.select-images.outputs.image_ids) }}
     uses: ./.github/workflows/build-test-release.yml
     secrets: inherit
     with:

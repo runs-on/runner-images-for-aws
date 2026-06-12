@@ -3,17 +3,41 @@ name: Minimal images
 on:
   workflow_dispatch:
     inputs:
-      images:
-        type: string
-        required: true
-        description: 'Distribution(s) to build'
-        default: '["ubuntu24-minimal-x64", "ubuntu24-minimal-arm64"]'
+      ubuntu24_minimal_x64:
+        type: boolean
+        description: ubuntu24-minimal-x64
+        default: true
+      ubuntu24_minimal_arm64:
+        type: boolean
+        description: ubuntu24-minimal-arm64
+        default: true
   schedule:
     # staggered after matrix-linux (08:00 same days) to avoid concurrent
     # "Sync from upstream" auto-commit push races
     - cron: '0 10 2,17 * *'
 
 jobs:
+  select-images:
+    name: Select images
+    runs-on: ubuntu-latest
+    outputs:
+      image_ids: ${{ steps.select.outputs.image_ids }}
+    steps:
+      - id: select
+        env:
+          UBUNTU24_MINIMAL_X64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu24_minimal_x64 }}
+          UBUNTU24_MINIMAL_ARM64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu24_minimal_arm64 }}
+        run: |
+          images=()
+          [ "$UBUNTU24_MINIMAL_X64" = "true" ] && images+=("ubuntu24-minimal-x64")
+          [ "$UBUNTU24_MINIMAL_ARM64" = "true" ] && images+=("ubuntu24-minimal-arm64")
+          if [ "${#images[@]}" -eq 0 ]; then
+            echo "No images selected" >&2
+            exit 1
+          fi
+          image_ids="$(printf '%s\n' "${images[@]}" | jq -R . | jq -s -c .)"
+          echo "image_ids=$image_ids" >> "$GITHUB_OUTPUT"
+
   sync:
     uses: ./.github/workflows/sync.yml
     secrets: inherit
@@ -26,11 +50,13 @@ jobs:
 
   build-test-release:
     name: Build/Test/Release ${{ matrix.image_id }}
-    needs: sync
+    needs:
+      - select-images
+      - sync
     strategy:
       fail-fast: false
       matrix:
-        image_id: ${{ fromJSON(github.event.inputs.images || '["ubuntu24-minimal-x64", "ubuntu24-minimal-arm64"]') }}
+        image_id: ${{ fromJSON(needs.select-images.outputs.image_ids) }}
     uses: ./.github/workflows/build-test-release-minimal.yml
     secrets: inherit
     with:
