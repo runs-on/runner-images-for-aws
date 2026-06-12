@@ -66,6 +66,21 @@ images:
     source_ami_owner: 099720109477
     description: RunsOn Ubuntu24 arm64
 
+  # Ubuntu26
+  - id: ubuntu26-full-x64
+    instance_type: m8a.large
+    volume_size: 30
+    source_ami_name: ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-amd64-server-*
+    source_ami_owner: 099720109477
+    description: RunsOn Ubuntu26 x64
+
+  - id: ubuntu26-full-arm64
+    instance_type: m8g.large
+    volume_size: 30
+    source_ami_name: ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-arm64-server-*
+    source_ami_owner: 099720109477
+    description: RunsOn Ubuntu26 arm64
+
   - id: ubuntu24-gpu-x64
     instance_type: g4dn.xlarge
     volume_size: 40

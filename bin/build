@@ -398,11 +398,6 @@ unless run_command_with_log(
 end
 
 packer_build_env = { "PROJECT_ROOT" => File.expand_path("..", __dir__) }
-# Packer >= 1.14 switched plugin RPC to protobuf, which throttles provisioner
-# output to ~2 lines/s; the resulting stdout backlog gets its stream reset at
-# command teardown and surfaces as a bogus "exit status 123". Force the legacy
-# gob codec until fixed upstream.
-packer_build_env["PACKER_FORCE_GOB"] = "1" unless ENV.key?("PACKER_FORCE_GOB")
 unless custom_plugin_path.empty?
   packer_build_env["PACKER_PLUGIN_PATH"] = custom_plugin_path
 end
