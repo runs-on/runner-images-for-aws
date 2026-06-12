@@ -1,0 +1,59 @@
+name: Sync
+
+# Reusable sync job shared by the matrix-* workflows: generates the release
+# name, cleans up old dev AMIs, re-syncs releases/ from upstream and commits.
+on:
+  workflow_call:
+    inputs:
+      release_prefix:
+        description: 'Prefix for the generated release name (linux, minimal, windows)'
+        type: string
+        required: true
+      ami_cleanup_prefix:
+        description: 'AMI_PREFIX passed to bin/utils/cleanup-amis'
+        type: string
+        required: true
+      dist_prefix:
+        description: 'Only sync releases/ trees for this dist prefix (ubuntu, windows)'
+        type: string
+        required: true
+    outputs:
+      release_name:
+        description: 'Generated release name'
+        value: ${{ jobs.sync.outputs.release_name }}
+
+jobs:
+  sync:
+    name: Synchronize
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_name: ${{ steps.generate-release-name.outputs.release_name }}
+    steps:
+      - name: Generate release name
+        id: generate-release-name
+        run: echo "release_name=${{ inputs.release_prefix }}-$(date +%Y%m%d%H%M%S)" >> $GITHUB_OUTPUT
+      - uses: actions/checkout@v6
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: 3.2.2
+          bundler-cache: true
+      - name: Check config.yml/workflow image list consistency
+        run: bundle exec bin/utils/check-workflow-images
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Cleanup dev AMIs
+        env:
+          AMI_PREFIX: ${{ inputs.ami_cleanup_prefix }}
+        run: bundle exec bin/utils/cleanup-amis --force
+      - name: Synchronize with upstream repository
+        run: bundle exec bin/sync --dist-prefix ${{ inputs.dist_prefix }}
+      - uses: stefanzweifel/git-auto-commit-action@v7
+        with:
+          commit_message: "Sync from upstream"
+          tagging_message: ""

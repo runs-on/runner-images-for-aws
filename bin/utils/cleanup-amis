@@ -6,14 +6,15 @@ require 'yaml'
 require 'date'
 require 'colorize'
 
-REGIONS = YAML.load_file(File.expand_path("../../config.yml", __dir__)).fetch("regions")
-AMI_PREFIX = ENV.fetch('AMI_PREFIX', 'runs-on-dev')
+CONFIG = YAML.load_file(File.expand_path("../../config.yml", __dir__))
+REGIONS = CONFIG.fetch("regions")
 
 options = {}
 usage = Slop::Options.new do |opts|
-  opts.banner = "Usage: #{$0} [--force] [--all] [--help]"
+  opts.banner = "Usage: #{$0} [--force] [--all] [--prod] [--help]"
   opts.bool '-f', '--force', 'Do not ask for confirmation'
   opts.bool '-a', '--all', 'Consider all AMIs [warn: this could delete all AMIs]'
+  opts.bool '--prod', "Target production AMIs (#{CONFIG.fetch('ami_prod_prefix')}) instead of dev ones"
   opts.string '--region', 'Region to cleanup', default: "all"
   opts.bool '-h', '--help', 'Show help'
 end
@@ -35,7 +36,11 @@ end
 force, all = options.values_at(:force, :all)
 skip_most_recent = !all
 images_to_remove = []
-dev_prefix = AMI_PREFIX.start_with?("runs-on-dev")
+# Precedence: explicit AMI_PREFIX env > --prod flag > dev prefix default
+AMI_PREFIX = ENV['AMI_PREFIX'].to_s.empty? ?
+  CONFIG.fetch(options[:prod] ? 'ami_prod_prefix' : 'ami_dev_prefix') :
+  ENV['AMI_PREFIX']
+dev_prefix = AMI_PREFIX.start_with?(CONFIG.fetch('ami_dev_prefix'))
 keep_count = dev_prefix ? 1 : 2
 
 class Image < Struct.new(:ami, :region)

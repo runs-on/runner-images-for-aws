@@ -10,8 +10,9 @@ IMAGES = YAML.load_file(File.expand_path("../config.yml", __dir__)).fetch("image
 options = {}
 
 usage = Slop::Options.new do |opts|
-  opts.banner = "Usage: #{$0} [--image-id IMAGE_ID]"
+  opts.banner = "Usage: #{$0} [--image-id IMAGE_ID] [--dist-prefix PREFIX]"
   opts.string '--image-id', 'Image ID', required: false
+  opts.string '--dist-prefix', 'Only sync images whose dist starts with this prefix (e.g. ubuntu, windows)', required: false
 end
 
 begin
@@ -30,6 +31,9 @@ begin
   system("git clone -q --depth 1 --branch main https://github.com/actions/runner-images.git \"#{repo_dir}\"") || fail("Failed to clone runner-images")
   IMAGES.each do |image|
     if options[:image_id] && image['id'] != options[:image_id]
+      next
+    end
+    if options[:dist_prefix] && !image['id'].start_with?(options[:dist_prefix])
       next
     end
 

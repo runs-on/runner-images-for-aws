@@ -10,10 +10,11 @@ require 'fileutils'
 module CopyAmi
   module_function
 
-  AMI_DEV_PREFIX = "runs-on-dev"
-  AMI_PROD_PREFIX = "runs-on-v2.2"
+  CONFIG = YAML.load_file(File.expand_path("../config.yml", __dir__))
+  AMI_DEV_PREFIX = CONFIG.fetch("ami_dev_prefix")
+  AMI_PROD_PREFIX = CONFIG.fetch("ami_prod_prefix")
   SOURCE_REGION = "us-east-1"
-  REGIONS = YAML.load_file(File.expand_path("../config.yml", __dir__)).fetch("regions")
+  REGIONS = CONFIG.fetch("regions")
   DEFAULT_WAIT_OPTIONS = {
     image: { delay: 15, max_attempts: 40 }.freeze,
     snapshot: { delay: 15, max_attempts: 40 }.freeze
