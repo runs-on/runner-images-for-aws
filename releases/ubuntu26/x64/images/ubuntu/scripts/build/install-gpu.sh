@@ -1,0 +1,98 @@
+#!/bin/bash
+
+HELPER_SCRIPTS=${HELPER_SCRIPTS:-"/imagegeneration/helpers"}
+
+source $HELPER_SCRIPTS/os.sh
+source $HELPER_SCRIPTS/etc-environment.sh
+
+DIST_SLUG=""
+NVIDIA_DRIVER_PACKAGES=""
+CUDA_PACKAGES="cuda-12-9 cuda-toolkit-12-9"
+if is_ubuntu24; then
+    DIST_SLUG="ubuntu2404"
+    NVIDIA_DRIVER_PACKAGES="linux-modules-nvidia-580-aws nvidia-driver-580"
+elif is_ubuntu22; then
+    DIST_SLUG="ubuntu2204"
+    NVIDIA_DRIVER_PACKAGES="cuda-drivers-575"
+else
+    echo "Unsupported ubuntu version"
+    exit 1
+fi
+
+set -eox pipefail
+
+if [ -f /root/cuda-installed.txt ]; then
+    # Verify CUDA and driver installation
+    echo "=== CUDA Installation Verification ==="
+    su - runner -c "nvcc --version"
+    nvidia-smi
+    su - runner -c "nvcc --version" | grep "release 12"
+    rm /root/cuda-installed.txt
+    exit 0
+fi
+
+echo "cuda installed" > /root/cuda-installed.txt
+
+# Ensure the root partition is resized
+cloud-init single --name cc_growpart
+cloud-init single --name cc_resizefs
+
+# NVIDIA CUDA drivers and toolkit
+DEBIAN_FILE="cuda-keyring_1.1-1_all.deb"
+REPO_URL="https://developer.download.nvidia.com/compute/cuda/repos/$DIST_SLUG/x86_64/$DEBIAN_FILE"
+wget $REPO_URL
+dpkg -i $DEBIAN_FILE && rm $DEBIAN_FILE
+
+# NVIDIA container toolkit
+REPO_URL="https://nvidia.github.io/libnvidia-container/stable/deb/\$(ARCH)"
+GPG_KEY="/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg"
+REPO_PATH="/etc/apt/sources.list.d/nvidia-container-toolkit.list"
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | gpg --dearmor -o $GPG_KEY
+echo "deb [signed-by=$GPG_KEY] $REPO_URL /" > $REPO_PATH
+
+apt-get update -qq
+
+if is_ubuntu24; then
+    # Noble's 575 driver packages transition to Ubuntu's 580 driver stack, which
+    # has prebuilt modules for the AWS kernel. Prefer those over CUDA repo DKMS
+    # packages so cuda-12-9 stays installed without compiling nvidia-dkms.
+    cat >/etc/apt/preferences.d/ubuntu-nvidia-driver <<'EOF'
+Package: nvidia-driver* nvidia-dkms* nvidia-headless* nvidia-kernel* nvidia-utils* nvidia-compute-utils* nvidia-firmware* nvidia-modprobe nvidia-persistenced libnvidia* xserver-xorg-video-nvidia* linux-modules-nvidia*
+Pin: release o=Ubuntu
+Pin-Priority: 1001
+EOF
+fi
+
+# Pin CUDA version to 12
+# cuda-toolkit vs nvidia-cuda-toolkit:
+# - cuda-toolkit is NVIDIA's official package from their repository
+# - nvidia-cuda-toolkit is Ubuntu's packaged version of CUDA toolkit (often outdated version)
+# So using cuda-toolkit here:
+apt install -y --no-install-recommends $NVIDIA_DRIVER_PACKAGES $CUDA_PACKAGES nvidia-container-toolkit
+
+( dpkg -l | grep -E "(nvidia-driver|cuda)" | head -10 ) || true
+
+# Update PATH and LD_LIBRARY_PATH for CUDA 12
+path="/usr/local/cuda-12/bin"
+library_path="/usr/local/cuda-12/lib64"
+# Ensure the paths exist
+ls -al $path
+ls -al $library_path
+prepend_etc_environment_path "$path"
+
+# prepend_etc_environment_variable does not check if the variable exists, so fails if not...
+if grep "^LD_LIBRARY_PATH=" /etc/environment; then
+    prepend_etc_environment_variable "LD_LIBRARY_PATH" "$library_path"
+else
+    set_etc_environment_variable "LD_LIBRARY_PATH" "$library_path"
+fi
+
+# Configure the container runtime by using the nvidia-ctk command
+nvidia-ctk runtime configure --runtime=docker
+
+# Restart the Docker daemon
+systemctl restart docker
+docker info
+
+# Disable nvidia-persistenced service
+systemctl disable nvidia-persistenced
