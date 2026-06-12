@@ -255,8 +255,12 @@ resolved_subnet_id = resolve_subnet_id(
   instance_type: image.fetch('instance_type'),
   fallback_subnet_id: legacy_subnet_id
 )
-packer_template_relative_path = "#{dist.sub(/\d+$/, '')}/templates/#{image['id']}.pkr.hcl"
+# Images may share a template via the optional `template:` key in config.yml;
+# default is a template named after the image id.
+packer_template_name = image.fetch('template', image['id'])
+packer_template_relative_path = "#{dist.sub(/\d+$/, '')}/templates/#{packer_template_name}.pkr.hcl"
 packer_template_path = "#{release_dir}/images/#{packer_template_relative_path}"
+packer_template_content = File.read("patches/#{packer_template_relative_path}")
 log_file_path = options[:log_file] || default_log_file
 puts "Using Packer command log file: #{log_file_path}"
 custom_amazon_plugin_binary = ENV.fetch('PACKER_AMAZON_PLUGIN_BINARY', '').strip
@@ -358,9 +362,22 @@ else
     packer_template_path
   ]
 end
+# Shared templates take the toolset file (derived from the image id) and the
+# image's install_scripts list from config.yml; per-image templates do not
+# declare these variables, and packer errors on undefined -var flags.
+shared_template_vars = []
+if packer_template_content.include?('variable "toolset_file"')
+  toolset_file = "toolset-#{dist[/\d+/]}04#{arch == 'arm64' ? '-arm64' : ''}.json"
+  shared_template_vars += ["-var", "toolset_file=#{toolset_file}"]
+end
+if packer_template_content.include?('variable "install_scripts"')
+  shared_template_vars += ["-var", "install_scripts=#{JSON.generate(image.fetch('install_scripts', []))}"]
+end
+
 packer_build_cmd = [
   "packer", "build",
   options[:debug] ? "-debug" : nil,
+  *shared_template_vars,
   "-var", %{ami_regions=["us-east-1"]},
   "-var", "ami_name=#{ami_name}",
   "-var", "image_os=#{dist}",

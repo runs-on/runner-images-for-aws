@@ -1,3 +1,7 @@
+// Shared template for ubuntu{22,24,26}-full-arm64. Version-specific bits are
+// injected by bin/build: toolset_file (derived from the image id) and
+// install_scripts (from the image's install_scripts list in config.yml),
+// which run after the common local.base_scripts.
 packer {
   required_plugins {
     amazon = {
@@ -58,13 +62,22 @@ variable "ami_regions" {
 }
 
 variable "source_ami_owner" {
-  type    = string
-  default = "099720109477"
+  type = string
 }
 
 variable "source_ami_name" {
-  type    = string
-  default = "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-arm64-server-*"
+  type = string
+}
+
+// ex: toolset-2404-arm64.json
+variable "toolset_file" {
+  type = string
+}
+
+// extra build scripts (basenames) to run after local.base_scripts
+variable "install_scripts" {
+  type    = list(string)
+  default = []
 }
 
 // make sure the subnet auto-assigns public IPs
@@ -88,6 +101,34 @@ variable "instance_type" {
   default = "m8g.large"
 }
 
+locals {
+  // Build scripts common to every ubuntu version; version-specific extras live
+  // in the install_scripts lists in config.yml and run after these.
+  base_scripts = [
+    "${path.root}/../scripts/build/install-actions-cache.sh",
+    "${path.root}/../scripts/build/install-runner-package.sh",
+    "${path.root}/../scripts/build/install-apt-common.sh",
+    "${path.root}/../scripts/build/install-aws-tools.sh",
+    "${path.root}/../scripts/build/install-clang.sh",
+    "${path.root}/../scripts/build/install-cmake.sh",
+    "${path.root}/../scripts/build/install-gcc-compilers.sh",
+    "${path.root}/../scripts/build/install-git.sh",
+    "${path.root}/../scripts/build/install-git-lfs.sh",
+    "${path.root}/../scripts/build/install-github-cli.sh",
+    "${path.root}/../scripts/build/install-java-tools.sh",
+    "${path.root}/../scripts/build/install-kubernetes-tools.sh",
+    "${path.root}/../scripts/build/install-mysql.sh",
+    "${path.root}/../scripts/build/install-nodejs.sh",
+    "${path.root}/../scripts/build/install-postgresql.sh",
+    "${path.root}/../scripts/build/install-ruby.sh",
+    "${path.root}/../scripts/build/install-rust.sh",
+    "${path.root}/../scripts/build/configure-dpkg.sh",
+    "${path.root}/../scripts/build/install-yq.sh",
+    "${path.root}/../scripts/build/install-python.sh",
+    "${path.root}/../scripts/build/install-zstd.sh"
+  ]
+}
+
 source "amazon-ebs" "build_ebs" {
   aws_polling {
     delay_seconds = 30
@@ -101,7 +142,7 @@ source "amazon-ebs" "build_ebs" {
   # make AMIs publicly accessible
   ami_groups    = ["all"]
   ebs_optimized = true
-  # spot_instance_types                       = ["r7g.large", "c7g.xlarge", "m7g.xlarge", "c7g.2xlarge", "m7g.2xlarge"]
+  # spot_instance_types                       = ["r7g.large", "m7g.xlarge", "c7g.xlarge"]
   # spot_price                                = "1.00"
   instance_type               = var.instance_type
   region                      = "${var.region}"
@@ -221,7 +262,7 @@ build {
 
   provisioner "file" {
     destination = "${var.installer_script_folder}/toolset.json"
-    source      = "${path.root}/../toolsets/toolset-2204-arm64.json"
+    source      = "${path.root}/../toolsets/${var.toolset_file}"
   }
 
   provisioner "shell" {
@@ -259,46 +300,18 @@ build {
   provisioner "shell" {
     environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
     execute_command  = "sudo sh -c '{{ .Vars }} pwsh -f {{ .Path }}'"
-    scripts          = ["${path.root}/../scripts/build/Install-PowerShellModules.ps1"]
+    // scripts          = ["${path.root}/../scripts/build/Install-PowerShellModules.ps1", "${path.root}/../scripts/build/Install-PowerShellAzModules.ps1"]
+    scripts = ["${path.root}/../scripts/build/Install-PowerShellModules.ps1"]
   }
 
   provisioner "shell" {
     environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}", "DEBIAN_FRONTEND=noninteractive"]
     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts = [
-      "${path.root}/../scripts/build/install-actions-cache.sh",
-      "${path.root}/../scripts/build/install-runner-package.sh",
-      "${path.root}/../scripts/build/install-apt-common.sh",
-      "${path.root}/../scripts/build/install-aws-tools.sh",
-      "${path.root}/../scripts/build/install-clang.sh",
-      "${path.root}/../scripts/build/install-cmake.sh",
-      "${path.root}/../scripts/build/install-gcc-compilers.sh",
-      "${path.root}/../scripts/build/install-git.sh",
-      "${path.root}/../scripts/build/install-git-lfs.sh",
-      "${path.root}/../scripts/build/install-github-cli.sh",
-      "${path.root}/../scripts/build/install-java-tools.sh",
-      "${path.root}/../scripts/build/install-kubernetes-tools.sh",
-      "${path.root}/../scripts/build/install-mysql.sh",
-      "${path.root}/../scripts/build/install-nvm.sh",
-      "${path.root}/../scripts/build/install-nodejs.sh",
-      // this ends up in/ home/ubuntu/.cache for some reason, so not useful anyway
-      // "${path.root}/../scripts/build/install-bazel.sh",
-      "${path.root}/../scripts/build/install-postgresql.sh",
-      "${path.root}/../scripts/build/install-ruby.sh",
-      "${path.root}/../scripts/build/install-rust.sh",
-      "${path.root}/../scripts/build/install-terraform.sh",
-      "${path.root}/../scripts/build/configure-dpkg.sh",
-      "${path.root}/../scripts/build/install-yq.sh",
-      // "${path.root}/../scripts/build/install-android-sdk.sh",
-      # hard to install on arm64 for now
-      # "${path.root}/../scripts/build/install-pypy.sh",
-      "${path.root}/../scripts/build/install-python.sh",
-      "${path.root}/../scripts/build/install-zstd.sh"
-    ]
+    scripts          = concat(local.base_scripts, [for s in var.install_scripts : "${path.root}/../scripts/build/${s}"])
   }
 
   provisioner "shell" {
-    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}", "DOCKERHUB_PULL_IMAGES=no"]
+    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}", "DOCKERHUB_PULL_IMAGES=NO"]
     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     scripts          = ["${path.root}/../scripts/build/install-docker.sh"]
   }
@@ -345,20 +358,32 @@ build {
     start_retry_timeout = "10m"
   }
 
+  // provisioner "shell" {
+  //   environment_vars = ["IMAGE_VERSION=${var.image_version}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}"]
+  //   inline           = ["pwsh -File ${var.image_folder}/SoftwareReport/Generate-SoftwareReport.ps1 -OutputDirectory ${var.image_folder}", "pwsh -File ${var.image_folder}/tests/RunAll-Tests.ps1 -OutputDirectory ${var.image_folder}"]
+  // }
+
+  // provisioner "file" {
+  //   destination = "${path.root}/../Ubuntu2404-Readme.md"
+  //   direction   = "download"
+  //   source      = "${var.image_folder}/software-report.md"
+  // }
+
+  // provisioner "file" {
+  //   destination = "${path.root}/../software-report.json"
+  //   direction   = "download"
+  //   source      = "${var.image_folder}/software-report.json"
+  // }
+
   provisioner "shell" {
     environment_vars = ["HELPER_SCRIPT_FOLDER=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}", "IMAGE_FOLDER=${var.image_folder}"]
     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     scripts          = ["${path.root}/../scripts/build/configure-system.sh", "${path.root}/../custom/files/after-reboot.sh"]
   }
 
-  # provisioner "file" {
-  #   destination = "/tmp/"
-  #   source      = "${path.root}/../assets/ubuntu2204.conf"
-  # }
-
-  # provisioner "shell" {
-  #   execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-  #   inline          = ["mkdir -p /etc/vsts", "cp /tmp/ubuntu2204.conf /etc/vsts/machine_instance.conf"]
-  # }
+  // provisioner "shell" {
+  //   execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+  //   inline          = ["sleep 30", "/usr/sbin/waagent -force -deprovision+user && export HISTSIZE=0 && sync"]
+  // }
 
 }

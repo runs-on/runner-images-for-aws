@@ -1,3 +1,7 @@
+// Shared template for ubuntu{22,24,26}-full-x64. Version-specific bits are
+// injected by bin/build: toolset_file (derived from the image id) and
+// install_scripts (from the image's install_scripts list in config.yml),
+// which run after the common local.base_scripts.
 packer {
   required_plugins {
     amazon = {
@@ -15,16 +19,6 @@ variable "ami_name" {
 variable "ami_description" {
   type    = string
   default = "${env("AMI_DESCRIPTION")}"
-}
-
-variable "dockerhub_login" {
-  type    = string
-  default = "${env("DOCKERHUB_LOGIN")}"
-}
-
-variable "dockerhub_password" {
-  type    = string
-  default = "${env("DOCKERHUB_PASSWORD")}"
 }
 
 variable "helper_script_folder" {
@@ -68,13 +62,22 @@ variable "ami_regions" {
 }
 
 variable "source_ami_owner" {
-  type    = string
-  default = "099720109477"
+  type = string
 }
 
 variable "source_ami_name" {
-  type    = string
-  default = "ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-arm64-server-*"
+  type = string
+}
+
+// ex: toolset-2404.json
+variable "toolset_file" {
+  type = string
+}
+
+// extra build scripts (basenames) to run after local.base_scripts
+variable "install_scripts" {
+  type    = list(string)
+  default = []
 }
 
 // make sure the subnet auto-assigns public IPs
@@ -95,7 +98,46 @@ variable "volume_type" {
 
 variable "instance_type" {
   type    = string
-  default = "m8g.large"
+  default = "m8a.large"
+}
+
+locals {
+  // Build scripts common to every ubuntu version; version-specific extras live
+  // in the install_scripts lists in config.yml and run after these.
+  base_scripts = [
+    "${path.root}/../scripts/build/install-actions-cache.sh",
+    "${path.root}/../scripts/build/install-runner-package.sh",
+    "${path.root}/../scripts/build/install-apt-common.sh",
+    "${path.root}/../scripts/build/install-azcopy.sh",
+    "${path.root}/../scripts/build/install-azure-cli.sh",
+    "${path.root}/../scripts/build/install-bicep.sh",
+    "${path.root}/../scripts/build/install-apache.sh",
+    "${path.root}/../scripts/build/install-aws-tools.sh",
+    "${path.root}/../scripts/build/install-clang.sh",
+    "${path.root}/../scripts/build/install-cmake.sh",
+    "${path.root}/../scripts/build/install-dotnetcore-sdk.sh",
+    "${path.root}/../scripts/build/install-gcc-compilers.sh",
+    "${path.root}/../scripts/build/install-gfortran.sh",
+    "${path.root}/../scripts/build/install-git.sh",
+    "${path.root}/../scripts/build/install-git-lfs.sh",
+    "${path.root}/../scripts/build/install-github-cli.sh",
+    "${path.root}/../scripts/build/install-google-chrome.sh",
+    "${path.root}/../scripts/build/install-java-tools.sh",
+    "${path.root}/../scripts/build/install-kubernetes-tools.sh",
+    "${path.root}/../scripts/build/install-mysql.sh",
+    "${path.root}/../scripts/build/install-nodejs.sh",
+    "${path.root}/../scripts/build/install-oras-cli.sh",
+    "${path.root}/../scripts/build/install-php.sh",
+    "${path.root}/../scripts/build/install-postgresql.sh",
+    "${path.root}/../scripts/build/install-ruby.sh",
+    "${path.root}/../scripts/build/install-rust.sh",
+    "${path.root}/../scripts/build/install-selenium.sh",
+    "${path.root}/../scripts/build/configure-dpkg.sh",
+    "${path.root}/../scripts/build/install-yq.sh",
+    "${path.root}/../scripts/build/install-pypy.sh",
+    "${path.root}/../scripts/build/install-python.sh",
+    "${path.root}/../scripts/build/install-zstd.sh"
+  ]
 }
 
 source "amazon-ebs" "build_ebs" {
@@ -111,7 +153,7 @@ source "amazon-ebs" "build_ebs" {
   # make AMIs publicly accessible
   ami_groups    = ["all"]
   ebs_optimized = true
-  # spot_instance_types                       = ["r7g.large", "m7g.xlarge", "c7g.xlarge"]
+  # spot_instance_types                       = ["r7a.large", "r7i.large", "m7a.xlarge", "c7a.xlarge", "m7i-flex.xlarge"]
   # spot_price                                = "1.00"
   instance_type               = var.instance_type
   region                      = "${var.region}"
@@ -231,7 +273,7 @@ build {
 
   provisioner "file" {
     destination = "${var.installer_script_folder}/toolset.json"
-    source      = "${path.root}/../toolsets/toolset-2604-arm64.json"
+    source      = "${path.root}/../toolsets/${var.toolset_file}"
   }
 
   provisioner "shell" {
@@ -276,52 +318,7 @@ build {
   provisioner "shell" {
     environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}", "DEBIAN_FRONTEND=noninteractive"]
     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts = [
-      "${path.root}/../scripts/build/install-actions-cache.sh",
-      "${path.root}/../scripts/build/install-runner-package.sh",
-      "${path.root}/../scripts/build/install-apt-common.sh",
-      # "${path.root}/../scripts/build/install-azcopy.sh",
-      "${path.root}/../scripts/build/install-azure-cli.sh",
-      // "${path.root}/../scripts/build/install-azure-devops-cli.sh",
-      # "${path.root}/../scripts/build/install-bicep.sh",
-      # "${path.root}/../scripts/build/install-apache.sh",
-      "${path.root}/../scripts/build/install-aws-tools.sh",
-      "${path.root}/../scripts/build/install-clang.sh",
-      "${path.root}/../scripts/build/install-cmake.sh",
-      // "${path.root}/../scripts/build/install-codeql-bundle.sh",
-      "${path.root}/../scripts/build/install-container-tools.sh",
-      # "${path.root}/../scripts/build/install-dotnetcore-sdk.sh",
-      "${path.root}/../scripts/build/install-gcc-compilers.sh",
-      # "${path.root}/../scripts/build/install-gfortran.sh",
-      "${path.root}/../scripts/build/install-git.sh",
-      "${path.root}/../scripts/build/install-git-lfs.sh",
-      "${path.root}/../scripts/build/install-github-cli.sh",
-      # "${path.root}/../scripts/build/install-google-chrome.sh",
-      // "${path.root}/../scripts/build/install-haskell.sh",
-      "${path.root}/../scripts/build/install-java-tools.sh",
-      "${path.root}/../scripts/build/install-kubernetes-tools.sh",
-      # "${path.root}/../scripts/build/install-miniconda.sh",
-      "${path.root}/../scripts/build/install-mysql.sh",
-      // "${path.root}/../scripts/build/install-nginx.sh",
-      "${path.root}/../scripts/build/install-nodejs.sh",
-      // "${path.root}/../scripts/build/install-bazel.sh",
-      "${path.root}/../scripts/build/install-oras-cli.sh",
-      "${path.root}/../scripts/build/install-php.sh",
-      "${path.root}/../scripts/build/install-postgresql.sh",
-      // "${path.root}/../scripts/build/install-pulumi.sh",
-      "${path.root}/../scripts/build/install-ruby.sh",
-      "${path.root}/../scripts/build/install-rust.sh",
-      // "${path.root}/../scripts/build/install-julia.sh",
-      # "${path.root}/../scripts/build/install-selenium.sh",
-      // "${path.root}/../scripts/build/install-vcpkg.sh",
-      "${path.root}/../scripts/build/configure-dpkg.sh",
-      "${path.root}/../scripts/build/install-yq.sh",
-      // "${path.root}/../scripts/build/install-android-sdk.sh",
-      # hard to install on arm64 for now
-      # "${path.root}/../scripts/build/install-pypy.sh",
-      "${path.root}/../scripts/build/install-python.sh",
-      "${path.root}/../scripts/build/install-zstd.sh"
-    ]
+    scripts          = concat(local.base_scripts, [for s in var.install_scripts : "${path.root}/../scripts/build/${s}"])
   }
 
   provisioner "shell" {
