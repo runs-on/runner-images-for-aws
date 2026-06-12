@@ -15,8 +15,27 @@ regions:
   - ap-southeast-1
   - ap-southeast-2
 images:
+  # Shared templates (template: key, resolved by bin/build against
+  # patches/<dist>/templates/<template>.pkr.hcl; defaults to <id>.pkr.hcl).
+  # install_scripts lists the version-specific build scripts that run after the
+  # common base list defined in the template.
+
   # Ubuntu22
   - id: ubuntu22-full-x64
+    template: ubuntu-full-x64
+    install_scripts:
+      - install-aliyun-cli.sh
+      - install-firefox.sh
+      - install-microsoft-edge.sh
+      - install-leiningen.sh
+      - install-miniconda.sh
+      - install-kotlin.sh
+      - install-mssql-tools.sh
+      - install-sqlpackage.sh
+      - install-rlang.sh
+      - install-sbt.sh
+      - install-terraform.sh
+      - install-packer.sh
     instance_type: m8a.large
     volume_size: 30
     source_ami_name: ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*
@@ -24,6 +43,10 @@ images:
     description: RunsOn Ubuntu22 x64
 
   - id: ubuntu22-full-arm64
+    template: ubuntu-full-arm64
+    install_scripts:
+      - install-nvm.sh
+      - install-terraform.sh
     instance_type: m8g.large
     volume_size: 30
     source_ami_name: ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-arm64-server-*
@@ -31,6 +54,7 @@ images:
     description: RunsOn Ubuntu22 arm64
 
   - id: ubuntu22-gpu-x64
+    template: ubuntu-gpu-x64
     instance_type: g4dn.xlarge
     volume_size: 40
     source_ami_name: runs-on-dev-ubuntu22-full-x64-*
@@ -39,6 +63,10 @@ images:
 
   # Ubuntu24
   - id: ubuntu24-full-x64
+    template: ubuntu-full-x64
+    install_scripts:
+      - install-container-tools.sh
+      - install-miniconda.sh
     inspect: true
     instance_type: m8a.large
     volume_size: 30
@@ -63,6 +91,12 @@ images:
     description: RunsOn Ubuntu24 minimal arm64
 
   - id: ubuntu24-full-arm64
+    template: ubuntu-full-arm64
+    install_scripts:
+      - install-azure-cli.sh
+      - install-container-tools.sh
+      - install-oras-cli.sh
+      - install-php.sh
     inspect: true
     instance_type: m8g.large
     volume_size: 30
@@ -72,6 +106,10 @@ images:
 
   # Ubuntu26
   - id: ubuntu26-full-x64
+    template: ubuntu-full-x64
+    install_scripts:
+      # no install-miniconda.sh: not available on ubuntu 26.04 upstream
+      - install-container-tools.sh
     instance_type: m8a.large
     volume_size: 30
     source_ami_name: ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-amd64-server-*
@@ -79,6 +117,12 @@ images:
     description: RunsOn Ubuntu26 x64
 
   - id: ubuntu26-full-arm64
+    template: ubuntu-full-arm64
+    install_scripts:
+      - install-azure-cli.sh
+      - install-container-tools.sh
+      - install-oras-cli.sh
+      - install-php.sh
     instance_type: m8g.large
     volume_size: 30
     source_ami_name: ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-arm64-server-*
@@ -86,6 +130,7 @@ images:
     description: RunsOn Ubuntu26 arm64
 
   - id: ubuntu24-gpu-x64
+    template: ubuntu-gpu-x64
     instance_type: g4dn.xlarge
     volume_size: 40
     source_ami_name: runs-on-dev-ubuntu24-full-x64-*
@@ -93,6 +138,7 @@ images:
     description: RunsOn Ubuntu24 GPU optimized x64
 
   - id: ubuntu24-stepsecurity-x64
+    template: ubuntu-stepsecurity-x64
     instance_type: m8a.large
     volume_size: 30
     source_ami_name: runs-on-dev-ubuntu24-full-x64-*
@@ -100,6 +146,7 @@ images:
     description: RunsOn Ubuntu24 + StepSecurity x64
 
   - id: ubuntu24-stepsecurity-arm64
+    template: ubuntu-stepsecurity-arm64
     instance_type: m8g.large
     volume_size: 30
     source_ami_name: runs-on-dev-ubuntu24-full-arm64-*
@@ -107,6 +154,7 @@ images:
     description: RunsOn Ubuntu24 + StepSecurity arm64
 
   - id: ubuntu22-stepsecurity-x64
+    template: ubuntu-stepsecurity-x64
     instance_type: m8a.large
     volume_size: 30
     source_ami_name: runs-on-dev-ubuntu22-full-x64-*
@@ -114,6 +162,7 @@ images:
     description: RunsOn Ubuntu22 + StepSecurity x64
 
   - id: ubuntu22-stepsecurity-arm64
+    template: ubuntu-stepsecurity-arm64
     instance_type: m8g.large
     volume_size: 30
     source_ami_name: runs-on-dev-ubuntu22-full-arm64-*
