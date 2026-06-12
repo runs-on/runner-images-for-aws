@@ -33,20 +33,20 @@ jobs:
       - name: Verify AMI name
         run: |
           echo "${{ inputs.ami_name }}" | grep "${{ inputs.image_id }}"
-      - uses: actions/checkout@v6
-      - uses: ruby/setup-ruby@v1
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af # v1
         with:
           ruby-version: 3.2.2
           bundler-cache: true
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
       - name: Copy dev AMI to prod
         run: bundle exec bin/copy-ami --force --summary-json release-summary/${{ inputs.image_id }}.json ${{ inputs.ami_name }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: released-ami-${{ inputs.image_id }}
           path: release-summary/${{ inputs.image_id }}.json

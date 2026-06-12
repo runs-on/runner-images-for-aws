@@ -30,7 +30,7 @@ jobs:
       ami_name: ${{ steps.build.outputs.ami_name }}
       ami_id: ${{ steps.build.outputs.ami_id }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: ${{ github.ref_name }}
       - uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
@@ -39,14 +39,14 @@ jobs:
       - run: git log --oneline -n 1
       - name: Setup mise (minimal image tooling)
         if: ${{ contains(inputs.image_id, '-minimal-') }}
-        uses: jdx/mise-action@v3
+        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
         with:
           install_args: go upx
       - name: Show Packer version
         run: packer version
       - name: Setup Go (windows25 custom plugin)
         if: ${{ startsWith(inputs.image_id, 'windows25-') }}
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version: 1.25.1
       - name: Build patched amazon plugin (windows25)
@@ -55,12 +55,12 @@ jobs:
         run: |
           plugin_binary="$(./scripts/build-patched-packer-plugin-amazon.sh)"
           echo "plugin_binary=$plugin_binary" >> "$GITHUB_OUTPUT"
-      - uses: ruby/setup-ruby@v1
+      - uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af # v1
         with:
           ruby-version: 3.2.2
           bundler-cache: true
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
