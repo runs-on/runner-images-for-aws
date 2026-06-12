@@ -1,0 +1,33 @@
+Describe "Haskell" -Skip:(Test-IsArm64) {
+    BeforeDiscovery {
+        if (Test-IsArm64) { return }
+        $GHCCommonPath = "/usr/local/.ghcup/ghc"
+        $GHCVersions = Get-ChildItem -Path $GHCCommonPath | Where-Object { $_.Name -match "\d+\.\d+" }
+
+        $testCases = $GHCVersions | ForEach-Object { @{ GHCPath = "${_}/bin/ghc"} }
+    }
+
+    It "GHC version <GHCPath>" -TestCases $testCases {
+        "$GHCPath --version" | Should -ReturnZeroExitCode
+    }
+
+    It "GHCup" {
+        "ghcup --version" | Should -ReturnZeroExitCode
+    }
+
+    It "Default GHC" {
+        "ghc --version" | Should -ReturnZeroExitCode
+    }
+
+    It "Cabal" {
+        "cabal --version" | Should -ReturnZeroExitCode
+    }
+
+    It "Stack" {
+        "stack --version" | Should -ReturnZeroExitCode
+    }
+
+    It "Stack hook is not installed" {
+        "$HOME/.stack/hooks/ghc-install.sh" | Should -Not -Exist
+    }
+}
