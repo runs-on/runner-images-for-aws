@@ -10,7 +10,7 @@ source $HELPER_SCRIPTS/install.sh
 # pwsh_version=$(get_toolset_value .pwsh.version)
 pwsh_version=7.4.1
 
-if [ "$(uname -i)" = "aarch64" ]; then
+if [ "$(uname -m)" = "aarch64" ]; then
   arch=arm64
 else
   arch=x64
