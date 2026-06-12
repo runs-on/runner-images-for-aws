@@ -34,15 +34,15 @@ jobs:
       - name: Generate release name
         id: generate-release-name
         run: echo "release_name=${{ inputs.release_prefix }}-$(date +%Y%m%d%H%M%S)" >> $GITHUB_OUTPUT
-      - uses: actions/checkout@v6
-      - uses: ruby/setup-ruby@v1
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af # v1
         with:
           ruby-version: 3.2.2
           bundler-cache: true
       - name: Check config.yml/workflow image list consistency
         run: bundle exec bin/utils/check-workflow-images
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v6
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v6
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
@@ -53,7 +53,7 @@ jobs:
         run: bundle exec bin/utils/cleanup-amis --force
       - name: Synchronize with upstream repository
         run: bundle exec bin/sync --dist-prefix ${{ inputs.dist_prefix }}
-      - uses: stefanzweifel/git-auto-commit-action@v7
+      - uses: stefanzweifel/git-auto-commit-action@04702edda442b2e678b25b537cec683a1493fcb9 # v7
         with:
           commit_message: "Sync from upstream"
           tagging_message: ""
