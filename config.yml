@@ -17,25 +17,57 @@ regions:
 images:
   # Shared templates (template: key, resolved by bin/build against
   # patches/<dist>/templates/<template>.pkr.hcl; defaults to <id>.pkr.hcl).
-  # install_scripts lists the version-specific build scripts that run after the
-  # common base list defined in the template.
+  # install_scripts is the full ordered build script list for shared Ubuntu
+  # full-image templates.
 
   # Ubuntu22
   - id: ubuntu22-full-x64
     template: ubuntu-full-x64
     install_scripts:
+      - install-actions-cache.sh
+      - install-runner-package.sh
+      - install-apt-common.sh
+      - install-azcopy.sh
+      - install-azure-cli.sh
+      - install-bicep.sh
       - install-aliyun-cli.sh
+      - install-apache.sh
+      - install-aws-tools.sh
+      - install-clang.sh
+      - install-cmake.sh
+      - install-dotnetcore-sdk.sh
       - install-firefox.sh
       - install-microsoft-edge.sh
+      - install-gcc-compilers.sh
+      - install-gfortran.sh
+      - install-git.sh
+      - install-git-lfs.sh
+      - install-github-cli.sh
+      - install-google-chrome.sh
+      - install-java-tools.sh
+      - install-kubernetes-tools.sh
       - install-leiningen.sh
       - install-miniconda.sh
       - install-kotlin.sh
+      - install-mysql.sh
       - install-mssql-tools.sh
       - install-sqlpackage.sh
+      - install-nodejs.sh
+      - install-oras-cli.sh
+      - install-php.sh
+      - install-postgresql.sh
+      - install-ruby.sh
       - install-rlang.sh
+      - install-rust.sh
       - install-sbt.sh
+      - install-selenium.sh
       - install-terraform.sh
       - install-packer.sh
+      - configure-dpkg.sh
+      - install-yq.sh
+      - install-pypy.sh
+      - install-python.sh
+      - install-zstd.sh
     instance_type: m8a.large
     volume_size: 30
     source_ami_name: ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*
@@ -45,8 +77,29 @@ images:
   - id: ubuntu22-full-arm64
     template: ubuntu-full-arm64
     install_scripts:
+      - install-actions-cache.sh
+      - install-runner-package.sh
+      - install-apt-common.sh
+      - install-aws-tools.sh
+      - install-clang.sh
+      - install-cmake.sh
+      - install-gcc-compilers.sh
+      - install-git.sh
+      - install-git-lfs.sh
+      - install-github-cli.sh
+      - install-java-tools.sh
+      - install-kubernetes-tools.sh
+      - install-mysql.sh
       - install-nvm.sh
+      - install-nodejs.sh
+      - install-postgresql.sh
+      - install-ruby.sh
+      - install-rust.sh
       - install-terraform.sh
+      - configure-dpkg.sh
+      - install-yq.sh
+      - install-python.sh
+      - install-zstd.sh
     instance_type: m8g.large
     volume_size: 30
     source_ami_name: ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-arm64-server-*
@@ -65,8 +118,40 @@ images:
   - id: ubuntu24-full-x64
     template: ubuntu-full-x64
     install_scripts:
+      - install-actions-cache.sh
+      - install-runner-package.sh
+      - install-apt-common.sh
+      - install-azcopy.sh
+      - install-azure-cli.sh
+      - install-bicep.sh
+      - install-apache.sh
+      - install-aws-tools.sh
+      - install-clang.sh
+      - install-cmake.sh
       - install-container-tools.sh
+      - install-dotnetcore-sdk.sh
+      - install-gcc-compilers.sh
+      - install-gfortran.sh
+      - install-git.sh
+      - install-git-lfs.sh
+      - install-github-cli.sh
+      - install-google-chrome.sh
+      - install-java-tools.sh
+      - install-kubernetes-tools.sh
       - install-miniconda.sh
+      - install-mysql.sh
+      - install-nodejs.sh
+      - install-oras-cli.sh
+      - install-php.sh
+      - install-postgresql.sh
+      - install-ruby.sh
+      - install-rust.sh
+      - install-selenium.sh
+      - configure-dpkg.sh
+      - install-yq.sh
+      - install-pypy.sh
+      - install-python.sh
+      - install-zstd.sh
     inspect: true
     instance_type: m8a.large
     volume_size: 30
@@ -93,10 +178,31 @@ images:
   - id: ubuntu24-full-arm64
     template: ubuntu-full-arm64
     install_scripts:
+      - install-actions-cache.sh
+      - install-runner-package.sh
+      - install-apt-common.sh
       - install-azure-cli.sh
+      - install-aws-tools.sh
+      - install-clang.sh
+      - install-cmake.sh
       - install-container-tools.sh
+      - install-gcc-compilers.sh
+      - install-git.sh
+      - install-git-lfs.sh
+      - install-github-cli.sh
+      - install-java-tools.sh
+      - install-kubernetes-tools.sh
+      - install-mysql.sh
+      - install-nodejs.sh
       - install-oras-cli.sh
       - install-php.sh
+      - install-postgresql.sh
+      - install-ruby.sh
+      - install-rust.sh
+      - configure-dpkg.sh
+      - install-yq.sh
+      - install-python.sh
+      - install-zstd.sh
     inspect: true
     instance_type: m8g.large
     volume_size: 30
@@ -108,8 +214,40 @@ images:
   - id: ubuntu26-full-x64
     template: ubuntu-full-x64
     install_scripts:
-      # no install-miniconda.sh: not available on ubuntu 26.04 upstream
+      - install-actions-cache.sh
+      - install-runner-package.sh
+      - install-apt-common.sh
+      - install-azcopy.sh
+      - install-azure-cli.sh
+      - install-bicep.sh
+      - install-apache.sh
+      - install-aws-tools.sh
+      - install-clang.sh
+      - install-cmake.sh
       - install-container-tools.sh
+      - install-dotnetcore-sdk.sh
+      - install-gcc-compilers.sh
+      - install-gfortran.sh
+      - install-git.sh
+      - install-git-lfs.sh
+      - install-github-cli.sh
+      - install-google-chrome.sh
+      - install-java-tools.sh
+      - install-kubernetes-tools.sh
+      # no install-miniconda.sh: not available on ubuntu 26.04 upstream
+      - install-mysql.sh
+      - install-nodejs.sh
+      - install-oras-cli.sh
+      - install-php.sh
+      - install-postgresql.sh
+      - install-ruby.sh
+      - install-rust.sh
+      - install-selenium.sh
+      - configure-dpkg.sh
+      - install-yq.sh
+      - install-pypy.sh
+      - install-python.sh
+      - install-zstd.sh
     instance_type: m8a.large
     volume_size: 30
     source_ami_name: ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-amd64-server-*
@@ -119,10 +257,31 @@ images:
   - id: ubuntu26-full-arm64
     template: ubuntu-full-arm64
     install_scripts:
+      - install-actions-cache.sh
+      - install-runner-package.sh
+      - install-apt-common.sh
       - install-azure-cli.sh
+      - install-aws-tools.sh
+      - install-clang.sh
+      - install-cmake.sh
       - install-container-tools.sh
+      - install-gcc-compilers.sh
+      - install-git.sh
+      - install-git-lfs.sh
+      - install-github-cli.sh
+      - install-java-tools.sh
+      - install-kubernetes-tools.sh
+      - install-mysql.sh
+      - install-nodejs.sh
       - install-oras-cli.sh
       - install-php.sh
+      - install-postgresql.sh
+      - install-ruby.sh
+      - install-rust.sh
+      - configure-dpkg.sh
+      - install-yq.sh
+      - install-python.sh
+      - install-zstd.sh
     instance_type: m8g.large
     volume_size: 30
     source_ami_name: ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-arm64-server-*
