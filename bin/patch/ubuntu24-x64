@@ -2,104 +2,10 @@
 
 set -eo pipefail
 
-gnu_sed() {
-  $(which gsed || which sed) "$@"
-}
+DIST=ubuntu24
+ARCH=x64
+TOOLSET_FILE=toolset-2404.json
 
-RELEASE_DIR="$1"
+source "$(dirname "$0")/lib.sh"
 
-if [ -z "$RELEASE_DIR" ]; then
-  echo "Usage: $0 <RELEASE_DIR>"
-  exit 1
-fi
-
-release_dir="$RELEASE_DIR"
-repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
-build_dir="$release_dir/images/ubuntu/scripts/build"
-custom_dir="$release_dir/images/ubuntu/custom"
-toolsets_dir="$release_dir/images/ubuntu/toolsets"
-TOOLSET_PATH="$toolsets_dir/toolset-2404.json"
-dist_dir="$repo_root/dist"
-rolaunch_bin="$dist_dir/rolaunch-linux-amd64"
-
-build_minimal_rolaunch() {
-  mkdir -p "$dist_dir"
-  rm -f "$rolaunch_bin"
-  (cd tools/rolaunch && mise exec go@1.26.1 -- env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o "$rolaunch_bin" .)
-  if ! command -v upx >/dev/null; then
-    echo "upx is required to compress rolaunch for packer upload" >&2
-    exit 1
-  fi
-  upx -f -1 "$rolaunch_bin"
-  cp "$rolaunch_bin" "$custom_dir/files/rolaunch"
-}
-
-# add gpu install script
-cp patches/ubuntu/build/install-gpu.sh "$release_dir/images/ubuntu/scripts/build/"
-# install apt common packages in one transaction to avoid repeated apt service checks
-cp patches/ubuntu/build/install-apt-common.sh "$release_dir/images/ubuntu/scripts/build/"
-# restore runner install script
-cp patches/ubuntu/build/install-runner-package.sh "$release_dir/images/ubuntu/scripts/build/"
-
-# custom stuff
-mkdir -p $custom_dir
-cp -r patches/ubuntu/files $custom_dir/
-
-if [ "${IMAGE_ID:-}" = "ubuntu24-minimal-x64" ]; then
-  build_minimal_rolaunch
-fi
-
-# Save ~3.2GB by removing default docker images
-yq -oj -i '.docker.images = []' $TOOLSET_PATH
-
-# Use official runners for CodeQL
-yq -oj -i 'del(.toolcache[] | select(.name == "CodeQL"))' $TOOLSET_PATH
-# only keep last python version
-yq -oj -i 'eval(.toolcache[] | select(.name == "Python") | .versions |= [.[-1]])' $TOOLSET_PATH
-# only keep last node version in toolcache
-yq -oj -i 'eval(.toolcache[] | select(.name == "node") | .versions |= [.[-1]])' $TOOLSET_PATH
-# only keep one last pypy version
-yq -oj -i 'eval(.toolcache[] | select(.name == "PyPy") | .versions |= [.[-1]])' $TOOLSET_PATH
-# only keep one last go version
-yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .versions |= [.[-1]])' $TOOLSET_PATH
-yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
-# only keep one last clang version
-yq -oj -i 'eval(.clang | .versions |= [.[-1]])' $TOOLSET_PATH
-yq -oj -i 'eval(.clang | .default_version |= (parent | .versions[-1]))' $TOOLSET_PATH
-# only keep latest dotnet version
-yq -oj -i 'eval(.dotnet | .aptPackages |= [.[-1]])' $TOOLSET_PATH
-yq -oj -i 'eval(.dotnet | .versions |= [.[-1]])' $TOOLSET_PATH
-# remove PSScriptAnalyzer
-yq -oj -i 'eval(del(.powershellModules[] | select(.name == "PSScriptAnalyzer")))' $TOOLSET_PATH
-# only keep the default java version (use action to install additional, adds 5s)
-yq -oj -i 'eval(.java | .versions |= [(parent | .default)])' $TOOLSET_PATH
-# only keep the default android ndk version
-yq -oj -i 'eval(.android.ndk | .versions |= [(parent | .default)])' $TOOLSET_PATH
-# only keep latest gfortran version
-yq -oj -i 'eval(.gfortran | .versions |= [.[-1]])' $TOOLSET_PATH
-# only keep one last gcc version
-yq -oj -i 'eval(.gcc | .versions |= [.[-1]])' $TOOLSET_PATH
-# remove sphinxsearch
-yq -oj -i 'del(.apt.cmd_packages[] | select(. == "sphinxsearch"))' $TOOLSET_PATH
-
-# only keep yarn
-yq -oj -i 'del(.node_modules[] | (select(.name != "yarn" and .name != "typescript")))' $TOOLSET_PATH
-
-yq -oj -i 'del(.azureModules[])' $TOOLSET_PATH
-
-# Remove chromium since chrome already installed. 500MB saved
-# https://github.com/actions/runner-images/issues/2388
-# might need to add symlinks if causing issues, but let's see
-gnu_sed -i 's/apt-get install "\$chrome_deb_path" -f/\/usr\/bin\/apt-get -qq install "\$chrome_deb_path" -f/' $release_dir/images/ubuntu/scripts/build/install-google-chrome.sh
-gnu_sed -i 's|# Download and unpack Chromium|invoke_tests "Browsers" "Chrome" \&\& exit 0|' $release_dir/images/ubuntu/scripts/build/install-google-chrome.sh
-
-gnu_sed -i 's|download_url="https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"|kustomize_url=$(resolve_github_release_asset_url "kubernetes-sigs/kustomize" "endswith(\\"linux_${tools_arch}.tar.gz\\")" "latest")|' $release_dir/images/ubuntu/scripts/build/install-kubernetes-tools.sh
-gnu_sed -i 's#curl -fsSL "$download_url" | bash#kustomize_archive_path=$(download_with_retry "$kustomize_url")#' $release_dir/images/ubuntu/scripts/build/install-kubernetes-tools.sh
-gnu_sed -i '/tar -xzf "\$kustomize_archive_path"/d' $release_dir/images/ubuntu/scripts/build/install-kubernetes-tools.sh
-gnu_sed -i '/mv kustomize \/usr\/local\/bin/i tar -xzf "$kustomize_archive_path"' $release_dir/images/ubuntu/scripts/build/install-kubernetes-tools.sh
-
-gnu_sed -i 's/unzip "$aws_sam_cli_archive_path" -d \/tmp/unzip -qq "$aws_sam_cli_archive_path" -d \/tmp/' $release_dir/images/ubuntu/scripts/build/install-aws-tools.sh
-
-gnu_sed -i 's/apt-get install --no-install-recommends/\/usr\/bin\/apt-get -qq install --no-install-recommends/g' $release_dir/images/ubuntu/scripts/build/install-php.sh
-
-gnu_sed -i 's|mkdir $AGENT_TOOLSDIRECTORY|mkdir -p $AGENT_TOOLSDIRECTORY|' $release_dir/images/ubuntu/scripts/build/configure-environment.sh
+patch_ubuntu "$1"
