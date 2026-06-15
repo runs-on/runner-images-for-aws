@@ -86,20 +86,64 @@ module CopyAmi
 
     sleep 5
 
-    results = regions.map do |region|
-      process_region(
-        source_ami_id: ami_id,
-        target_name: name,
-        region: region,
-        wait_options: waiter_options,
-        ec2: client_factory.call(region),
-        out: out
-      )
-    end
+    results = process_regions(
+      source_ami_id: ami_id,
+      target_name: name,
+      regions: regions,
+      wait_options: waiter_options,
+      client_factory: client_factory,
+      out: out
+    )
 
     print_summary(results, waiter_options, out)
     write_release_summary(summary_json, ami_name: name, results: results) if summary_json
     results
+  end
+
+  def process_regions(source_ami_id:, target_name:, regions:, wait_options:, client_factory:, out: $stdout)
+    results = Array.new(regions.length)
+    thread_out = synchronized_output(out)
+
+    threads = regions.each_with_index.map do |region, index|
+      Thread.new do
+        results[index] = process_region(
+          source_ami_id: source_ami_id,
+          target_name: target_name,
+          region: region,
+          wait_options: wait_options,
+          ec2: client_factory.call(region),
+          out: thread_out
+        )
+      rescue StandardError => e
+        results[index] = build_result(region: region, status: "error", success: false, error: e.message)
+      end
+    end
+
+    threads.each(&:join)
+    results
+  end
+
+  def synchronized_output(out)
+    SynchronizedOutput.new(out)
+  end
+
+  class SynchronizedOutput
+    def initialize(out)
+      @out = out
+      @mutex = Mutex.new
+    end
+
+    def puts(*args)
+      @mutex.synchronize { @out.puts(*args) }
+    end
+
+    def print(*args)
+      @mutex.synchronize { @out.print(*args) }
+    end
+
+    def flush
+      @mutex.synchronize { @out.flush }
+    end
   end
 
   def write_release_summary(path, ami_name:, results:)
