@@ -29,6 +29,20 @@ enable_target_units() {
   target_systemctl enable "$@"
 }
 
+configure_needrestart_for_ci() {
+  local base_dir="${TARGET_ROOT_MOUNT:-}"
+  local conf_dir="${base_dir}/etc/needrestart/conf.d"
+
+  install -d "${conf_dir}"
+  cat > "${conf_dir}/99-runs-on-ci.conf" <<'EOF'
+# RunsOn executes the GitHub runner inside runs-on-bootstrap.service. Package
+# restart hooks must never restart that service while a job is active.
+$nrconf{restart} = 'l';
+$nrconf{override_rc}->{qr(^runs-on-bootstrap\.service$)} = 0;
+1;
+EOF
+}
+
 set_default_target_unit() {
   local target_unit="$1"
   local base_dir="${TARGET_ROOT_MOUNT:-}"
@@ -118,6 +132,8 @@ remove_ldconfig_symlinks() {
 
 log "disabling runner image units for variant ${variant}"
 
+configure_needrestart_for_ci
+
 disable_target_units timers.target
 disable_target_units \
   console-setup.service \
@@ -174,6 +190,10 @@ disable_target_units \
   libvirtd.service \
   systemd-machined.service
 disable_target_units mono-xsp4.service
+mask_target_units \
+  packagekit.service \
+  packagekit-offline-update.service \
+  packagekit-offline-update.timer
 
 if [[ "${variant}" == "minimal" ]]; then
   disable_target_units ssh.service ssh.socket ldconfig.service
