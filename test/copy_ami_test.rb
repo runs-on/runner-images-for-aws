@@ -2,6 +2,7 @@ require "minitest/autorun"
 require "json"
 require "stringio"
 require "tmpdir"
+require "timeout"
 load File.expand_path("../bin/copy-ami", __dir__)
 
 FakeEbs = Struct.new(:snapshot_id)
@@ -13,11 +14,12 @@ FakeCopyImageResponse = Struct.new(:image_id)
 class FakeEc2Client
   attr_reader :copied_names, :published_images, :published_snapshots
 
-  def initialize(images_by_name: {}, images_by_id: {}, wait_errors: {}, copy_image_id: nil)
+  def initialize(images_by_name: {}, images_by_id: {}, wait_errors: {}, copy_image_id: nil, on_wait: nil)
     @images_by_name = images_by_name
     @images_by_id = images_by_id
     @wait_errors = wait_errors
     @copy_image_id = copy_image_id
+    @on_wait = on_wait
     @copied_names = []
     @published_images = []
     @published_snapshots = []
@@ -41,6 +43,8 @@ class FakeEc2Client
   end
 
   def wait_until(waiter_name, params)
+    @on_wait&.call(waiter_name, params)
+
     error = @wait_errors[waiter_name]
     raise error if error
 
@@ -189,6 +193,49 @@ class CopyAmiTest < Minitest::Test
       refute_includes summary.fetch("regions").first.keys, "snapshot_id"
       refute_includes summary.fetch("regions").first.keys, "status"
     end
+  end
+
+  def test_regions_are_processed_in_parallel_and_results_keep_input_order
+    started_regions = Queue.new
+    release_first_region = Queue.new
+    out = StringIO.new
+
+    copy_thread = Thread.new do
+      CopyAmi.process_regions(
+        source_ami_id: "ami-source",
+        target_name: "runs-on-v2.2-ubuntu24-full-x64-123",
+        regions: %w[us-east-1 eu-west-1],
+        wait_options: CopyAmi::DEFAULT_WAIT_OPTIONS,
+        client_factory: lambda { |region|
+          image = build_image(image_id: "ami-#{region}", name: "runs-on-v2.2-ubuntu24-full-x64-123", state: "available", public: false)
+          FakeEc2Client.new(
+            images_by_name: { image.name => image },
+            images_by_id: { image.image_id => image },
+            on_wait: lambda { |waiter_name, _params|
+              next unless waiter_name == :image_available
+
+              started_regions << region
+              release_first_region.pop if region == "us-east-1"
+            }
+          )
+        },
+        out: out
+      )
+    end
+
+    first_started = Timeout.timeout(1) { started_regions.pop }
+    second_started = Timeout.timeout(1) { started_regions.pop }
+
+    assert_equal %w[eu-west-1 us-east-1], [first_started, second_started].sort
+
+    release_first_region << true
+    results = Timeout.timeout(5) { copy_thread.value }
+
+    assert_equal %w[us-east-1 eu-west-1], results.map { |result| result.fetch(:region) }
+    assert_equal [true, true], results.map { |result| result.fetch(:success) }
+  ensure
+    release_first_region << true if defined?(release_first_region)
+    copy_thread&.kill if defined?(copy_thread) && copy_thread&.alive?
   end
 
   private

@@ -24,6 +24,7 @@ GEM
     colorize (1.1.0)
     jmespath (1.6.2)
     logger (1.7.0)
+    minitest (5.20.0)
     net-ssh (7.3.0)
     ox (2.14.23)
       bigdecimal (>= 3.0)
@@ -42,6 +43,7 @@ DEPENDENCIES
   aws-sdk-ec2
   aws-sdk-servicequotas
   colorize
+  minitest
   net-ssh
   ox
   slop
