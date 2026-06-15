@@ -21,7 +21,7 @@ usage = Slop::Options.new do |opts|
   opts.string '--image-id', 'Image ID', required: true
   opts.string '--image-prefix', 'Image Prefix', default: ENV.fetch('AMI_PREFIX', "runs-on-dev")
   opts.string '--image-version', 'Image Version', default: Time.now.strftime("%Y%m%d%H%M%S")
-  opts.string '--subnet-id', 'Subnet ID to use, or legacy fallback to tag when no tagged subnet exists', default: nil
+  opts.string '--subnet-id', 'Override subnet selection; tags this subnet if no tagged subnet exists', default: nil
   opts.string '--log-file', 'Path to write Packer output (defaults to a temporary file)', default: nil
   opts.string '--region', 'Region', default: ENV.fetch('AWS_DEFAULT_REGION', "us-east-1")
   opts.boolean '--debug', 'Debug mode', default: false
@@ -115,6 +115,11 @@ def subnet_summary(subnet)
   "#{subnet.subnet_id} (#{subnet.availability_zone}, vpc #{subnet.vpc_id})"
 end
 
+def preferred_subnet(subnets)
+  # AWS does not guarantee response ordering; prefer the earliest AZ for repeatable builds.
+  subnets.min_by { |subnet| [subnet.availability_zone, subnet.subnet_id] }
+end
+
 def ensure_subnet_tag(ec2_client:, subnet_id:, tag_key:, tag_value:)
   subnet = ec2_client.describe_subnets(subnet_ids: [subnet_id]).subnets.first
   existing_value = subnet.tags&.find { |tag| tag.key == tag_key }&.value
@@ -178,10 +183,9 @@ def resolve_subnet_id(ec2_client:, tag_key:, tag_value:, instance_type:, fallbac
     fail("No tagged subnet can launch #{instance_type} with public SSH access:\n#{details}")
   end
 
-  subnet = valid_subnets.first
-  valid_ids = valid_subnets.map(&:subnet_id).join(", ")
-  puts "Multiple valid tagged subnets found for #{tag_key}=#{tag_value}: #{valid_ids}"
-  puts "Using first valid tagged subnet #{subnet_summary(subnet)}"
+  valid_ids = valid_subnets.map(&:subnet_id).sort.join(", ")
+  subnet = preferred_subnet(valid_subnets)
+  puts "Multiple valid tagged subnets found for #{tag_key}=#{tag_value}: #{valid_ids}. Auto-selecting #{subnet_summary(subnet)}. Pass --subnet-id to override."
   puts details
   subnet.subnet_id
 end
