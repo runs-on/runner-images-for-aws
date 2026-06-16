@@ -60,6 +60,11 @@ variable "ami_regions" {
   type = list(string)
 }
 
+variable "ami_public" {
+  type    = bool
+  default = true
+}
+
 variable "source_ami_owner" {
   type = string
 }
@@ -111,7 +116,7 @@ source "amazon-ebs" "build_ebs" {
   ami_description                           = "${var.ami_description}"
   ami_virtualization_type                   = "hvm"
   # make AMIs publicly accessible
-  ami_groups    = ["all"]
+  ami_groups    = var.ami_public ? ["all"] : []
   ebs_optimized = true
   # spot_instance_types                       = ["r7a.large", "r7i.large", "m7a.xlarge", "c7a.xlarge", "m7i-flex.xlarge"]
   # spot_price                                = "1.00"
@@ -126,7 +131,7 @@ source "amazon-ebs" "build_ebs" {
   ami_regions = "${var.ami_regions}"
 
   // make underlying snapshot public
-  snapshot_groups = ["all"]
+  snapshot_groups = var.ami_public ? ["all"] : []
 
   launch_block_device_mappings {
     device_name           = "/dev/sda1"
@@ -347,9 +352,9 @@ build {
   // }
 
   provisioner "shell" {
-    environment_vars = ["HELPER_SCRIPT_FOLDER=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}", "IMAGE_FOLDER=${var.image_folder}"]
+    environment_vars = ["HELPER_SCRIPT_FOLDER=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}", "IMAGE_FOLDER=${var.image_folder}", "RUNNER_FINALIZE_UNITS_MODE=package-restarts-only"]
     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = ["${path.root}/../scripts/build/configure-system.sh", "${path.root}/../custom/files/after-reboot.sh"]
+    scripts          = ["${path.root}/../custom/files/runner-finalize-units.sh", "${path.root}/../scripts/build/configure-system.sh", "${path.root}/../custom/files/after-reboot.sh"]
   }
 
   // provisioner "shell" {

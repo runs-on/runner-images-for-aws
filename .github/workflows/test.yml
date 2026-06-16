@@ -140,6 +140,24 @@ jobs:
           sudo lsblk -l
       - name: env
         run: env | sort
+      - name: Check package restart guards
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -d /etc/needrestart ]]; then
+            sudo test -f /etc/needrestart/conf.d/99-runs-on-ci.conf
+            sudo grep -F "\$nrconf{restart} = 'l';" /etc/needrestart/conf.d/99-runs-on-ci.conf
+            sudo grep -F "runs-on-bootstrap\\.service" /etc/needrestart/conf.d/99-runs-on-ci.conf
+          fi
+
+          for unit in packagekit.service packagekit-offline-update.service packagekit-offline-update.timer; do
+            if systemctl list-unit-files "$unit" --no-legend --no-pager | grep -q "^$unit"; then
+              state="$(systemctl is-enabled "$unit" || true)"
+              echo "$unit=$state"
+              test "$state" = "masked"
+            fi
+          done
       - name: Ensure apt-get update is working
         run: sudo apt-get update
       - name: Ensure code can be checked out

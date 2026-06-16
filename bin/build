@@ -269,6 +269,8 @@ log_file_path = options[:log_file] || default_log_file
 puts "Using Packer command log file: #{log_file_path}"
 custom_amazon_plugin_binary = ENV.fetch('PACKER_AMAZON_PLUGIN_BINARY', '').strip
 custom_plugin_path = ""
+ami_public = ENV.fetch("AMI_PUBLIC", "true")
+fail("AMI_PUBLIC must be true or false") unless %w[true false].include?(ami_public)
 
 # Ensure template directory exists
 FileUtils.mkdir_p(File.dirname(packer_template_path))
@@ -376,6 +378,9 @@ if packer_template_content.include?('variable "toolset_file"')
 end
 if packer_template_content.include?('variable "install_scripts"')
   shared_template_vars += ["-var", "install_scripts=#{JSON.generate(image.fetch('install_scripts', []))}"]
+end
+if packer_template_content.include?('variable "ami_public"')
+  shared_template_vars += ["-var", "ami_public=#{ami_public}"]
 end
 
 packer_build_cmd = [

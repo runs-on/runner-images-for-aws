@@ -4,6 +4,7 @@ set -euo pipefail
 
 TARGET_ROOT_MOUNT="${TARGET_ROOT_MOUNT:-}"
 variant="${RUNNER_FINALIZE_VARIANT:-${1:-full}}"
+mode="${RUNNER_FINALIZE_UNITS_MODE:-all}"
 
 log() {
   echo "[runner-finalize-units] $*"
@@ -41,6 +42,13 @@ $nrconf{restart} = 'l';
 $nrconf{override_rc}->{qr(^runs-on-bootstrap\.service$)} = 0;
 1;
 EOF
+}
+
+mask_package_restart_units() {
+  mask_target_units \
+    packagekit.service \
+    packagekit-offline-update.service \
+    packagekit-offline-update.timer
 }
 
 set_default_target_unit() {
@@ -133,6 +141,12 @@ remove_ldconfig_symlinks() {
 log "disabling runner image units for variant ${variant}"
 
 configure_needrestart_for_ci
+mask_package_restart_units
+
+if [[ "${mode}" == "package-restarts-only" ]]; then
+  log "package restart guards applied"
+  exit 0
+fi
 
 disable_target_units timers.target
 disable_target_units \
@@ -190,10 +204,6 @@ disable_target_units \
   libvirtd.service \
   systemd-machined.service
 disable_target_units mono-xsp4.service
-mask_target_units \
-  packagekit.service \
-  packagekit-offline-update.service \
-  packagekit-offline-update.timer
 
 if [[ "${variant}" == "minimal" ]]; then
   disable_target_units ssh.service ssh.socket ldconfig.service
