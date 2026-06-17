@@ -80,10 +80,7 @@
       "name": "PSWindowsUpdate"
     },
     {
-      "name": "SqlServer",
-      "versions": [
-        "22.3.0"
-      ]
+      "name": "SqlServer"
     },
     {
       "name": "VSSetup"
@@ -386,6 +383,6 @@
     "version": "3.*"
   },
   "pwsh": {
-    "version": "7.4"
+    "version": "7.6"
   }
 }
