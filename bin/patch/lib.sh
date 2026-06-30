@@ -50,6 +50,8 @@ patch_ubuntu() {
   cp patches/ubuntu/build/install-apt-common.sh "$build_dir/"
   # restore runner install script
   cp patches/ubuntu/build/install-runner-package.sh "$build_dir/"
+  # add runs-on/action@v2 to action archive cache
+  cp patches/ubuntu/build/install-actions-cache.sh "$build_dir/"
 
   ## Custom files
   mkdir -p $custom_dir
