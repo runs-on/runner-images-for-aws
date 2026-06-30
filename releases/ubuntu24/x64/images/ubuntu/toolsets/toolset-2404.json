@@ -33,9 +33,9 @@
       "arch": "x64",
       "platform": "linux",
       "versions": [
-        "1.25.*"
+        "1.26.*"
       ],
-      "default": "1.25.*"
+      "default": "1.26.*"
     },
     {
       "name": "Ruby",
@@ -113,6 +113,7 @@
       "libyaml-dev",
       "libtool",
       "libssl-dev",
+      "libicu-dev",
       "libsqlite3-dev",
       "locales",
       "mercurial",
