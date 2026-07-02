@@ -16,4 +16,15 @@ class UbuntuTemplateTest < Minitest::Test
 
     assert_empty offenders
   end
+
+  def test_templates_do_not_run_azure_apt_sources_rewrite
+    # configure-apt-sources.sh is Azure-specific upstream behavior. In AWS
+    # copied AMIs it freezes the build-region apt mirror into cloud-init's
+    # runtime template instead of letting apt_configure choose the EC2 region.
+    offenders = Dir[File.join(TEMPLATE_DIR, "*.pkr.hcl")].filter_map do |template|
+      File.basename(template) if File.read(template).include?("configure-apt-sources.sh")
+    end
+
+    assert_empty offenders
+  end
 end

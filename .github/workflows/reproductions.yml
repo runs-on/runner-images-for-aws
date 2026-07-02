@@ -50,6 +50,36 @@ jobs:
           test -n "$ImageOS" || (echo "ERROR: ImageOS is not set" && exit 1)
           test -n "$ImageVersion" || (echo "ERROR: ImageVersion is not set" && exit 1)
 
+  apt-mirror-ubuntu24-dev-x64:
+    name: Regional apt mirror on ubuntu24-dev-x64
+    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-dev-x64
+    steps:
+      - name: Check apt mirror region
+        run: |
+          set -euo pipefail
+
+          region="$(jq -r '.v1.region // empty' /run/cloud-init/instance-data.json)"
+          test -n "$region"
+
+          sources=()
+          [ ! -f /etc/apt/sources.list ] || sources+=(/etc/apt/sources.list)
+          [ ! -f /etc/apt/sources.list.d/ubuntu.sources ] || sources+=(/etc/apt/sources.list.d/ubuntu.sources)
+          if [ "${#sources[@]}" -eq 0 ]; then
+            echo "No apt sources found" >&2
+            exit 1
+          fi
+
+          sed -n '1,120p' "${sources[@]}"
+          if ! grep -E "https?://${region}\.ec2\.(archive|ports)\.ubuntu\.com/" "${sources[@]}"; then
+            echo "Expected apt sources to use an EC2 mirror in $region" >&2
+            exit 1
+          fi
+          if [ "$region" != "us-east-1" ] && grep -E 'https?://us-east-1\.ec2\.(archive|ports)\.ubuntu\.com/' "${sources[@]}"; then
+            echo "Found stale us-east-1 apt mirror on a $region runner" >&2
+            exit 1
+          fi
+
+          sudo apt-get update -y
   issue-19-windows25-hyperv-vs-cpp:
     name: issue-19 windows25 Hyper-V + VS + C++
     runs-on: runs-on=${{ github.run_id }}/image=windows25-dev-x64/family=m8i
