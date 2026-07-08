@@ -80,6 +80,7 @@ kustomize_hash=$(get_checksum_from_url "https://github.com/kubernetes-sigs/kusto
 use_checksum_comparison "$kustomize_archive_path" "$kustomize_hash"
 
 tmp_dir=$(mktemp -d)
+tar -xzf "$kustomize_archive_path" -C "$tmp_dir"
 mv "$tmp_dir/kustomize" /usr/local/bin
 rm -rf "$tmp_dir" "$kustomize_archive_path"
 
