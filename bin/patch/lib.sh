@@ -39,10 +39,7 @@ patch_ubuntu() {
   rolaunch_bin="$dist_dir/rolaunch-linux-$goarch"
 
   ## Script overrides
-  if [ "$ARCH" = "arm64" ]; then
-    # override powershell install (upstream tarball URL is x64-only friendly)
-    cp patches/ubuntu/build/install-powershell.sh "$build_dir/"
-  else
+  if [ "$ARCH" = "x64" ]; then
     # add gpu install script
     cp patches/ubuntu/build/install-gpu.sh "$build_dir/"
   fi
@@ -138,11 +135,6 @@ patch_ubuntu() {
   # might need to add symlinks if causing issues, but let's see
   gnu_sed -i 's/apt-get install "\$chrome_deb_path" -f/\/usr\/bin\/apt-get -qq install "\$chrome_deb_path" -f/' $build_dir/install-google-chrome.sh
   gnu_sed -i 's|# Download and unpack Chromium|invoke_tests "Browsers" "Chrome" \&\& exit 0|' $build_dir/install-google-chrome.sh
-
-  gnu_sed -i 's|download_url="https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh"|kustomize_url=$(resolve_github_release_asset_url "kubernetes-sigs/kustomize" "endswith(\\"linux_${tools_arch}.tar.gz\\")" "latest")|' $build_dir/install-kubernetes-tools.sh
-  gnu_sed -i 's#curl -fsSL "$download_url" | bash#kustomize_archive_path=$(download_with_retry "$kustomize_url")#' $build_dir/install-kubernetes-tools.sh
-  gnu_sed -i '/tar -xzf "\$kustomize_archive_path"/d' $build_dir/install-kubernetes-tools.sh
-  gnu_sed -i '/mv kustomize \/usr\/local\/bin/i tar -xzf "$kustomize_archive_path"' $build_dir/install-kubernetes-tools.sh
 
   gnu_sed -i 's/unzip "$aws_sam_cli_archive_path" -d \/tmp/unzip -qq "$aws_sam_cli_archive_path" -d \/tmp/' $build_dir/install-aws-tools.sh
 
