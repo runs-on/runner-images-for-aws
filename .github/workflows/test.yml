@@ -142,6 +142,8 @@ jobs:
         run: env | sort
       - name: Ensure apt-get update is working
         run: sudo apt-get update
+      - name: Ensure PackageKit APT hook is absent
+        run: test ! -e /etc/apt/apt.conf.d/20packagekit
       - name: Ensure code can be checked out
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - name: Docker
