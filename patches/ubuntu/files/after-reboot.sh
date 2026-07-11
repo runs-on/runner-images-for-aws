@@ -6,7 +6,15 @@ tune2fs -c 0 $(cat /proc/self/mounts | grep " / " | cut -f 1 -d " ")
 
 # Stopped-pool preparation masks polkit. If PackageKit remains installed, its
 # APT hook waits for a DBus activation that cannot initialize after resume.
-DEBIAN_FRONTEND=noninteractive apt-get purge -y packagekit packagekit-tools
+packagekit_packages=()
+for package in packagekit packagekit-tools; do
+  if dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null | grep -qx installed; then
+    packagekit_packages+=("$package")
+  fi
+done
+if (( ${#packagekit_packages[@]} )); then
+  DEBIAN_FRONTEND=noninteractive apt-get purge -y "${packagekit_packages[@]}"
+fi
 test ! -e /etc/apt/apt.conf.d/20packagekit
 
 rm -rf /var/lib/apt/lists
