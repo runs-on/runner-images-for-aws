@@ -69,7 +69,10 @@
       "name": "Microsoft.Graph"
     },
     {
-      "name": "Pester"
+      "name": "Pester",
+      "versions": [
+        "5.9.0"
+      ]
     }
   ],
   "azureModules": [],
