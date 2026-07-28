@@ -50,16 +50,13 @@ jobs:
           test -n "$ImageOS" || (echo "ERROR: ImageOS is not set" && exit 1)
           test -n "$ImageVersion" || (echo "ERROR: ImageVersion is not set" && exit 1)
 
-  apt-mirror-ubuntu24-dev-x64:
-    name: Regional apt mirror on ubuntu24-dev-x64
+  issue-61-apt-cdn-ubuntu24-full-x64:
+    name: issue 61 CDN apt mirror on ubuntu24-full-x64
     runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-dev-x64
     steps:
-      - name: Check apt mirror region
+      - name: Check apt mirror and acquire settings
         run: |
           set -euo pipefail
-
-          region="$(jq -r '.v1.region // empty' /run/cloud-init/instance-data.json)"
-          test -n "$region"
 
           sources=()
           [ ! -f /etc/apt/sources.list ] || sources+=(/etc/apt/sources.list)
@@ -70,15 +67,18 @@ jobs:
           fi
 
           sed -n '1,120p' "${sources[@]}"
-          if ! grep -E "https?://${region}\.ec2\.(archive|ports)\.ubuntu\.com/" "${sources[@]}"; then
-            echo "Expected apt sources to use an EC2 mirror in $region" >&2
+          if ! grep -E 'https://archive\.ubuntu\.com/ubuntu/?' "${sources[@]}"; then
+            echo "Expected apt sources to use archive.ubuntu.com" >&2
             exit 1
           fi
-          if [ "$region" != "us-east-1" ] && grep -E 'https?://us-east-1\.ec2\.(archive|ports)\.ubuntu\.com/' "${sources[@]}"; then
-            echo "Found stale us-east-1 apt mirror on a $region runner" >&2
+          if grep -E 'https?://[^/]+\.ec2\.(archive|ports)\.ubuntu\.com/' "${sources[@]}"; then
+            echo "Found a regional EC2 apt mirror" >&2
             exit 1
           fi
 
+          apt-config dump | grep -Fx 'Acquire::Retries "5";'
+          apt-config dump | grep -Fx 'Acquire::http::Timeout "20";'
+          apt-config dump | grep -Fx 'Acquire::https::Timeout "20";'
           sudo apt-get update -y
   issue-19-windows25-hyperv-vs-cpp:
     name: issue-19 windows25 Hyper-V + VS + C++

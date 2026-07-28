@@ -31,8 +31,6 @@ const (
 	defaultHostKeyPath        = "/etc/ssh/ssh_host_ed25519_key"
 	defaultResolverConfigPath = "/etc/resolv.conf"
 	defaultEC2Resolver        = "169.254.169.253"
-	defaultAptSourcesListPath = "/etc/apt/sources.list"
-	defaultAptSourcesDeb822   = "/etc/apt/sources.list.d/ubuntu.sources"
 	defaultTimingsPath        = defaultWorkDir + "/timings.json"
 	defaultRunnerListenerPath = "/home/runner/bin/Runner.Listener"
 	defaultRunnerUser         = "runner"
@@ -40,8 +38,6 @@ const (
 	defaultReadinessInterval  = 50 * time.Millisecond
 	enableRunnerWarmup        = false
 )
-
-var ubuntuArchiveMirrorPattern = regexp.MustCompile(`https?://(?:(?:azure|[a-z0-9-]+\.ec2)\.)?archive\.ubuntu\.com/ubuntu/?`)
 
 // NOTE: cloud-initramfs-growroot and cloud-guest-utils are still useful if root-volume resize
 // support is required later, even if they are not part of this first iteration.
@@ -119,7 +115,6 @@ type launcherOps struct {
 	prefetchMatchingBootstrap   func(context.Context, config, string, []byte) (bool, error)
 	prefetchAgentConfigFiles    func(context.Context, config, instanceIdentity, []byte) error
 	markerMatchesInstance       func(string, string) (bool, error)
-	applyLocalAptMirror         func(string) error
 	installAuthorizedKey        func([]byte) error
 	prepareUserData             func(string, []byte) error
 	executeUserData             func(context.Context, config) error
@@ -154,7 +149,6 @@ func defaultLauncherOps() launcherOps {
 			return awsState.prefetchAgentConfigFiles(ctx, cfg, identity, raw)
 		},
 		markerMatchesInstance:       markerMatchesInstance,
-		applyLocalAptMirror:         applyLocalAptMirror,
 		installAuthorizedKey:        installAuthorizedKey,
 		prepareUserData:             prepareUserData,
 		executeUserData:             executeUserDataScript,
@@ -318,9 +312,6 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 	persistIdentity()
 
 	applyTasks := []asyncResult[struct{}]{
-		startAsyncTask(func() error {
-			return ops.applyLocalAptMirror(identity.Region)
-		}),
 		startAsyncTask(func() error {
 			return ops.installAuthorizedKey(publicKey)
 		}),
@@ -767,54 +758,6 @@ func growableSectorsAtEnd(diskSectors, partStartSectors, partSectors int64) int6
 	}
 
 	return growable
-}
-
-func applyLocalAptMirror(region string) error {
-	mirror := fmt.Sprintf("http://%s.ec2.archive.ubuntu.com/ubuntu", region)
-	updatedPaths := make([]string, 0, 2)
-	for _, path := range []string{defaultAptSourcesListPath, defaultAptSourcesDeb822} {
-		updated, err := rewriteAptSourcesFile(path, mirror)
-		if err != nil {
-			return err
-		}
-		if updated {
-			updatedPaths = append(updatedPaths, path)
-		}
-	}
-
-	if len(updatedPaths) > 0 {
-		log.Printf("configured apt archive mirror %s in %s", mirror, strings.Join(updatedPaths, ", "))
-	}
-
-	return nil
-}
-
-func rewriteAptSourcesFile(path string, mirror string) (bool, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("read apt sources (%s): %w", path, err)
-	}
-
-	updated, changed := rewriteUbuntuArchiveMirrors(raw, mirror)
-	if !changed {
-		return false, nil
-	}
-
-	if err := os.WriteFile(path, updated, 0o644); err != nil {
-		return false, fmt.Errorf("write apt sources (%s): %w", path, err)
-	}
-	return true, nil
-}
-
-func rewriteUbuntuArchiveMirrors(raw []byte, mirror string) ([]byte, bool) {
-	updated := ubuntuArchiveMirrorPattern.ReplaceAllString(string(raw), mirror)
-	if updated == string(raw) {
-		return raw, false
-	}
-	return []byte(updated), true
 }
 
 func installAuthorizedKey(key []byte) error {
