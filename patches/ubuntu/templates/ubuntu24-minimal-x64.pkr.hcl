@@ -249,8 +249,8 @@ build {
       "TARGET_VOLUME_SIZE_GB=${var.volume_size}",
       "TARGET_ARCH=amd64",
       "UBUNTU_RELEASE=noble",
-      "UBUNTU_MIRROR=http://${var.region}.ec2.archive.ubuntu.com/ubuntu",
-      "UBUNTU_SECURITY_MIRROR=http://security.ubuntu.com/ubuntu",
+      "UBUNTU_MIRROR=https://archive.ubuntu.com/ubuntu",
+      "UBUNTU_SECURITY_MIRROR=https://security.ubuntu.com/ubuntu",
       "ROLAUNCH_SOURCE=/tmp/rolaunch",
       "GROW_ROOTFS_SCRIPT_SOURCE=${var.image_folder}/grow-rootfs.sh",
       "TARGET_ROOT_MOUNT=/mnt/minimal-root",
@@ -274,8 +274,8 @@ build {
       "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}",
       "DEBIAN_FRONTEND=noninteractive",
       "TARGET_ROOT_MOUNT=/mnt/minimal-root",
-      "TARGET_UBUNTU_MIRROR=http://${var.region}.ec2.archive.ubuntu.com/ubuntu/",
-      "TARGET_UBUNTU_SECURITY_MIRROR=http://security.ubuntu.com/ubuntu/",
+      "TARGET_UBUNTU_MIRROR=https://archive.ubuntu.com/ubuntu/",
+      "TARGET_UBUNTU_SECURITY_MIRROR=https://security.ubuntu.com/ubuntu/",
       "WAAGENT_CONFIG_SOURCE=/tmp/waagent.conf"
     ]
     execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"

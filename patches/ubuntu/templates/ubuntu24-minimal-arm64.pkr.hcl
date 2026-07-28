@@ -249,8 +249,8 @@ build {
       "TARGET_VOLUME_SIZE_GB=${var.volume_size}",
       "TARGET_ARCH=arm64",
       "UBUNTU_RELEASE=noble",
-      "UBUNTU_MIRROR=http://${var.region}.ec2.ports.ubuntu.com/ubuntu-ports",
-      "UBUNTU_SECURITY_MIRROR=http://${var.region}.ec2.ports.ubuntu.com/ubuntu-ports",
+      "UBUNTU_MIRROR=https://ports.ubuntu.com/ubuntu-ports",
+      "UBUNTU_SECURITY_MIRROR=https://ports.ubuntu.com/ubuntu-ports",
       "ROLAUNCH_SOURCE=/tmp/rolaunch",
       "GROW_ROOTFS_SCRIPT_SOURCE=${var.image_folder}/grow-rootfs.sh",
       "TARGET_ROOT_MOUNT=/mnt/minimal-root",
@@ -274,8 +274,8 @@ build {
       "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}",
       "DEBIAN_FRONTEND=noninteractive",
       "TARGET_ROOT_MOUNT=/mnt/minimal-root",
-      "TARGET_UBUNTU_MIRROR=http://${var.region}.ec2.ports.ubuntu.com/ubuntu-ports/",
-      "TARGET_UBUNTU_SECURITY_MIRROR=http://${var.region}.ec2.ports.ubuntu.com/ubuntu-ports/",
+      "TARGET_UBUNTU_MIRROR=https://ports.ubuntu.com/ubuntu-ports/",
+      "TARGET_UBUNTU_SECURITY_MIRROR=https://ports.ubuntu.com/ubuntu-ports/",
       "WAAGENT_CONFIG_SOURCE=/tmp/waagent.conf"
     ]
     execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"

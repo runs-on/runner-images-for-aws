@@ -50,6 +50,13 @@ patch_ubuntu() {
   # add runs-on/action@v2 to action archive cache
   cp patches/ubuntu/build/install-actions-cache.sh "$build_dir/"
 
+  # Use effective retry settings and fail quickly enough to recover from an
+  # unresponsive package endpoint within a typical CI job timeout.
+  gnu_sed -i 's/Enable retry logic for apt up to 10 times/Enable retry logic for apt up to 5 times/' "$build_dir/configure-apt.sh"
+  gnu_sed -i 's/APT::Acquire::Retries \\"10\\"/Acquire::Retries \\"5\\"/' "$build_dir/configure-apt.sh"
+  gnu_sed -i '/Acquire::http::Pipeline-Depth 0;/a Acquire::http::Timeout "20";' "$build_dir/configure-apt.sh"
+  gnu_sed -i '/Acquire::https::Pipeline-Depth 0;/a Acquire::https::Timeout "20";' "$build_dir/configure-apt.sh"
+
   ## Custom files
   mkdir -p $custom_dir
   cp -r patches/ubuntu/files $custom_dir/

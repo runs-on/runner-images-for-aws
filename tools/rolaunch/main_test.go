@@ -47,48 +47,6 @@ func TestEnsureResolverConfigRewritesUnexpectedResolver(t *testing.T) {
 	}
 }
 
-func TestRewriteUbuntuArchiveMirrorsSourcesList(t *testing.T) {
-	t.Parallel()
-
-	raw := []byte("deb http://us-east-1.ec2.archive.ubuntu.com/ubuntu noble main\n" +
-		"deb http://security.ubuntu.com/ubuntu noble-security main\n")
-
-	updated, changed := rewriteUbuntuArchiveMirrors(raw, "http://eu-west-3.ec2.archive.ubuntu.com/ubuntu")
-	if !changed {
-		t.Fatal("expected archive mirror rewrite")
-	}
-
-	want := "deb http://eu-west-3.ec2.archive.ubuntu.com/ubuntu noble main\n" +
-		"deb http://security.ubuntu.com/ubuntu noble-security main\n"
-	if got := string(updated); got != want {
-		t.Fatalf("unexpected rewritten sources.list contents: %q", got)
-	}
-}
-
-func TestRewriteUbuntuArchiveMirrorsDeb822Sources(t *testing.T) {
-	t.Parallel()
-
-	raw := []byte("Types: deb\n" +
-		"URIs: http://azure.archive.ubuntu.com/ubuntu/\n" +
-		"Suites: noble noble-updates noble-backports\n" +
-		"Components: main restricted universe multiverse\n" +
-		"Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n")
-
-	updated, changed := rewriteUbuntuArchiveMirrors(raw, "http://eu-west-3.ec2.archive.ubuntu.com/ubuntu")
-	if !changed {
-		t.Fatal("expected archive mirror rewrite")
-	}
-
-	want := "Types: deb\n" +
-		"URIs: http://eu-west-3.ec2.archive.ubuntu.com/ubuntu\n" +
-		"Suites: noble noble-updates noble-backports\n" +
-		"Components: main restricted universe multiverse\n" +
-		"Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg\n"
-	if got := string(updated); got != want {
-		t.Fatalf("unexpected rewritten ubuntu.sources contents: %q", got)
-	}
-}
-
 func TestRunFetchesIdentityWithoutWaitingForLocalPrep(t *testing.T) {
 	cfg := testConfig(t.TempDir())
 	ops := testLauncherOps()
@@ -225,10 +183,6 @@ func TestRunCancelsMetadataFetchesWhenMarkerAlreadyMatches(t *testing.T) {
 	ops.markerMatchesInstance = func(string, string) (bool, error) {
 		return true, nil
 	}
-	ops.applyLocalAptMirror = func(string) error {
-		unexpectedCalls <- "mirror"
-		return nil
-	}
 	ops.installAuthorizedKey = func([]byte) error {
 		unexpectedCalls <- "key"
 		return nil
@@ -257,11 +211,9 @@ func TestRunExecutesUserDataOnlyAfterApplyPhaseCompletes(t *testing.T) {
 	cfg := testConfig(t.TempDir())
 	ops := testLauncherOps()
 
-	mirrorCalled := make(chan struct{})
 	keyCalled := make(chan struct{})
 	prepareCalled := make(chan struct{})
 	executeStarted := make(chan struct{})
-	mirrorRelease := make(chan struct{})
 	keyRelease := make(chan struct{})
 	prepareRelease := make(chan struct{})
 	prefetchCalled := make(chan struct{})
@@ -288,11 +240,6 @@ func TestRunExecutesUserDataOnlyAfterApplyPhaseCompletes(t *testing.T) {
 		<-configPrefetchRelease
 		return nil
 	}
-	ops.applyLocalAptMirror = func(string) error {
-		close(mirrorCalled)
-		<-mirrorRelease
-		return nil
-	}
 	ops.installAuthorizedKey = func([]byte) error {
 		close(keyCalled)
 		<-keyRelease
@@ -312,15 +259,11 @@ func TestRunExecutesUserDataOnlyAfterApplyPhaseCompletes(t *testing.T) {
 		return runWithOps(context.Background(), cfg, ops)
 	})
 
-	waitForSignal(t, mirrorCalled, "apt mirror apply")
 	waitForSignal(t, keyCalled, "authorized key install")
 	waitForSignal(t, prepareCalled, "userdata preparation")
 	waitForSignal(t, prefetchCalled, "bootstrap prefetch")
 	waitForSignal(t, configPrefetchCalled, "agent config prefetch")
 	assertNotSignaled(t, executeStarted, "userdata execution before apply completion")
-
-	close(mirrorRelease)
-	assertNotSignaled(t, executeStarted, "userdata execution after mirror completion")
 
 	close(keyRelease)
 	assertNotSignaled(t, executeStarted, "userdata execution after key completion")
@@ -951,7 +894,6 @@ func testLauncherOps() launcherOps {
 		markerMatchesInstance: func(string, string) (bool, error) {
 			return false, nil
 		},
-		applyLocalAptMirror:  func(string) error { return nil },
 		installAuthorizedKey: func([]byte) error { return nil },
 		prepareUserData:      func(string, []byte) error { return nil },
 		executeUserData:      func(context.Context, config) error { return nil },
