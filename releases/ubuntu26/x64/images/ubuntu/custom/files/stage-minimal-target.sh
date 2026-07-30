@@ -4,8 +4,8 @@ set -euo pipefail
 
 TARGET_ROOT_MOUNT="${TARGET_ROOT_MOUNT:-/mnt/minimal-root}"
 IMAGE_FOLDER="${IMAGE_FOLDER:-/imagegeneration}"
-TARGET_UBUNTU_MIRROR="${TARGET_UBUNTU_MIRROR:-http://archive.ubuntu.com/ubuntu/}"
-TARGET_UBUNTU_SECURITY_MIRROR="${TARGET_UBUNTU_SECURITY_MIRROR:-http://security.ubuntu.com/ubuntu/}"
+TARGET_UBUNTU_MIRROR="${TARGET_UBUNTU_MIRROR:-https://archive.ubuntu.com/ubuntu/}"
+TARGET_UBUNTU_SECURITY_MIRROR="${TARGET_UBUNTU_SECURITY_MIRROR:-https://security.ubuntu.com/ubuntu/}"
 WAAGENT_CONFIG_SOURCE="${WAAGENT_CONFIG_SOURCE:-/etc/waagent.conf}"
 
 log() {
@@ -66,12 +66,6 @@ Suites: noble-security
 Components: main restricted universe multiverse
 Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
 APT_SOURCES
-
-cat > /etc/apt/apt-mirrors.txt <<APT_MIRRORS
-${TARGET_UBUNTU_MIRROR}	priority:1
-http://archive.ubuntu.com/ubuntu/	priority:2
-${TARGET_UBUNTU_SECURITY_MIRROR}	priority:3
-APT_MIRRORS
 
 rm -f /etc/apt/sources.list /etc/cloud/templates/sources.list.ubuntu.tmpl
 EOF

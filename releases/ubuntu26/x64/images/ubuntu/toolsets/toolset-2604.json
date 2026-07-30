@@ -39,7 +39,12 @@
       "name": "Ruby",
       "platform_version": "26.04",
       "arch": "x64",
-      "versions": []
+      "versions": [
+        "3.2.*",
+        "3.3.*",
+        "3.4.*",
+        "4.0.*"
+      ]
     }
   ],
   "java": {
