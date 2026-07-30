@@ -14,8 +14,8 @@ systemctl stop apt-daily-upgrade.timer
 systemctl disable apt-daily-upgrade.timer
 systemctl disable apt-daily-upgrade.service
 
-# Enable retry logic for apt up to 10 times
-echo "APT::Acquire::Retries \"10\";" > /etc/apt/apt.conf.d/80-retries
+# Enable retry logic for apt up to 5 times
+echo "Acquire::Retries \"5\";" > /etc/apt/apt.conf.d/80-retries
 
 # Configure apt to always assume Y
 echo "APT::Get::Assume-Yes \"true\";" > /etc/apt/apt.conf.d/90assumeyes
@@ -30,8 +30,10 @@ echo 'APT::Get::Always-Include-Phased-Updates "true";' > /etc/apt/apt.conf.d/99-
 # Fix bad proxy and http headers settings
 cat <<EOF >> /etc/apt/apt.conf.d/99bad_proxy
 Acquire::http::Pipeline-Depth 0;
+Acquire::http::Timeout "20";
 Acquire::http::No-Cache true;
 Acquire::https::Pipeline-Depth 0;
+Acquire::https::Timeout "20";
 Acquire::https::No-Cache true;
 Acquire::BrokenProxy    true;
 EOF

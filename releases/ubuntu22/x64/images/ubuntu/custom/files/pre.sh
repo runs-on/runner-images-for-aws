@@ -51,6 +51,13 @@ sed -i 's|release = util.lsb_release()\["codename"\].*|release = "'$codename'"|w
 sed -i 's|util.get_dpkg_architecture()|"'$arch'"|w /dev/stdout' /usr/lib/python3/dist-packages/cloudinit/config/cc_apt_configure.py | grep $arch
 sed -i 's|util.get_dpkg_architecture()|"'$arch'"|w /dev/stdout' /usr/lib/python3/dist-packages/cloudinit/distros/debian.py | grep $arch
 
+apt_primary_mirror="https://archive.ubuntu.com/ubuntu/"
+apt_security_mirror="https://security.ubuntu.com/ubuntu/"
+if [ "$arch" = "arm64" ]; then
+  apt_primary_mirror="https://ports.ubuntu.com/ubuntu-ports/"
+  apt_security_mirror="$apt_primary_mirror"
+fi
+
 cat > /etc/cloud/cloud.cfg.d/01_runs_on.cfg <<EOF
 ssh_quiet_keygen: true
 # keep true otherwise harder to build derivative images with packer
@@ -59,6 +66,15 @@ allow_public_ssh_keys: true
 disable_root: true
 ssh_deletekeys: true
 ssh_genkeytypes: [ed25519]
+
+apt:
+  preserve_sources_list: false
+  primary:
+    - arches: [default]
+      uri: "${apt_primary_mirror}"
+  security:
+    - arches: [default]
+      uri: "${apt_security_mirror}"
 
 # The modules that run in the 'init' stage.
 # users_groups is probably required for allow_public_ssh_keys to work

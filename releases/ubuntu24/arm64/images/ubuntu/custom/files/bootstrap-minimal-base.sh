@@ -493,7 +493,9 @@ LC_ALL=C.UTF-8
 EOF
 
 cat > "$TARGET_ROOT_MOUNT/etc/apt/apt.conf.d/80-retries" <<'EOF'
-APT::Acquire::Retries "10";
+Acquire::Retries "5";
+Acquire::http::Timeout "20";
+Acquire::https::Timeout "20";
 EOF
 
 cat > "$TARGET_ROOT_MOUNT/etc/apt/apt.conf.d/90assumeyes" <<'EOF'
