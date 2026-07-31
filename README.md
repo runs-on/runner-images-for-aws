@@ -45,6 +45,7 @@ Windows GPU images include the AWS GRID driver plus the CUDA toolkit.
 - Frankfurt (`eu-central-1`)
 - Mumbai (`ap-south-1`)
 - Tokyo (`ap-northeast-1`)
+- Seoul (`ap-northeast-2`)
 - Singapore (`ap-southeast-1`)
 - Sydney (`ap-southeast-2`)
 
