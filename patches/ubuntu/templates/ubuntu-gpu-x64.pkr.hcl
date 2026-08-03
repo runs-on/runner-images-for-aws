@@ -176,10 +176,15 @@ build {
   }
 
   provisioner "shell" {
-    environment_vars    = ["IMAGE_OS=${var.image_os}"]
-    execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    pause_before        = "1m0s"
-    scripts             = ["${path.root}/../scripts/build/cleanup.sh", "${path.root}/../custom/files/after-reboot.sh", "${path.root}/../custom/files/finalize-rolaunch-descendant.sh"]
+    environment_vars = ["IMAGE_OS=${var.image_os}"]
+    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    pause_before     = "1m0s"
+    scripts = [
+      "${path.root}/../scripts/build/cleanup.sh",
+      "${path.root}/../custom/files/after-reboot.sh",
+      "${path.root}/../custom/files/finalize-rolaunch-descendant.sh",
+      "${path.root}/../custom/files/prepare-direct-uefi.sh"
+    ]
     start_retry_timeout = "10m"
   }
 }

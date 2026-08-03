@@ -161,6 +161,60 @@ jobs:
               sudo resolvectl domain "$interface" | grep -Eq '[[:alnum:]]'
               sudo networkctl status --all
               sudo resolvectl status
+
+              direct_uefi_state=/var/lib/runs-on-direct-uefi
+              if [[ -d "$direct_uefi_state" ]]; then
+                efi_output="$(sudo efibootmgr -v)"
+                printf '%s\n' "$efi_output"
+
+                bootnums_for_label() {
+                  local label="$1"
+                  awk -v label="$label" '
+                    $0 ~ /^Boot[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][* ]/ {
+                      bootnum = substr($0, 5, 4)
+                      entry_label = $0
+                      sub(/^Boot[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][* ]+[[:space:]]*/, "", entry_label)
+                      sub(/\t.*/, "", entry_label)
+                      sub(/[[:space:]]+$/, "", entry_label)
+                      if (entry_label == label) print toupper(bootnum)
+                    }
+                  ' <<< "$efi_output"
+                }
+
+                expected_current="$(sudo cat "$direct_uefi_state/expected-boot-current")"
+                fallback_bootnum="$(sudo cat "$direct_uefi_state/fallback-bootnum")"
+                boot_current="$(awk -F': ' '/^BootCurrent:/ && !found { print toupper($2); found = 1 }' <<< "$efi_output")"
+                boot_next="$(awk -F': ' '/^BootNext:/ && !found { print toupper($2); found = 1 }' <<< "$efi_output")"
+                boot_order="$(awk -F': ' '/^BootOrder:/ && !found { print toupper($2); found = 1 }' <<< "$efi_output")"
+                direct_bootnum="$(bootnums_for_label 'RunsOn direct Linux')"
+                actual_fallback_bootnum="$(bootnums_for_label 'RunsOn GRUB fallback')"
+
+                test "$boot_current" = "$expected_current"
+                test -z "$boot_next"
+                test "$(awk 'NF { count++ } END { print count + 0 }' <<< "$direct_bootnum")" = 1
+                test "$(awk 'NF { count++ } END { print count + 0 }' <<< "$actual_fallback_bootnum")" = 1
+                test "$direct_bootnum" = "$expected_current"
+                test "$actual_fallback_bootnum" = "$fallback_bootnum"
+                test "${boot_order%%,*}" = "$actual_fallback_bootnum"
+                test "$direct_bootnum" != "${boot_order%%,*}"
+
+                expected_cmdline="$(sudo cat "$direct_uefi_state/expected-cmdline")"
+                test "$(< /proc/cmdline)" = "$expected_cmdline"
+                [[ " $expected_cmdline " == *' root=PARTUUID='* ]]
+                [[ " $expected_cmdline " == *' panic=-1 '* ]]
+                [[ " $(< /proc/cmdline) " != *' BOOT_IMAGE='* ]]
+                [[ " $(< /proc/cmdline) " != *' initrd='* ]]
+
+                kernel_release="$(sudo cat "$direct_uefi_state/kernel-release")"
+                kernel_format="$(sudo cat "$direct_uefi_state/kernel-source-format")"
+                direct_kernel="/boot/efi/EFI/runs-on/vmlinuz-${kernel_release}.efi"
+                test "$(uname -r)" = "$kernel_release"
+                test "$(sudo find /boot/efi/EFI/runs-on -maxdepth 1 -type f -name 'vmlinuz-*.efi' -printf . | wc -c)" = 1
+                sudo sha256sum --check "$direct_uefi_state/direct-kernel.sha256"
+                test "$kernel_format" = raw
+                sudo cmp -s "/boot/vmlinuz-${kernel_release}" "$direct_kernel"
+                sudo sha256sum --check "$direct_uefi_state/fallback.sha256"
+              fi
             fi
           else
             sudo cat /var/log/cloud-init-output.log
