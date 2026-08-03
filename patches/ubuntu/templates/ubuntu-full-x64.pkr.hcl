@@ -60,6 +60,11 @@ variable "ami_regions" {
   type = list(string)
 }
 
+variable "publish_publicly" {
+  type    = bool
+  default = true
+}
+
 variable "source_ami_owner" {
   type = string
 }
@@ -90,6 +95,11 @@ variable "volume_size" {
   default = 30
 }
 
+variable "volume_throughput" {
+  type    = number
+  default = 125
+}
+
 variable "volume_type" {
   type    = string
   default = "gp3"
@@ -110,8 +120,8 @@ source "amazon-ebs" "build_ebs" {
   ami_name                                  = "${var.ami_name}"
   ami_description                           = "${var.ami_description}"
   ami_virtualization_type                   = "hvm"
-  # make AMIs publicly accessible
-  ami_groups    = ["all"]
+  # Make AMIs public for release builds; dev accounts can keep them private.
+  ami_groups    = var.publish_publicly ? ["all"] : []
   ebs_optimized = true
   # spot_instance_types                       = ["r7a.large", "r7i.large", "m7a.xlarge", "c7a.xlarge", "m7i-flex.xlarge"]
   # spot_price                                = "1.00"
@@ -125,13 +135,14 @@ source "amazon-ebs" "build_ebs" {
 
   ami_regions = "${var.ami_regions}"
 
-  // make underlying snapshot public
-  snapshot_groups = ["all"]
+  // Keep the snapshot visibility aligned with the AMI.
+  snapshot_groups = var.publish_publicly ? ["all"] : []
 
   launch_block_device_mappings {
     device_name           = "/dev/sda1"
     volume_type           = "${var.volume_type}"
     volume_size           = "${var.volume_size}"
+    throughput            = var.volume_throughput
     delete_on_termination = "true"
     encrypted             = "false"
   }
@@ -346,9 +357,19 @@ build {
   // }
 
   provisioner "shell" {
-    environment_vars = ["HELPER_SCRIPT_FOLDER=${var.helper_script_folder}", "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}", "IMAGE_FOLDER=${var.image_folder}"]
-    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = ["${path.root}/../scripts/build/configure-system.sh", "${path.root}/../custom/files/after-reboot.sh"]
+    environment_vars = [
+      "HELPER_SCRIPT_FOLDER=${var.helper_script_folder}",
+      "IMAGE_FOLDER=${var.image_folder}",
+      "IMAGE_OS=${var.image_os}",
+      "INSTALLER_SCRIPT_FOLDER=${var.installer_script_folder}",
+      "ROLAUNCH_SOURCE=${var.installer_script_folder}/rolaunch"
+    ]
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    scripts = [
+      "${path.root}/../scripts/build/configure-system.sh",
+      "${path.root}/../custom/files/after-reboot.sh",
+      "${path.root}/../custom/files/configure-full-rolaunch.sh"
+    ]
   }
 
   // provisioner "shell" {

@@ -19,6 +19,14 @@ on:
         type: boolean
         description: ubuntu22-stepsecurity-arm64
         default: true
+      ubuntu26_stepsecurity_x64:
+        type: boolean
+        description: ubuntu26-stepsecurity-x64
+        default: false
+      ubuntu26_stepsecurity_arm64:
+        type: boolean
+        description: ubuntu26-stepsecurity-arm64
+        default: false
   workflow_run:
     workflows: ['Linux images']
     branches: [main]
@@ -39,12 +47,16 @@ jobs:
           UBUNTU24_STEPSECURITY_ARM64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu24_stepsecurity_arm64 }}
           UBUNTU22_STEPSECURITY_X64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu22_stepsecurity_x64 }}
           UBUNTU22_STEPSECURITY_ARM64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu22_stepsecurity_arm64 }}
+          UBUNTU26_STEPSECURITY_X64: ${{ github.event_name == 'workflow_dispatch' && inputs.ubuntu26_stepsecurity_x64 }}
+          UBUNTU26_STEPSECURITY_ARM64: ${{ github.event_name == 'workflow_dispatch' && inputs.ubuntu26_stepsecurity_arm64 }}
         run: |
           images=()
           [ "$UBUNTU24_STEPSECURITY_X64" = "true" ] && images+=("ubuntu24-stepsecurity-x64")
           [ "$UBUNTU24_STEPSECURITY_ARM64" = "true" ] && images+=("ubuntu24-stepsecurity-arm64")
           [ "$UBUNTU22_STEPSECURITY_X64" = "true" ] && images+=("ubuntu22-stepsecurity-x64")
           [ "$UBUNTU22_STEPSECURITY_ARM64" = "true" ] && images+=("ubuntu22-stepsecurity-arm64")
+          [ "$UBUNTU26_STEPSECURITY_X64" = "true" ] && images+=("ubuntu26-stepsecurity-x64")
+          [ "$UBUNTU26_STEPSECURITY_ARM64" = "true" ] && images+=("ubuntu26-stepsecurity-arm64")
           if [ "${#images[@]}" -eq 0 ]; then
             echo "No images selected" >&2
             exit 1

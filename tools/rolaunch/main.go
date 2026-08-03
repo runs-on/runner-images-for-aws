@@ -39,6 +39,14 @@ const (
 	enableRunnerWarmup        = false
 )
 
+type launchMode string
+
+const (
+	launchModeMinimal launchMode = "minimal"
+	launchModeFull    launchMode = "full"
+	defaultLaunchMode            = launchModeMinimal
+)
+
 // NOTE: cloud-initramfs-growroot and cloud-guest-utils are still useful if root-volume resize
 // support is required later, even if they are not part of this first iteration.
 type config struct {
@@ -49,6 +57,7 @@ type config struct {
 	userDataPath string
 	doneMarker   string
 	timingsPath  string
+	mode         launchMode
 }
 
 type authorizedKeysTarget struct {
@@ -64,6 +73,7 @@ type instanceIdentity struct {
 	MarketplaceProductCodes []string  `json:"marketplaceProductCodes,omitempty"`
 	AvailabilityZone        string    `json:"availabilityZone"`
 	PrivateIP               string    `json:"privateIp"`
+	LocalHostname           string    `json:"localHostname,omitempty"`
 	Version                 string    `json:"version,omitempty"`
 	Region                  string    `json:"region"`
 	InstanceID              string    `json:"instanceId"`
@@ -109,6 +119,7 @@ type launcherOps struct {
 	makeWorkDir                 func(string) error
 	ensureResolverConfig        func(string) error
 	waitForInstanceIdentity     func(context.Context, config) (instanceIdentity, error)
+	configureInstanceHostname   func(instanceIdentity) error
 	enrichInstanceIdentity      func(context.Context, config, instanceIdentity) (instanceIdentity, error)
 	fetchUserData               func(context.Context, config) ([]byte, error)
 	fetchTemporaryPublicKey     func(context.Context, config) ([]byte, error)
@@ -133,6 +144,7 @@ func defaultLauncherOps() launcherOps {
 		waitForInstanceIdentity: func(ctx context.Context, cfg config) (instanceIdentity, error) {
 			return awsState.waitForReadinessAndFetchIdentity(ctx, cfg)
 		},
+		configureInstanceHostname: configureInstanceHostname,
 		enrichInstanceIdentity: func(ctx context.Context, cfg config, identity instanceIdentity) (instanceIdentity, error) {
 			return awsState.enrichOptionalInstanceIdentity(ctx, cfg, identity)
 		},
@@ -163,8 +175,13 @@ func main() {
 		imdsEndpoint = flag.String("imds", defaultIMDSEndpoint, "IMDS endpoint")
 		timeout      = flag.Duration("timeout", defaultReadinessTimeout, "total startup timeout for waiting on network+IMDS")
 		workDir      = flag.String("workdir", defaultWorkDir, "working directory for userdata artifacts")
+		modeValue    = flag.String("mode", string(defaultLaunchMode), "launch mode: minimal or full")
 	)
 	flag.Parse()
+	mode, err := parseLaunchMode(*modeValue)
+	if err != nil {
+		log.Fatalf("invalid launch mode: %v", err)
+	}
 
 	cfg := config{
 		imdsBase:     *imdsEndpoint,
@@ -174,14 +191,29 @@ func main() {
 		userDataPath: filepath.Join(*workDir, defaultUserDataName),
 		doneMarker:   filepath.Join(*workDir, defaultDoneMarkerName),
 		timingsPath:  defaultTimingsPath,
+		mode:         mode,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), cfg.timeout)
-	err := run(ctx, cfg)
+	err = run(ctx, cfg)
 	cancel()
 	if err != nil {
 		log.Fatalf("rolaunch failed: %v", err)
 	}
+}
+
+func parseLaunchMode(value string) (launchMode, error) {
+	mode := launchMode(value)
+	switch mode {
+	case launchModeMinimal, launchModeFull:
+		return mode, nil
+	default:
+		return "", fmt.Errorf("must be %q or %q, got %q", launchModeMinimal, launchModeFull, value)
+	}
+}
+
+func (cfg config) isFullMode() bool {
+	return cfg.mode == launchModeFull
 }
 
 func run(ctx context.Context, cfg config) error {
@@ -220,6 +252,9 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 		return nil
 	})
 	resolverTask := startAsyncTask(func() error {
+		if cfg.isFullMode() {
+			return nil
+		}
 		return ops.ensureResolverConfig(defaultResolverConfigPath)
 	})
 	identityTask := startAsync(func() (instanceIdentity, error) {
@@ -234,6 +269,15 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 	identity, err := identityTask.wait()
 	if err != nil {
 		return fmt.Errorf("discover instance identity: %w", err)
+	}
+	localPrepTasks := []asyncResult[struct{}]{hostKeyTask, workDirTask, resolverTask}
+	if cfg.isFullMode() {
+		localPrepTasks = append(localPrepTasks, startAsyncTask(func() error {
+			if err := ops.configureInstanceHostname(identity); err != nil {
+				return fmt.Errorf("configure instance hostname: %w", err)
+			}
+			return nil
+		}))
 	}
 	optionalIdentityTask := startAsync(func() (instanceIdentity, error) {
 		return ops.enrichInstanceIdentity(ctx, cfg, identity)
@@ -256,7 +300,7 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 		return err
 	}
 	if alreadyProcessed {
-		if err := waitAllTasks(hostKeyTask, workDirTask, resolverTask); err != nil {
+		if err := waitAllTasks(localPrepTasks...); err != nil {
 			return err
 		}
 		persistIdentity()
@@ -306,7 +350,7 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 	if err != nil {
 		return err
 	}
-	if err := waitAllTasks(hostKeyTask, workDirTask, resolverTask); err != nil {
+	if err := waitAllTasks(localPrepTasks...); err != nil {
 		return err
 	}
 	persistIdentity()
@@ -332,9 +376,12 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 		recorder.add("rolaunch.agent-prefetched")
 	}
 	recorder.add("rolaunch.bootstrap-ready")
+	if cfg.isFullMode() && ops.waitForRootFilesystemResize(rootResizeDone) {
+		recorder.add("rolaunch.root-resize-finished")
+	}
 
 	if len(normalizedUserData) == 0 {
-		if ops.waitForRootFilesystemResize(rootResizeDone) {
+		if !cfg.isFullMode() && ops.waitForRootFilesystemResize(rootResizeDone) {
 			recorder.add("rolaunch.root-resize-finished")
 		}
 		recorder.add("rolaunch.userdata-skipped")
@@ -348,15 +395,19 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 
 	log.Printf("executing shell userdata: %s", cfg.userDataPath)
 	recorder.add("rolaunch.userdata-started")
-	err = ops.executeUserData(ctx, cfg)
+	userDataCtx := ctx
+	if cfg.isFullMode() {
+		userDataCtx = context.WithoutCancel(ctx)
+	}
+	err = ops.executeUserData(userDataCtx, cfg)
 	if err == nil {
 		recorder.add("rolaunch.userdata-finished")
 	}
-	if ops.waitForRootFilesystemResize(rootResizeDone) {
+	if !cfg.isFullMode() && ops.waitForRootFilesystemResize(rootResizeDone) {
 		recorder.add("rolaunch.root-resize-finished")
 	}
 	if err != nil {
-		if ctx.Err() != nil {
+		if !cfg.isFullMode() && ctx.Err() != nil {
 			return fmt.Errorf("executing userdata script: %w", ctx.Err())
 		}
 		return fmt.Errorf("executing userdata script: %w", err)

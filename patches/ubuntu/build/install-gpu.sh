@@ -8,7 +8,13 @@ source $HELPER_SCRIPTS/etc-environment.sh
 DIST_SLUG=""
 NVIDIA_DRIVER_PACKAGES=""
 CUDA_PACKAGES="cuda-12-9 cuda-toolkit-12-9"
-if is_ubuntu24; then
+CUDA_MAJOR_VERSION="12"
+if is_ubuntu26; then
+    DIST_SLUG="ubuntu2604"
+    NVIDIA_DRIVER_PACKAGES="linux-modules-nvidia-595-aws nvidia-driver-595"
+    CUDA_PACKAGES="cuda-toolkit-13-3"
+    CUDA_MAJOR_VERSION="13"
+elif is_ubuntu24; then
     DIST_SLUG="ubuntu2404"
     NVIDIA_DRIVER_PACKAGES="linux-modules-nvidia-580-aws nvidia-driver-580"
 elif is_ubuntu22; then
@@ -26,16 +32,19 @@ if [ -f /root/cuda-installed.txt ]; then
     echo "=== CUDA Installation Verification ==="
     su - runner -c "nvcc --version"
     nvidia-smi
-    su - runner -c "nvcc --version" | grep "release 12"
+    su - runner -c "nvcc --version" | grep "release $CUDA_MAJOR_VERSION"
     rm /root/cuda-installed.txt
     exit 0
 fi
 
 echo "cuda installed" > /root/cuda-installed.txt
 
-# Ensure the root partition is resized
-cloud-init single --name cc_growpart
-cloud-init single --name cc_resizefs
+# Ubuntu 26's parent waits for rolaunch's root resize before it exposes SSH.
+# Older parents still use cloud-init for this build-time guard.
+if ! is_ubuntu26; then
+    cloud-init single --name cc_growpart
+    cloud-init single --name cc_resizefs
+fi
 
 # NVIDIA CUDA drivers and toolkit
 DEBIAN_FILE="cuda-keyring_1.1-1_all.deb"
@@ -52,10 +61,9 @@ echo "deb [signed-by=$GPG_KEY] $REPO_URL /" > $REPO_PATH
 
 apt-get update -qq
 
-if is_ubuntu24; then
-    # Noble's 575 driver packages transition to Ubuntu's 580 driver stack, which
-    # has prebuilt modules for the AWS kernel. Prefer those over CUDA repo DKMS
-    # packages so cuda-12-9 stays installed without compiling nvidia-dkms.
+if is_ubuntu24 || is_ubuntu26; then
+    # Prefer Ubuntu's prebuilt AWS-kernel modules over CUDA repository DKMS
+    # packages. This keeps the driver aligned with the image's linux-aws kernel.
     cat >/etc/apt/preferences.d/ubuntu-nvidia-driver <<'EOF'
 Package: nvidia-driver* nvidia-dkms* nvidia-headless* nvidia-kernel* nvidia-utils* nvidia-compute-utils* nvidia-firmware* nvidia-modprobe nvidia-persistenced libnvidia* xserver-xorg-video-nvidia* linux-modules-nvidia*
 Pin: release o=Ubuntu
@@ -72,9 +80,9 @@ apt install -y --no-install-recommends $NVIDIA_DRIVER_PACKAGES $CUDA_PACKAGES nv
 
 ( dpkg -l | grep -E "(nvidia-driver|cuda)" | head -10 ) || true
 
-# Update PATH and LD_LIBRARY_PATH for CUDA 12
-path="/usr/local/cuda-12/bin"
-library_path="/usr/local/cuda-12/lib64"
+# Update PATH and LD_LIBRARY_PATH for the installed CUDA major version.
+path="/usr/local/cuda-${CUDA_MAJOR_VERSION}/bin"
+library_path="/usr/local/cuda-${CUDA_MAJOR_VERSION}/lib64"
 # Ensure the paths exist
 ls -al $path
 ls -al $library_path

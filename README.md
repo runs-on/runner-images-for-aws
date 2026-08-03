@@ -63,6 +63,11 @@ For instance, for the `ubuntu22-full-x64` image, search for:
 ## Notes
 
 * SSH daemon is disabled by default, so be sure to enable it in a user-data script if needed.
+* For full images, the new rolaunch boot path applies only to Ubuntu 26, including its GPU and StepSecurity descendants. Ubuntu 22 and 24 full images keep their existing cloud-init user-data path.
+* On those Ubuntu 26 images, user data must be a raw, uncompressed shebang shell script. Rolaunch does not process cloud-config, multipart MIME, or compressed payloads and requires a reachable EC2 instance metadata endpoint.
+* Ubuntu 26 uses `systemd-networkd` directly and disables cloud-init. This fast path supports a single primary ENA with IPv4 or dual-stack DHCP, including custom DHCP DNS and search domains.
+* Ubuntu 26 does not support multi-ENI policy routing, secondary IP discovery, IPv6-only subnets, old Xen network drivers, or persistent netplan configuration. Use Ubuntu 22 or 24 when those network layouts are required.
+* For local validation, set `AMI_PUBLIC=false` to keep a full Ubuntu AMI private.
 
 ## Inspector AMI scanning
 
