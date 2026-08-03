@@ -325,21 +325,6 @@ FileUtils.rm_rf("integrations") && Dir.mkdir("integrations")
   end
 end
 
-if dist == "ubuntu26" && variant == "stepsecurity"
-  stepsecurity_installer = "integrations/stepsecurity/packer/install-linux.sh"
-  unless File.read(stepsecurity_installer).match?(/^\s*resolute\)/)
-    stepsecurity_patch = File.expand_path("../patches/stepsecurity/ubuntu26.patch", __dir__)
-    unless run_command_with_log(
-      label: "Add Ubuntu 26 support to the StepSecurity integration",
-      command: ["git", "-C", "integrations/stepsecurity", "apply", stepsecurity_patch],
-      env: {},
-      log_file: log_file_path
-    )
-      fail("Failed to add Ubuntu 26 support to the StepSecurity integration")
-    end
-  end
-end
-
 at_exit do
   FileUtils.rm_rf(packer_template_path)
   FileUtils.rm_rf("integrations")

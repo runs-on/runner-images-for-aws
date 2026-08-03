@@ -452,6 +452,48 @@ class MeasureLaunchTimeTest < Minitest::Test
     assert_equal 20_000, mapping.fetch(:ebs).fetch(:iops)
   end
 
+  def test_security_group_setup_rolls_back_when_ingress_authorization_fails
+    ec2 = Aws::EC2::Client.new(stub_responses: true)
+    ec2.stub_responses(:create_security_group, group_id: "sg-test")
+    ec2.stub_responses(:authorize_security_group_ingress, "UnauthorizedOperation")
+    ec2.stub_responses(:delete_security_group, {})
+    subnet = Struct.new(:vpc_id).new("vpc-test")
+
+    assert_raises(Aws::EC2::Errors::ServiceError) do
+      @harness.create_temp_security_group(ec2, subnet, "203.0.113.10")
+    end
+
+    operations = ec2.api_requests.map { |request| request.fetch(:operation_name) }
+    assert_equal %i[create_security_group authorize_security_group_ingress delete_security_group], operations
+  end
+
+  def test_measurement_instances_tag_their_root_volumes
+    ec2 = Aws::EC2::Client.new(stub_responses: true)
+    ec2.stub_responses(:run_instances, instances: [{ instance_id: "i-test" }])
+    subnet = Struct.new(:subnet_id).new("subnet-test")
+
+    @harness.launch_instance(
+      ec2: ec2,
+      image: image_with_root_throughput(400),
+      instance_type: "m8a.large",
+      subnet: subnet,
+      security_group_id: "sg-test",
+      user_data: "#!/bin/bash\n",
+      root_iops: 3_000,
+      root_initialization_rate: 300,
+      root_throughput: 400,
+      root_volume_size: 30
+    )
+
+    request = ec2.api_requests.find { |candidate| candidate.fetch(:operation_name) == :run_instances }
+    volume_tags = request.fetch(:params).fetch(:tag_specifications).find do |specification|
+      specification.fetch(:resource_type) == "volume"
+    end
+    refute_nil volume_tags
+    assert_includes volume_tags.fetch(:tags), { key: "Name", value: "measure-launch-time" }
+    assert_includes volume_tags.fetch(:tags), { key: "application", value: "RunsOn" }
+  end
+
   def test_profile_boot_remote_script_is_valid_shell_and_includes_boot_timing_diagnostics
     source = File.read(PROFILE_HELPER_PATH)
     fragment = source[/^analyze_prefix = .*?(?=^Dir\.mktmpdir)/m]
@@ -474,6 +516,9 @@ class MeasureLaunchTimeTest < Minitest::Test
     assert_includes remote_script, "amazon-ssm-agent.service"
     assert_includes remote_script, "sudo -n docker info"
     assert_includes source, "root_throughput || root.ebs.throughput"
+    assert_includes source, "capture3_with_timeout(*ssh_cmd, timeout_seconds: timeout_seconds)"
+    assert_includes source, "cleanup_profile_resources(ec2, instance_id, security_group_id)"
+    assert_match(/additional_block_device_mappings.*?delete_on_termination: true/m, source)
     refute_includes source, "default: 750"
   end
 

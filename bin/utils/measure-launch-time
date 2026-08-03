@@ -161,17 +161,26 @@ def create_temp_security_group(ec2, subnet, caller_ip)
       }
     ]
   )
-  ec2.authorize_security_group_ingress(
-    group_id: sg.group_id,
-    ip_permissions: [
-      {
-        ip_protocol: 'tcp',
-        from_port: 22,
-        to_port: 22,
-        ip_ranges: [{ cidr_ip: "#{caller_ip}/32", description: 'measure-launch-time' }]
-      }
-    ]
-  )
+  begin
+    ec2.authorize_security_group_ingress(
+      group_id: sg.group_id,
+      ip_permissions: [
+        {
+          ip_protocol: 'tcp',
+          from_port: 22,
+          to_port: 22,
+          ip_ranges: [{ cidr_ip: "#{caller_ip}/32", description: 'measure-launch-time' }]
+        }
+      ]
+    )
+  rescue StandardError
+    begin
+      ec2.delete_security_group(group_id: sg.group_id)
+    rescue StandardError => cleanup_error
+      warn "Failed to roll back temporary security group #{sg.group_id}: #{cleanup_error.message}"
+    end
+    raise
+  end
   sg.group_id
 end
 
@@ -447,6 +456,13 @@ def launch_instance(ec2:, image:, instance_type:, subnet:, security_group_id:, u
     tag_specifications: [
       {
         resource_type: 'instance',
+        tags: [
+          { key: 'Name', value: 'measure-launch-time' },
+          { key: 'application', value: 'RunsOn' }
+        ]
+      },
+      {
+        resource_type: 'volume',
         tags: [
           { key: 'Name', value: 'measure-launch-time' },
           { key: 'application', value: 'RunsOn' }

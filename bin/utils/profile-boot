@@ -9,6 +9,7 @@ require 'open3'
 require 'slop'
 require 'tmpdir'
 require 'shellwords'
+require 'timeout'
 
 options = {}
 
@@ -141,17 +142,26 @@ def create_temp_security_group(ec2, subnet, caller_ip)
       }
     ]
   )
-  ec2.authorize_security_group_ingress(
-    group_id: sg.group_id,
-    ip_permissions: [
-      {
-        ip_protocol: 'tcp',
-        from_port: 22,
-        to_port: 22,
-        ip_ranges: [{ cidr_ip: "#{caller_ip}/32", description: 'profile-boot' }]
-      }
-    ]
-  )
+  begin
+    ec2.authorize_security_group_ingress(
+      group_id: sg.group_id,
+      ip_permissions: [
+        {
+          ip_protocol: 'tcp',
+          from_port: 22,
+          to_port: 22,
+          ip_ranges: [{ cidr_ip: "#{caller_ip}/32", description: 'profile-boot' }]
+        }
+      ]
+    )
+  rescue StandardError
+    begin
+      ec2.delete_security_group(group_id: sg.group_id)
+    rescue StandardError => cleanup_error
+      warn "Failed to roll back temporary security group #{sg.group_id}: #{cleanup_error.message}"
+    end
+    raise
+  end
   sg.group_id
 end
 
@@ -239,7 +249,7 @@ def additional_block_device_mappings(image)
         snapshot_id: mapping.ebs.snapshot_id,
         volume_size: mapping.ebs.volume_size,
         volume_type: mapping.ebs.volume_type,
-        delete_on_termination: mapping.ebs.delete_on_termination
+        delete_on_termination: true
       }
     }
 
@@ -296,19 +306,49 @@ def launch_instance(ec2:, image:, instance_type:, subnet:, security_group_id:, u
   instance.instance_id
 end
 
-def capture_ssh(ip:, ssh_user:, private_key_path:, remote_script:)
+def signal_process_group(pid, signal)
+  Process.kill(signal, -pid)
+rescue Errno::ESRCH
+  nil
+end
+
+def capture3_with_timeout(*command, timeout_seconds:)
+  Open3.popen3(*command, pgroup: true) do |stdin, stdout, stderr, wait_thread|
+    stdin.close
+    stdout_reader = Thread.new { stdout.read }
+    stderr_reader = Thread.new { stderr.read }
+
+    unless wait_thread.join(timeout_seconds)
+      signal_process_group(wait_thread.pid, 'TERM')
+      unless wait_thread.join(0.5)
+        signal_process_group(wait_thread.pid, 'KILL')
+        wait_thread.join
+      end
+      stdout_reader.join
+      stderr_reader.join
+      raise Timeout::Error, "command timed out after #{timeout_seconds.round(2)}s"
+    end
+
+    [stdout_reader.value, stderr_reader.value, wait_thread.value]
+  end
+end
+
+def capture_ssh(ip:, ssh_user:, private_key_path:, remote_script:, timeout_seconds:)
   ssh_cmd = [
     'ssh',
     '-o', 'BatchMode=yes',
     '-o', 'IdentitiesOnly=yes',
     '-o', 'StrictHostKeyChecking=no',
     '-o', 'UserKnownHostsFile=/dev/null',
+    '-o', 'ConnectTimeout=5',
+    '-o', 'ServerAliveInterval=2',
+    '-o', 'ServerAliveCountMax=2',
     '-i', private_key_path,
     "#{ssh_user}@#{ip}",
     remote_script
   ]
 
-  stdout, stderr, status = Open3.capture3(*ssh_cmd)
+  stdout, stderr, status = capture3_with_timeout(*ssh_cmd, timeout_seconds: timeout_seconds)
   raise "SSH command failed: #{stderr}" unless status.success?
 
   stdout
@@ -330,6 +370,24 @@ def delete_security_group_with_retry(ec2, security_group_id)
 
     sleep 3
   end
+end
+
+def cleanup_profile_resources(ec2, instance_id, security_group_id)
+  errors = []
+  if instance_id
+    begin
+      terminate_instance(ec2, instance_id)
+    rescue StandardError => e
+      errors << "failed to terminate #{instance_id}: #{e.message}"
+    end
+  end
+
+  begin
+    delete_security_group_with_retry(ec2, security_group_id)
+  rescue StandardError => e
+    errors << "failed to delete temporary security group #{security_group_id}: #{e.message}"
+  end
+  errors
 end
 
 ec2 = Aws::EC2::Client.new(region: options[:region])
@@ -555,7 +613,8 @@ Dir.mktmpdir('profile-boot') do |dir|
       ip: ip,
       ssh_user: options[:ssh_user],
       private_key_path: private_key_path,
-      remote_script: remote_script
+      remote_script: remote_script,
+      timeout_seconds: options[:ssh_timeout]
     )
 
     puts
@@ -571,7 +630,12 @@ Dir.mktmpdir('profile-boot') do |dir|
       }
     )
   ensure
-    terminate_instance(ec2, instance_id) if instance_id
-    delete_security_group_with_retry(ec2, security_group_id)
+    original_error = $!
+    cleanup_errors = cleanup_profile_resources(ec2, instance_id, security_group_id)
+    unless cleanup_errors.empty?
+      message = "Cleanup incomplete: #{cleanup_errors.join('; ')}"
+      warn message
+      raise message unless original_error
+    end
   end
 end

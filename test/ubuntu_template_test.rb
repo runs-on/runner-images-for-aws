@@ -1,7 +1,4 @@
 require "minitest/autorun"
-require "fileutils"
-require "open3"
-require "tmpdir"
 require "yaml"
 
 class UbuntuTemplateTest < Minitest::Test
@@ -18,7 +15,6 @@ class UbuntuTemplateTest < Minitest::Test
   FULL_ROLAUNCH_SCRIPT = File.expand_path("../patches/ubuntu/files/configure-full-rolaunch.sh", __dir__)
   DESCENDANT_ROLAUNCH_SCRIPT = File.expand_path("../patches/ubuntu/files/finalize-rolaunch-descendant.sh", __dir__)
   GPU_INSTALL_SCRIPT = File.expand_path("../patches/ubuntu/build/install-gpu.sh", __dir__)
-  STEPSECURITY_UBUNTU26_PATCH = File.expand_path("../patches/stepsecurity/ubuntu26.patch", __dir__)
   MINIMAL_BASE_SCRIPT = File.expand_path("../patches/ubuntu/files/bootstrap-minimal-base.sh", __dir__)
   PATCH_LIB = File.expand_path("../bin/patch/lib.sh", __dir__)
   PRE_SCRIPT = File.expand_path("../patches/ubuntu/files/pre.sh", __dir__)
@@ -139,33 +135,6 @@ class UbuntuTemplateTest < Minitest::Test
     assert_includes content, '/usr/local/cuda-${CUDA_MAJOR_VERSION}/lib64'
     assert_match(/if ! is_ubuntu26; then\s+cloud-init single --name cc_growpart\s+cloud-init single --name cc_resizefs/m, content)
     refute_includes content, "/usr/local/cuda-12/"
-  end
-
-  def test_ubuntu26_stepsecurity_support_is_applied_only_to_its_descendants
-    build_script = File.read(BUILD_SCRIPT)
-    patch = File.read(STEPSECURITY_UBUNTU26_PATCH)
-
-    assert_includes build_script, 'dist == "ubuntu26" && variant == "stepsecurity"'
-    assert_includes build_script, 'Add Ubuntu 26 support to the StepSecurity integration'
-    assert_includes patch, "resolute)"
-    assert_includes patch, 'DIST_SLUG="ubuntu2604"'
-
-    Dir.mktmpdir("stepsecurity-ubuntu26-patch") do |dir|
-      packer_dir = File.join(dir, "packer")
-      FileUtils.mkdir_p(packer_dir)
-      File.write(
-        File.join(packer_dir, "install-linux.sh"),
-        <<~SH
-          DIST_SLUG=""
-          case $VERSION_CODENAME in
-              noble)
-                  DIST_SLUG="ubuntu2404"
-                  ;;
-        SH
-      )
-      output, status = Open3.capture2e("git", "apply", "--check", STEPSECURITY_UBUNTU26_PATCH, chdir: dir)
-      assert status.success?, output
-    end
   end
 
   def test_ubuntu26_descendants_clear_inherited_launch_state
