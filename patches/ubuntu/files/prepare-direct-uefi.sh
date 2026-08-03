@@ -128,7 +128,12 @@ select_latest_aws_kernel() {
 
 validate_direct_cmdline() {
   local kernel_cmdline="$1"
-  local argument console_count=0
+  local argument
+  local console_count=0
+  local quiet_count=0
+  local loglevel_count=0
+  local systemd_status_count=0
+  local rd_systemd_status_count=0
   local -a kernel_arguments=()
 
   [[ " ${kernel_cmdline} " == *' root=PARTUUID='* ]] || fail "direct kernel command line has no root=PARTUUID= argument"
@@ -145,9 +150,28 @@ validate_direct_cmdline() {
       earlycon|earlycon=*)
         fail "direct kernel command line still enables an early console"
         ;;
+      quiet)
+        quiet_count="$((quiet_count + 1))"
+        ;;
+      loglevel=*)
+        loglevel_count="$((loglevel_count + 1))"
+        [[ "${argument}" == 'loglevel=3' ]] || fail "direct kernel command line has the wrong log level"
+        ;;
+      systemd.show_status=*)
+        systemd_status_count="$((systemd_status_count + 1))"
+        [[ "${argument}" == 'systemd.show_status=false' ]] || fail "direct kernel command line still shows systemd status"
+        ;;
+      rd.systemd.show_status=*)
+        rd_systemd_status_count="$((rd_systemd_status_count + 1))"
+        [[ "${argument}" == 'rd.systemd.show_status=false' ]] || fail "direct kernel command line still shows initrd systemd status"
+        ;;
     esac
   done
   [[ "${console_count}" -eq 1 ]] || fail "direct kernel command line must contain exactly one console=null argument"
+  [[ "${quiet_count}" -eq 1 ]] || fail "direct kernel command line must contain exactly one quiet argument"
+  [[ "${loglevel_count}" -eq 1 ]] || fail "direct kernel command line must contain exactly one loglevel=3 argument"
+  [[ "${systemd_status_count}" -eq 1 ]] || fail "direct kernel command line must contain exactly one systemd.show_status=false argument"
+  [[ "${rd_systemd_status_count}" -eq 1 ]] || fail "direct kernel command line must contain exactly one rd.systemd.show_status=false argument"
 }
 
 compose_direct_cmdline() {
@@ -155,14 +179,14 @@ compose_direct_cmdline() {
 
   for argument in "$@"; do
     case "${argument}" in
-      BOOT_IMAGE=*|initrd=*|initrdfail|initrdless_boot_fallback_triggered|console=*|earlycon|earlycon=*)
+      BOOT_IMAGE=*|initrd=*|initrdfail|initrdless_boot_fallback_triggered|console=*|earlycon|earlycon=*|quiet|loglevel=*|systemd.show_status=*|rd.systemd.show_status=*)
         ;;
       *)
         kernel_cmdline+="${kernel_cmdline:+ }${argument}"
         ;;
     esac
   done
-  kernel_cmdline+="${kernel_cmdline:+ }console=null"
+  kernel_cmdline+="${kernel_cmdline:+ }console=null quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false"
   printf '%s\n' "${kernel_cmdline}"
 }
 

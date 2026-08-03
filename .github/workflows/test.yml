@@ -207,6 +207,10 @@ jobs:
                 test "$(tr ' ' '\n' < /proc/cmdline | grep -c '^console=')" = 1
                 [[ " $(< /proc/cmdline) " == *' console=null '* ]]
                 ! grep -Eq '(^| )earlycon(=| |$)' /proc/cmdline
+                test "$(tr ' ' '\n' < /proc/cmdline | grep -c '^quiet$')" = 1
+                [[ " $(< /proc/cmdline) " == *' loglevel=3 '* ]]
+                [[ " $(< /proc/cmdline) " == *' systemd.show_status=false '* ]]
+                [[ " $(< /proc/cmdline) " == *' rd.systemd.show_status=false '* ]]
 
                 kernel_release="$(sudo cat "$direct_uefi_state/kernel-release")"
                 kernel_format="$(sudo cat "$direct_uefi_state/kernel-source-format")"

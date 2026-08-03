@@ -150,7 +150,7 @@ class DirectUefiTest < Minitest::Test
   end
 
   def test_direct_cmdline_requires_portable_root_and_panic_reboot
-    valid = "root=PARTUUID=abc ro panic=-1 console=null"
+    valid = "root=PARTUUID=abc ro panic=-1 console=null quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false"
     _stdout, stderr, status = run_function("validate_direct_cmdline #{Shellwords.escape(valid)}")
     assert status.success?, stderr
 
@@ -177,14 +177,30 @@ class DirectUefiTest < Minitest::Test
     _stdout, stderr, status = run_function("validate_direct_cmdline 'root=PARTUUID=abc panic=-1 console=null earlycon=uart8250'")
     refute status.success?
     assert_includes stderr, "still enables an early console"
+
+    _stdout, stderr, status = run_function("validate_direct_cmdline 'root=PARTUUID=abc panic=-1 console=null quiet loglevel=7 systemd.show_status=false rd.systemd.show_status=false'")
+    refute status.success?
+    assert_includes stderr, "wrong log level"
+
+    _stdout, stderr, status = run_function("validate_direct_cmdline 'root=PARTUUID=abc panic=-1 console=null quiet loglevel=3 systemd.show_status=true rd.systemd.show_status=false'")
+    refute status.success?
+    assert_includes stderr, "still shows systemd status"
+
+    _stdout, stderr, status = run_function("validate_direct_cmdline 'root=PARTUUID=abc panic=-1 console=null quiet quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false'")
+    refute status.success?
+    assert_includes stderr, "exactly one quiet"
+
+    _stdout, stderr, status = run_function("validate_direct_cmdline 'root=PARTUUID=abc panic=-1 console=null quiet loglevel=3 systemd.show_status=false'")
+    refute status.success?
+    assert_includes stderr, "exactly one rd.systemd.show_status=false"
   end
 
   def test_direct_cmdline_removes_bootloader_initrd_and_console_arguments
-    command = "compose_direct_cmdline root=PARTUUID=abc ro console=tty1 console=ttyS0 earlycon=uart8250 panic=-1 BOOT_IMAGE=/vmlinuz initrd=initrd.img initrdfail"
+    command = "compose_direct_cmdline root=PARTUUID=abc ro console=tty1 console=ttyS0 earlycon=uart8250 panic=-1 quiet loglevel=7 systemd.show_status=true rd.systemd.show_status=true BOOT_IMAGE=/vmlinuz initrd=initrd.img initrdfail"
     stdout, stderr, status = run_function(command)
 
     assert status.success?, stderr
-    assert_equal "root=PARTUUID=abc ro panic=-1 console=null\n", stdout
+    assert_equal "root=PARTUUID=abc ro panic=-1 console=null quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false\n", stdout
   end
 
   def test_exact_label_parser_handles_verbose_output
@@ -264,6 +280,10 @@ class DirectUefiTest < Minitest::Test
     assert_includes workflow, "panic=-1"
     assert_includes workflow, %q([[ " $(< /proc/cmdline) " == *' console=null '* ]])
     assert_includes workflow, %q(! grep -Eq '(^| )earlycon(=| |$)' /proc/cmdline)
+    assert_includes workflow, %q(test "$(tr ' ' '\n' < /proc/cmdline | grep -c '^quiet$')" = 1)
+    assert_includes workflow, %q([[ " $(< /proc/cmdline) " == *' loglevel=3 '* ]])
+    assert_includes workflow, %q([[ " $(< /proc/cmdline) " == *' systemd.show_status=false '* ]])
+    assert_includes workflow, %q([[ " $(< /proc/cmdline) " == *' rd.systemd.show_status=false '* ]])
     assert_includes workflow, "direct-kernel.sha256"
     assert_includes workflow, "kernel-source-format"
     assert_includes workflow, 'test "$kernel_format" = raw'
@@ -295,7 +315,7 @@ class DirectUefiTest < Minitest::Test
     assert_includes script, '"${prepared_order%%,*}" == "${fallback_bootnum}"'
     assert_includes script, '"${prepared_order##*,}" == "${direct_bootnum}"'
     assert_includes script, 'cmp -s "${fallback_hashes_before}" "${fallback_hashes_after}"'
-    assert_includes script, "BOOT_IMAGE=*|initrd=*|initrdfail|initrdless_boot_fallback_triggered|console=*|earlycon|earlycon=*"
+    assert_includes script, "BOOT_IMAGE=*|initrd=*|initrdfail|initrdless_boot_fallback_triggered|console=*|earlycon|earlycon=*|quiet|loglevel=*|systemd.show_status=*|rd.systemd.show_status=*"
     assert_includes script, "validate_direct_cmdline"
     assert_includes script, "read -ra kernel_arguments < /proc/cmdline"
     assert_includes script, 'compose_direct_cmdline "${kernel_arguments[@]}"'
