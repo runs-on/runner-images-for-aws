@@ -228,6 +228,16 @@ class UbuntuTemplateTest < Minitest::Test
     assert_includes content, "rm -f /var/lib/dbus/machine-id"
   end
 
+  def test_full_rolaunch_starts_as_soon_as_networkd_is_ready
+    content = File.read(FULL_ROLAUNCH_SCRIPT)
+
+    assert_includes content, "DefaultDependencies=no"
+    assert_includes content, "Wants=systemd-networkd.service systemd-resolved.service"
+    assert_includes content, "After=systemd-networkd.service systemd-resolved.service"
+    assert_includes content, "Conflicts=shutdown.target"
+    assert_includes content, "Before=shutdown.target"
+  end
+
   def test_ubuntu26_full_and_descendants_disable_new_boot_daemons
     [FULL_ROLAUNCH_SCRIPT, DESCENDANT_ROLAUNCH_SCRIPT].each do |path|
       content = File.read(path)

@@ -132,6 +132,22 @@ validate_direct_cmdline() {
   [[ " ${kernel_cmdline} " == *' root=PARTUUID='* ]] || fail "direct kernel command line has no root=PARTUUID= argument"
   [[ " ${kernel_cmdline} " == *' panic=-1 '* ]] || fail "direct kernel command line must reboot immediately after a panic"
   [[ " ${kernel_cmdline} " != *' initrd='* ]] || fail "direct kernel command line still refers to an initrd"
+  [[ " ${kernel_cmdline} " != *' console='* ]] || fail "direct kernel command line must not write to a console"
+}
+
+compose_direct_cmdline() {
+  local argument kernel_cmdline=''
+
+  for argument in "$@"; do
+    case "${argument}" in
+      BOOT_IMAGE=*|initrd=*|initrdfail|initrdless_boot_fallback_triggered|console=*)
+        ;;
+      *)
+        kernel_cmdline+="${kernel_cmdline:+ }${argument}"
+        ;;
+    esac
+  done
+  printf '%s\n' "${kernel_cmdline}"
 }
 
 read_le16() {
@@ -219,7 +235,7 @@ main() {
   local kernel_release kernel_path kernel_config kernel_magic
   local esp_mount esp_source esp_parent esp_part esp_disk
   local fallback_loader='' loader
-  local kernel_cmdline='' argument config_option direct_filename direct_path direct_loader
+  local kernel_cmdline='' config_option direct_filename direct_path direct_loader
   local kernel_copy_size esp_available original_order fallback_bootnum direct_bootnum new_order
   local prepared_output prepared_next prepared_order direct_verbose installed_direct_kernel installed_direct_count
   local -a fallback_loader_paths=(
@@ -263,15 +279,7 @@ main() {
   [[ -n "${fallback_loader}" ]] || fail "no existing GRUB or shim EFI loader found"
 
   read -ra kernel_arguments < /proc/cmdline
-  for argument in "${kernel_arguments[@]}"; do
-    case "${argument}" in
-      BOOT_IMAGE=*|initrd=*|initrdfail|initrdless_boot_fallback_triggered)
-        ;;
-      *)
-        kernel_cmdline+="${kernel_cmdline:+ }${argument}"
-        ;;
-    esac
-  done
+  kernel_cmdline="$(compose_direct_cmdline "${kernel_arguments[@]}")"
   validate_direct_cmdline "${kernel_cmdline}"
 
   install -d -m 0755 "${esp_mount}/EFI/runs-on" "${state_dir}"

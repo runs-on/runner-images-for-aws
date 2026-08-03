@@ -204,6 +204,7 @@ jobs:
                 [[ " $expected_cmdline " == *' panic=-1 '* ]]
                 [[ " $(< /proc/cmdline) " != *' BOOT_IMAGE='* ]]
                 [[ " $(< /proc/cmdline) " != *' initrd='* ]]
+                [[ " $(< /proc/cmdline) " != *' console='* ]]
 
                 kernel_release="$(sudo cat "$direct_uefi_state/kernel-release")"
                 kernel_format="$(sudo cat "$direct_uefi_state/kernel-source-format")"
