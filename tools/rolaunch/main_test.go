@@ -19,7 +19,7 @@ func TestResolverConfigHasEC2Resolver(t *testing.T) {
 	if !resolverConfigHasEC2Resolver([]byte("nameserver " + defaultEC2Resolver + "\n")) {
 		t.Fatal("expected resolver config to detect EC2 resolver")
 	}
-	if resolverConfigHasEC2Resolver([]byte("nameserver 127.0.0.53\n")) {
+	if resolverConfigHasEC2Resolver([]byte("nameserver 10.0.0.2\n")) {
 		t.Fatal("expected non-EC2 resolver to be rejected")
 	}
 }
@@ -44,6 +44,62 @@ func TestEnsureResolverConfigRewritesUnexpectedResolver(t *testing.T) {
 	want := "nameserver " + defaultEC2Resolver + "\noptions timeout:1 attempts:5\n"
 	if got := string(raw); got != want {
 		t.Fatalf("unexpected resolver config contents: %q", got)
+	}
+}
+
+func TestRunFullModeSkipsResolverManagement(t *testing.T) {
+	cfg := testConfig(t.TempDir())
+	cfg.mode = launchModeFull
+	ops := testLauncherOps()
+	ops.ensureResolverConfig = func(string) error {
+		return fmt.Errorf("resolver management must be disabled")
+	}
+
+	if err := runWithOps(context.Background(), cfg, ops); err != nil {
+		t.Fatalf("runWithOps returned error: %v", err)
+	}
+}
+
+func TestRunMinimalModeManagesResolver(t *testing.T) {
+	cfg := testConfig(t.TempDir())
+	ops := testLauncherOps()
+	resolverManaged := make(chan struct{})
+	ops.ensureResolverConfig = func(string) error {
+		close(resolverManaged)
+		return nil
+	}
+
+	if err := runWithOps(context.Background(), cfg, ops); err != nil {
+		t.Fatalf("runWithOps returned error: %v", err)
+	}
+	waitForSignal(t, resolverManaged, "resolver management")
+}
+
+func TestParseLaunchMode(t *testing.T) {
+	t.Parallel()
+
+	for _, value := range []string{string(launchModeMinimal), string(launchModeFull)} {
+		mode, err := parseLaunchMode(value)
+		if err != nil {
+			t.Fatalf("parseLaunchMode(%q) returned error: %v", value, err)
+		}
+		if mode != launchMode(value) {
+			t.Fatalf("parseLaunchMode(%q) returned %q", value, mode)
+		}
+	}
+	if _, err := parseLaunchMode(""); err == nil {
+		t.Fatal("expected empty launch mode to be rejected")
+	}
+}
+
+func TestDefaultAndZeroValueLaunchModesAreMinimal(t *testing.T) {
+	t.Parallel()
+
+	if defaultLaunchMode != launchModeMinimal {
+		t.Fatalf("unexpected default launch mode %q", defaultLaunchMode)
+	}
+	if (config{}).isFullMode() {
+		t.Fatal("zero-value config unexpectedly enables full mode")
 	}
 }
 
@@ -283,6 +339,71 @@ func TestRunExecutesUserDataOnlyAfterApplyPhaseCompletes(t *testing.T) {
 
 	if err := <-runDone; err != nil {
 		t.Fatalf("runWithOps returned error: %v", err)
+	}
+}
+
+func TestRunFullModeExecutesUserDataWithoutReadinessDeadline(t *testing.T) {
+	cfg := testConfig(t.TempDir())
+	cfg.mode = launchModeFull
+	ops := testLauncherOps()
+	ops.fetchUserData = func(context.Context, config) ([]byte, error) {
+		return []byte("#!/bin/sh\necho ok\n"), nil
+	}
+	ops.executeUserData = func(ctx context.Context, _ config) error {
+		if deadline, ok := ctx.Deadline(); ok {
+			return fmt.Errorf("unexpected userdata deadline: %s", deadline)
+		}
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("unexpected userdata context error: %w", err)
+		}
+		return nil
+	}
+
+	readinessCtx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	<-readinessCtx.Done()
+
+	if err := runWithOps(readinessCtx, cfg, ops); err != nil {
+		t.Fatalf("runWithOps returned error: %v", err)
+	}
+}
+
+func TestRunMinimalModeExecutesUserDataWithReadinessDeadline(t *testing.T) {
+	cfg := testConfig(t.TempDir())
+	ops := testLauncherOps()
+	ops.fetchUserData = func(context.Context, config) ([]byte, error) {
+		return []byte("#!/bin/sh\necho ok\n"), nil
+	}
+	ops.executeUserData = func(ctx context.Context, _ config) error {
+		if _, ok := ctx.Deadline(); !ok {
+			return fmt.Errorf("expected userdata readiness deadline")
+		}
+		return nil
+	}
+
+	readinessCtx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	if err := runWithOps(readinessCtx, cfg, ops); err != nil {
+		t.Fatalf("runWithOps returned error: %v", err)
+	}
+}
+
+func TestRunMinimalModeReportsReadinessCancellationFromUserData(t *testing.T) {
+	cfg := testConfig(t.TempDir())
+	ops := testLauncherOps()
+	ops.fetchUserData = func(context.Context, config) ([]byte, error) {
+		return []byte("#!/bin/sh\necho ok\n"), nil
+	}
+
+	readinessCtx, cancel := context.WithCancel(context.Background())
+	ops.executeUserData = func(context.Context, config) error {
+		cancel()
+		return fmt.Errorf("script interrupted")
+	}
+
+	err := runWithOps(readinessCtx, cfg, ops)
+	if err == nil || !strings.Contains(err.Error(), "executing userdata script: context canceled") {
+		t.Fatalf("unexpected runWithOps error: %v", err)
 	}
 }
 
@@ -646,21 +767,27 @@ func TestRunPersistsTimingsForEmptyUserData(t *testing.T) {
 	assertStepAbsent(t, steps, "rolaunch.userdata-finished")
 }
 
-func TestRunPersistsRootResizeFinishedWhenResizeChangesFilesystem(t *testing.T) {
+func TestRunFullModeWaitsForRootResizeBeforeExecutingUserDataAndPersistsMilestone(t *testing.T) {
 	t.Parallel()
 
 	cfg := testConfig(t.TempDir())
+	cfg.mode = launchModeFull
 	ops := testLauncherOps()
 	ops.fetchUserData = func(context.Context, config) ([]byte, error) {
 		return []byte("#!/bin/sh\necho ok\n"), nil
 	}
 
 	resizeDone := make(chan rootResizeResult, 1)
+	resizeWaitStarted := make(chan struct{})
 	executeStarted := make(chan struct{})
 	allowExecuteFinish := make(chan struct{})
 
 	ops.startRootFilesystemResize = func(context.Context) <-chan rootResizeResult {
 		return resizeDone
+	}
+	ops.waitForRootFilesystemResize = func(done <-chan rootResizeResult) bool {
+		close(resizeWaitStarted)
+		return waitForRootFilesystemResize(done)
 	}
 	ops.executeUserData = func(context.Context, config) error {
 		close(executeStarted)
@@ -672,17 +799,13 @@ func TestRunPersistsRootResizeFinishedWhenResizeChangesFilesystem(t *testing.T) 
 		return runWithOps(context.Background(), cfg, ops)
 	})
 
-	waitForSignal(t, executeStarted, "userdata execution")
-	close(allowExecuteFinish)
-
-	select {
-	case err := <-runDone:
-		t.Fatalf("runWithOps returned early: %v", err)
-	case <-time.After(100 * time.Millisecond):
-	}
+	waitForSignal(t, resizeWaitStarted, "root resize wait")
+	assertNotSignaled(t, executeStarted, "userdata execution before root resize completion")
 
 	resizeDone <- rootResizeResult{changed: true}
 	close(resizeDone)
+	waitForSignal(t, executeStarted, "userdata execution")
+	close(allowExecuteFinish)
 
 	if err := <-runDone; err != nil {
 		t.Fatalf("runWithOps returned error: %v", err)
@@ -697,11 +820,69 @@ func TestRunPersistsRootResizeFinishedWhenResizeChangesFilesystem(t *testing.T) 
 		"rolaunch.host-key-ready",
 		"rolaunch.identity-ready",
 		"rolaunch.bootstrap-ready",
+		"rolaunch.root-resize-finished",
+		"rolaunch.userdata-started",
+		"rolaunch.userdata-finished",
+		"rolaunch.done",
+	})
+	assertStepBefore(t, steps, "rolaunch.root-resize-finished", "rolaunch.userdata-started")
+}
+
+func TestRunMinimalModeWaitsForRootResizeAfterUserDataAndPersistsMilestone(t *testing.T) {
+	t.Parallel()
+
+	cfg := testConfig(t.TempDir())
+	ops := testLauncherOps()
+	ops.fetchUserData = func(context.Context, config) ([]byte, error) {
+		return []byte("#!/bin/sh\necho ok\n"), nil
+	}
+
+	resizeDone := make(chan rootResizeResult, 1)
+	resizeWaitStarted := make(chan struct{})
+	executeStarted := make(chan struct{})
+	allowExecuteFinish := make(chan struct{})
+
+	ops.startRootFilesystemResize = func(context.Context) <-chan rootResizeResult {
+		return resizeDone
+	}
+	ops.waitForRootFilesystemResize = func(done <-chan rootResizeResult) bool {
+		close(resizeWaitStarted)
+		return waitForRootFilesystemResize(done)
+	}
+	ops.executeUserData = func(context.Context, config) error {
+		close(executeStarted)
+		<-allowExecuteFinish
+		return nil
+	}
+
+	runDone := runAsync(func() error {
+		return runWithOps(context.Background(), cfg, ops)
+	})
+
+	waitForSignal(t, executeStarted, "userdata execution")
+	assertNotSignaled(t, resizeWaitStarted, "root resize wait before userdata completion")
+	close(allowExecuteFinish)
+	waitForSignal(t, resizeWaitStarted, "root resize wait")
+	select {
+	case err := <-runDone:
+		t.Fatalf("runWithOps returned before root resize completion: %v", err)
+	default:
+	}
+
+	resizeDone <- rootResizeResult{changed: true}
+	close(resizeDone)
+	if err := <-runDone; err != nil {
+		t.Fatalf("runWithOps returned error: %v", err)
+	}
+
+	steps := mustLoadSteps(t, cfg.timingsPath)
+	assertStepsPresent(t, steps, []string{
 		"rolaunch.userdata-started",
 		"rolaunch.userdata-finished",
 		"rolaunch.root-resize-finished",
 		"rolaunch.done",
 	})
+	assertStepBefore(t, steps, "rolaunch.userdata-finished", "rolaunch.root-resize-finished")
 }
 
 func TestRunIgnoresInvalidExistingTimingsFile(t *testing.T) {
@@ -864,6 +1045,7 @@ func testConfig(workDir string) config {
 		userDataPath: filepath.Join(workDir, defaultUserDataName),
 		doneMarker:   filepath.Join(workDir, defaultDoneMarkerName),
 		timingsPath:  filepath.Join(workDir, "timings.json"),
+		mode:         launchModeMinimal,
 	}
 }
 
@@ -876,6 +1058,7 @@ func testLauncherOps() launcherOps {
 		waitForInstanceIdentity: func(context.Context, config) (instanceIdentity, error) {
 			return instanceIdentity{InstanceID: "i-123", Region: "eu-west-3"}, nil
 		},
+		configureInstanceHostname: func(instanceIdentity) error { return nil },
 		enrichInstanceIdentity: func(_ context.Context, _ config, identity instanceIdentity) (instanceIdentity, error) {
 			return identity, nil
 		},
@@ -1028,5 +1211,21 @@ func assertStepAbsent(t *testing.T, steps []Step, name string) {
 		if step.Name == name {
 			t.Fatalf("unexpected step %q in %+v", name, steps)
 		}
+	}
+}
+
+func assertStepBefore(t *testing.T, steps []Step, before string, after string) {
+	t.Helper()
+
+	positions := make(map[string]int, 2)
+	for index, step := range steps {
+		if step.Name == before || step.Name == after {
+			positions[step.Name] = index
+		}
+	}
+	beforeIndex, hasBefore := positions[before]
+	afterIndex, hasAfter := positions[after]
+	if !hasBefore || !hasAfter || beforeIndex >= afterIndex {
+		t.Fatalf("expected %q before %q in %+v", before, after, steps)
 	}
 }

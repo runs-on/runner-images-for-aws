@@ -11,6 +11,10 @@ on:
         type: boolean
         description: ubuntu24-gpu-x64
         default: true
+      ubuntu26_gpu_x64:
+        type: boolean
+        description: ubuntu26-gpu-x64
+        default: false
   workflow_run:
     workflows: ['Linux images']
     branches: [main]
@@ -29,10 +33,12 @@ jobs:
         env:
           UBUNTU22_GPU_X64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu22_gpu_x64 }}
           UBUNTU24_GPU_X64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu24_gpu_x64 }}
+          UBUNTU26_GPU_X64: ${{ github.event_name == 'workflow_dispatch' && inputs.ubuntu26_gpu_x64 }}
         run: |
           images=()
           [ "$UBUNTU22_GPU_X64" = "true" ] && images+=("ubuntu22-gpu-x64")
           [ "$UBUNTU24_GPU_X64" = "true" ] && images+=("ubuntu24-gpu-x64")
+          [ "$UBUNTU26_GPU_X64" = "true" ] && images+=("ubuntu26-gpu-x64")
           if [ "${#images[@]}" -eq 0 ]; then
             echo "No images selected" >&2
             exit 1

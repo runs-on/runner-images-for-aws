@@ -18,15 +18,20 @@ variable "ami_name" {
 }
 
 variable "ami_description" {
-  type    = string
+  type = string
 }
 
 variable "ami_regions" {
-  type    = list(string)
+  type = list(string)
+}
+
+variable "publish_publicly" {
+  type    = bool
+  default = true
 }
 
 variable "image_os" {
-  type    = string
+  type = string
   // ex: ubuntu22
   default = "${env("IMAGE_OS")}"
 }
@@ -37,12 +42,17 @@ variable "image_version" {
 }
 
 variable "subnet_id" {
-  type    = string
+  type = string
 }
 
 variable "volume_size" {
   type    = number
   default = 30
+}
+
+variable "volume_throughput" {
+  type    = number
+  default = 125
 }
 
 variable "volume_type" {
@@ -56,15 +66,15 @@ variable "instance_type" {
 }
 
 variable "region" {
-  type    = string
+  type = string
 }
 
 variable "source_ami_owner" {
-  type    = string
+  type = string
 }
 
 variable "source_ami_name" {
-  type    = string
+  type = string
 }
 
 data "amazon-ami" "runs-on-ami" {
@@ -88,44 +98,45 @@ source "amazon-ebs" "build_ebs" {
   ami_name                                  = "${var.ami_name}"
   ami_description                           = "${var.ami_description}"
   ami_virtualization_type                   = "hvm"
-  # make AMIs publicly accessible
-  ami_groups                                = ["all"]
-  ebs_optimized                             = true
-  instance_type                             = var.instance_type
-  region                                    = "${var.region}"
-  ssh_username                              = "ubuntu"
-  subnet_id                                 = "${var.subnet_id}"
-  associate_public_ip_address               = "true"
-  force_deregister                          = "true"
-  force_delete_snapshot                     = "true"
+  # Make AMIs public for release builds; dev accounts can keep them private.
+  ami_groups                  = var.publish_publicly ? ["all"] : []
+  ebs_optimized               = true
+  instance_type               = var.instance_type
+  region                      = "${var.region}"
+  ssh_username                = "ubuntu"
+  subnet_id                   = "${var.subnet_id}"
+  associate_public_ip_address = "true"
+  force_deregister            = "true"
+  force_delete_snapshot       = "true"
 
   ami_regions = "${var.ami_regions}"
 
-  // make underlying snapshot public
-  snapshot_groups = ["all"]
+  // Keep the snapshot visibility aligned with the AMI.
+  snapshot_groups = var.publish_publicly ? ["all"] : []
 
   launch_block_device_mappings {
-    device_name = "/dev/sda1"
-    volume_type = "${var.volume_type}"
-    volume_size = "${var.volume_size}"
+    device_name           = "/dev/sda1"
+    volume_type           = "${var.volume_type}"
+    volume_size           = "${var.volume_size}"
+    throughput            = var.volume_throughput
     delete_on_termination = "true"
-    encrypted = "false"
+    encrypted             = "false"
   }
 
   run_tags = {
-    creator     = "RunsOn"
-    contact     = "ops@runs-on.com"
-    ami_name    = "${var.ami_name}"
+    creator  = "RunsOn"
+    contact  = "ops@runs-on.com"
+    ami_name = "${var.ami_name}"
   }
 
   tags = {
-    creator     = "RunsOn"
-    contact     = "ops@runs-on.com"
+    creator = "RunsOn"
+    contact = "ops@runs-on.com"
   }
 
   snapshot_tags = {
-    creator     = "RunsOn"
-    contact     = "ops@runs-on.com"
+    creator = "RunsOn"
+    contact = "ops@runs-on.com"
   }
 
   source_ami_filter {
@@ -138,7 +149,7 @@ source "amazon-ebs" "build_ebs" {
     most_recent = true
   }
 
-    user_data = <<EOF
+  user_data = <<EOF
 #!/bin/bash
 systemctl enable ssh
 systemctl start ssh
@@ -153,8 +164,8 @@ build {
     destination = "/tmp/packer"
   }
   provisioner "shell" {
-    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = ["${var.project_root}/integrations/stepsecurity/packer/install-linux.sh"]
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    scripts         = ["${var.project_root}/integrations/stepsecurity/packer/install-linux.sh"]
   }
   provisioner "shell" {
     execute_command   = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
@@ -162,9 +173,10 @@ build {
     inline            = ["echo 'Reboot VM'", "sudo reboot"]
   }
   provisioner "shell" {
+    environment_vars    = ["IMAGE_OS=${var.image_os}"]
     execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     pause_before        = "1m0s"
-    scripts             = ["${path.root}/../scripts/build/cleanup.sh", "${path.root}/../custom/files/after-reboot.sh"]
+    scripts             = ["${path.root}/../scripts/build/cleanup.sh", "${path.root}/../custom/files/after-reboot.sh", "${path.root}/../custom/files/finalize-rolaunch-descendant.sh"]
     start_retry_timeout = "10m"
   }
 }

@@ -126,8 +126,45 @@ jobs:
     env:
       FILENAME: random-file-${{ inputs.ami_id }}-${{github.run_id}}-${{github.run_attempt }}-${{ inputs.index }}
     steps:
-      - name: Logs
-        run: sudo cat /var/log/cloud-init-output.log
+      - name: Launcher logs
+        shell: bash
+        run: |
+          set -euo pipefail
+          if sudo systemctl list-unit-files rolaunch.service --no-legend | grep -q '^rolaunch.service'; then
+            sudo systemctl status rolaunch.service --no-pager || true
+            sudo journalctl --unit rolaunch.service --no-pager || true
+            sudo cat /var/lib/rolaunch/timings.json || true
+            sudo systemctl is-active --quiet rolaunch.service
+            if sudo systemctl cat rolaunch.service | grep -q -- '--mode=full'; then
+              test -e /etc/cloud/cloud-init.disabled
+              test -s /etc/systemd/network/10-runs-on-ec2.network
+              test "$(sudo systemctl is-enabled cloud-init-main.service)" = masked
+              test "$(sudo systemctl is-enabled netplan-configure.service)" = masked
+              test "$(sudo systemctl is-enabled systemd-networkd-wait-online.service)" = masked
+              test "$(sudo systemctl is-enabled netavark-dhcp-proxy.service)" = disabled
+              test "$(sudo systemctl is-enabled netavark-dhcp-proxy.socket)" = enabled
+              test "$(sudo systemctl is-enabled udisks2.service)" = disabled
+              ! sudo systemctl is-active --quiet netavark-dhcp-proxy.service
+              ! sudo systemctl is-active --quiet udisks2.service
+              ! sudo systemctl is-active --quiet systemd-binfmt.service
+              test "$(sudo systemctl show systemd-binfmt.service -p ExecMainStartTimestampMonotonic --value)" = 0
+              interface=""
+              for path in /sys/class/net/*; do
+                if [[ -e "$path/device/driver" && "$(basename "$(readlink -f "$path/device/driver")")" == ena ]]; then
+                  interface="$(basename "$path")"
+                  break
+                fi
+              done
+              test -n "$interface"
+              sudo networkctl status "$interface" --no-pager | grep -F '10-runs-on-ec2.network'
+              sudo resolvectl dns "$interface" | grep -Eq '[0-9]'
+              sudo resolvectl domain "$interface" | grep -Eq '[[:alnum:]]'
+              sudo networkctl status --all
+              sudo resolvectl status
+            fi
+          else
+            sudo cat /var/log/cloud-init-output.log
+          fi
       - name: Systemctl status
         run: sudo systemctl status
       - uses: runs-on/action@v2 # keep pinned on tag as we need to make sure latest version passes tests

@@ -19,7 +19,9 @@ usage = Slop::Options.new do |opts|
   opts.string '--subnet-id', 'Subnet to launch into'
   opts.string '--ssh-user', 'SSH username', default: 'ubuntu'
   opts.integer '--ssh-timeout', 'Max seconds to wait for SSH login', default: 600
-  opts.integer '--root-throughput', 'Override root gp3 throughput in MiB/s', default: 750
+  opts.integer '--root-iops', 'Override root gp3 IOPS'
+  opts.integer '--root-initialization-rate', 'Provisioned snapshot initialization rate in MiB/s (100-300)'
+  opts.integer '--root-throughput', 'Override root gp3 throughput in MiB/s'
   opts.integer '--root-volume-size', 'Override root volume size in GiB'
   opts.bool '-h', '--help', 'Show help'
 end
@@ -37,6 +39,11 @@ end
 if options[:help] || options[:ami_name_or_id].nil?
   puts usage
   exit(options[:help] ? 0 : 1)
+end
+
+if options[:root_initialization_rate] && !(100..300).cover?(options[:root_initialization_rate])
+  warn "--root-initialization-rate must be between 100 and 300 MiB/s"
+  exit 1
 end
 
 def linux_user_data(ssh_user:, public_key:)
@@ -197,7 +204,7 @@ def build_keypair(dir)
   [private_key, File.read(public_key).strip]
 end
 
-def root_block_device_override(image, root_throughput:, root_volume_size:)
+def root_block_device_override(image, root_iops:, root_initialization_rate:, root_throughput:, root_volume_size:)
   root = image.block_device_mappings.find do |mapping|
     mapping.device_name == image.root_device_name && mapping.ebs
   end
@@ -211,9 +218,12 @@ def root_block_device_override(image, root_throughput:, root_volume_size:)
       delete_on_termination: true
     }
   }
-  override[:ebs][:iops] = root.ebs.iops if root.ebs.iops
-  if root.ebs.volume_type == 'gp3' && root_throughput
-    override[:ebs][:throughput] = root_throughput
+  iops = root_iops || root.ebs.iops
+  override[:ebs][:iops] = iops if iops
+  override[:ebs][:volume_initialization_rate] = root_initialization_rate if root_initialization_rate
+  if root.ebs.volume_type == 'gp3'
+    throughput = root_throughput || root.ebs.throughput
+    override[:ebs][:throughput] = throughput if throughput
   end
   override
 end
@@ -240,7 +250,7 @@ def additional_block_device_mappings(image)
   end
 end
 
-def launch_instance(ec2:, image:, instance_type:, subnet:, security_group_id:, user_data:, root_throughput:, root_volume_size:)
+def launch_instance(ec2:, image:, instance_type:, subnet:, security_group_id:, user_data:, root_iops:, root_initialization_rate:, root_throughput:, root_volume_size:)
   instance = ec2.run_instances(
     image_id: image.image_id,
     instance_type: instance_type,
@@ -251,6 +261,8 @@ def launch_instance(ec2:, image:, instance_type:, subnet:, security_group_id:, u
     block_device_mappings: [
       root_block_device_override(
         image,
+        root_iops: root_iops,
+        root_initialization_rate: root_initialization_rate,
         root_throughput: root_throughput,
         root_volume_size: root_volume_size
       )
@@ -267,6 +279,13 @@ def launch_instance(ec2:, image:, instance_type:, subnet:, security_group_id:, u
     tag_specifications: [
       {
         resource_type: 'instance',
+        tags: [
+          { key: 'Name', value: 'profile-boot' },
+          { key: 'application', value: 'RunsOn' }
+        ]
+      },
+      {
+        resource_type: 'volume',
         tags: [
           { key: 'Name', value: 'profile-boot' },
           { key: 'application', value: 'RunsOn' }
@@ -331,10 +350,18 @@ remote_script << <<~'EOS'
 EOS
 remote_script << "#{analyze_prefix}systemd-analyze critical-chain --no-pager 2>&1 || true\n"
 remote_script << <<~'EOS'
+  echo '=== systemd-analyze rolaunch critical-chain ==='
+EOS
+remote_script << "#{analyze_prefix}systemd-analyze critical-chain rolaunch.service --no-pager 2>&1 || true\n"
+remote_script << <<~'EOS'
   echo '=== systemd-analyze blame top 25 ==='
 EOS
 remote_script << "#{analyze_prefix}systemd-analyze blame --no-pager 2>&1 | head -n 25 || true\n"
 remote_script << <<~'EOS'
+  echo '=== active boot services ==='
+  systemctl list-units --type=service --state=running,exited --no-pager --no-legend 2>&1 || true
+  echo '=== enabled service units ==='
+  systemctl list-unit-files --type=service --state=enabled --no-pager --no-legend 2>&1 || true
   echo '=== cloud-init analyze blame ==='
   cloud-init analyze blame 2>&1 || true
   echo '=== cloud-init status --long ==='
@@ -413,11 +440,65 @@ PY
   fi
   echo '=== largest files ==='
   find /boot /usr /var -xdev -type f -printf '%s %p\n' 2>/dev/null | sort -nr | head -n 25 || true
+  echo '=== boot configuration ==='
+  uname -a 2>&1 || true
+  cat /proc/cmdline 2>&1 || true
+  if [ -d /sys/firmware/efi ]; then echo 'firmware=uefi'; else echo 'firmware=legacy-bios'; fi
+  grep -H . /etc/default/grub.d/40-force-partuuid.cfg /etc/default/grub.d/99-runs-on-fastboot.cfg 2>/dev/null || true
+  grep -nE 'GRUB_FORCE|initrd|^[[:space:]]*linux ' /boot/grub/grub.cfg 2>/dev/null | head -n 60 || true
+  ls -lh /boot/vmlinuz-* /boot/initrd.img-* /boot/microcode.cpio 2>/dev/null || true
   echo '=== rolaunch service ==='
   systemctl status rolaunch.service --no-pager 2>&1 || true
+  systemctl show rolaunch.service \
+    -p ActiveEnterTimestampMonotonic \
+    -p ExecMainStartTimestampMonotonic \
+    -p ExecMainExitTimestampMonotonic 2>&1 || true
+  echo '=== rolaunch timings ==='
+  sudo cat /var/lib/rolaunch/timings.json 2>&1 || true
+  echo '=== rolaunch journal ==='
+  sudo journalctl --boot --unit rolaunch.service --no-pager --output=short-monotonic 2>&1 || true
+  echo '=== EC2 network bootstrap ==='
+  systemctl list-unit-files \
+    cloud-init-local.service \
+    cloud-init.service \
+    cloud-config.service \
+    cloud-final.service \
+    systemd-networkd.service \
+    systemd-resolved.service \
+    rolaunch.service \
+    --no-pager \
+    --no-legend 2>&1 || true
+  systemctl show \
+    cloud-init-local.service \
+    cloud-init.service \
+    systemd-networkd.service \
+    systemd-resolved.service \
+    -p Id \
+    -p ActiveState \
+    -p SubState \
+    -p ExecMainStatus \
+    -p ActiveEnterTimestampMonotonic 2>&1 || true
+  sudo grep -H . /etc/cloud/cloud.cfg.d/99-runs-on-rolaunch-network.cfg /etc/netplan/*.yaml 2>/dev/null || true
+  networkctl list --no-pager --no-legend 2>&1 || true
+  ip -brief address 2>&1 || true
+  ip -4 route show table all 2>&1 || true
+  resolvectl dns 2>&1 || true
+  resolvectl domain 2>&1 || true
+  curl --noproxy '*' --silent --show-error --max-time 2 \
+    --request PUT \
+    --header 'X-aws-ec2-metadata-token-ttl-seconds: 60' \
+    --output /dev/null \
+    --write-out 'imds_v2_token_http=%{http_code}\n' \
+    http://169.254.169.254/latest/api/token 2>&1 || true
   echo '=== ssh units ==='
   systemctl status ssh --no-pager 2>&1 || true
   systemctl status ssh.socket --no-pager 2>&1 || true
+  echo '=== runner readiness ==='
+  hostname 2>&1 || true
+  systemctl is-active systemd-networkd.service chrony.service irqbalance.service amazon-ssm-agent.service 2>&1 || true
+  systemctl is-enabled docker.socket rolaunch.service 2>&1 || true
+  sudo -n docker info --format '{{json .ServerVersion}}' 2>&1 || true
+  cat /proc/sys/fs/binfmt_misc/status 2>&1 || true
 EOS
 
 Dir.mktmpdir('profile-boot') do |dir|
@@ -437,7 +518,15 @@ Dir.mktmpdir('profile-boot') do |dir|
     puts "Region: #{options[:region]}"
     puts "Subnet: #{subnet.subnet_id}"
     puts "Security group: #{security_group_id}"
-    puts "Root throughput override: #{options[:root_throughput]} MiB/s"
+    puts "Root IOPS override: #{options[:root_iops]}" if options[:root_iops]
+    if options[:root_initialization_rate]
+      puts "Root initialization rate: #{options[:root_initialization_rate]} MiB/s"
+    end
+    if options[:root_throughput]
+      puts "Root throughput override: #{options[:root_throughput]} MiB/s"
+    else
+      puts "Root throughput: AMI block device mapping"
+    end
     puts "Root volume size override: #{options[:root_volume_size] || image.block_device_mappings.find { |m| m.device_name == image.root_device_name }&.ebs&.volume_size} GiB"
     puts "SSH timeout: #{options[:ssh_timeout]}s"
 
@@ -449,6 +538,8 @@ Dir.mktmpdir('profile-boot') do |dir|
       subnet: subnet,
       security_group_id: security_group_id,
       user_data: user_data,
+      root_iops: options[:root_iops],
+      root_initialization_rate: options[:root_initialization_rate],
       root_throughput: options[:root_throughput],
       root_volume_size: options[:root_volume_size]
     )

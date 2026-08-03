@@ -6,12 +6,14 @@ require 'base64'
 require 'fileutils'
 require 'json'
 require 'open-uri'
+require 'open3'
 require 'slop'
 require 'socket'
 require 'tempfile'
 require 'tmpdir'
 require 'timeout'
 require 'shellwords'
+require 'time'
 
 options = {}
 
@@ -22,9 +24,13 @@ usage = Slop::Options.new do |opts|
   opts.string '--subnet-id', 'Subnet to launch into'
   opts.string '--ssh-user', 'SSH username', default: 'ubuntu'
   opts.integer '--ssh-timeout', 'Max seconds to wait for SSH login', default: 600
-  opts.integer '--root-throughput', 'Override root gp3 throughput in MiB/s', default: 750
-  opts.integer '--warm-runs', 'Warm-up launches before measurement', default: 2
-  opts.integer '--measure-runs', 'Measured launches after warm-up', default: 2
+  opts.string '--output-json', 'Write the complete benchmark result to this path'
+  opts.integer '--root-iops', 'Override root gp3 IOPS'
+  opts.integer '--root-initialization-rate', 'Provisioned snapshot initialization rate in MiB/s (100-300)'
+  opts.integer '--root-throughput', 'Override root gp3 throughput in MiB/s'
+  opts.integer '--root-volume-size', 'Override root volume size in GiB'
+  opts.integer '--warm-runs', 'Warm-up launches before measurement', default: 3
+  opts.integer '--measure-runs', 'Measured launches after warm-up', default: 3
   opts.bool '-h', '--help', 'Show help'
 end
 
@@ -41,6 +47,21 @@ end
 if options[:help] || options[:ami_name_or_id].nil?
   puts usage
   exit(options[:help] ? 0 : 1)
+end
+
+if options[:root_initialization_rate] && !(100..300).cover?(options[:root_initialization_rate])
+  warn "--root-initialization-rate must be between 100 and 300 MiB/s"
+  exit 1
+end
+
+if options[:warm_runs].negative?
+  warn "--warm-runs must be zero or greater"
+  exit 1
+end
+
+if options[:measure_runs] <= 0
+  warn "--measure-runs must be greater than zero"
+  exit 1
 end
 
 def linux_user_data(ssh_user:, public_key:)
@@ -77,6 +98,8 @@ def linux_user_data(ssh_user:, public_key:)
     systemctl unmask ssh.service || true
     systemctl enable ssh.service || true
     systemctl start ssh.service || true
+    date --utc '+%Y-%m-%dT%H:%M:%S.%NZ' > /run/runs-on-boot-benchmark-ready
+    chmod 0644 /run/runs-on-boot-benchmark-ready
   EOS
 end
 
@@ -158,7 +181,9 @@ def wait_for_public_ip(ec2, instance_id, timeout_seconds:)
   loop do
     begin
       instance = ec2.describe_instances(instance_ids: [instance_id]).reservations.first.instances.first
-      return instance.public_ip_address if instance.public_ip_address && !instance.public_ip_address.empty?
+      if instance.public_ip_address && !instance.public_ip_address.empty?
+        return [instance.public_ip_address, instance.launch_time]
+      end
     rescue Aws::EC2::Errors::InvalidInstanceIDNotFound => e
       last_error = e
     end
@@ -170,10 +195,13 @@ def wait_for_public_ip(ec2, instance_id, timeout_seconds:)
 end
 
 def wait_for_ssh(ip:, ssh_user:, private_key_path:, timeout_seconds:)
-  deadline = Time.now + timeout_seconds
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout_seconds
   last_error = nil
 
   loop do
+    remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    raise "Timed out waiting for SSH on #{ip}: #{last_error}" if remaining <= 0
+
     begin
       ssh_cmd = [
         'ssh',
@@ -182,21 +210,180 @@ def wait_for_ssh(ip:, ssh_user:, private_key_path:, timeout_seconds:)
         '-o', 'StrictHostKeyChecking=no',
         '-o', 'UserKnownHostsFile=/dev/null',
         '-o', 'ConnectTimeout=5',
+        '-o', 'ServerAliveInterval=2',
+        '-o', 'ServerAliveCountMax=2',
         '-i', private_key_path,
         "#{ssh_user}@#{ip}",
         'true'
       ]
-      ok = system(*ssh_cmd, out: File::NULL, err: File::NULL)
-      return if ok
-      last_error = 'ssh exited non-zero'
+      _stdout, stderr, status = capture3_with_timeout(
+        *ssh_cmd,
+        timeout_seconds: [remaining, 10].min
+      )
+      return if status.success?
+
+      last_error = stderr.strip.empty? ? 'ssh exited non-zero' : stderr.strip
     rescue StandardError => e
       last_error = e
     end
 
-    raise "Timed out waiting for SSH on #{ip}: #{last_error}" if Time.now >= deadline
+    remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    raise "Timed out waiting for SSH on #{ip}: #{last_error}" if remaining <= 0
 
-    sleep 2
+    sleep [2, remaining].min
   end
+end
+
+class RolaunchUnavailable < StandardError; end
+
+def signal_process_group(pid, signal)
+  Process.kill(signal, -pid)
+rescue Errno::ESRCH
+  nil
+end
+
+def capture3_with_timeout(*command, timeout_seconds:)
+  Open3.popen3(*command, pgroup: true) do |stdin, stdout, stderr, wait_thread|
+    stdin.close
+    stdout_reader = Thread.new { stdout.read }
+    stderr_reader = Thread.new { stderr.read }
+
+    unless wait_thread.join(timeout_seconds)
+      signal_process_group(wait_thread.pid, 'TERM')
+      unless wait_thread.join(0.5)
+        signal_process_group(wait_thread.pid, 'KILL')
+        wait_thread.join
+      end
+      stdout_reader.join
+      stderr_reader.join
+      raise Timeout::Error, "command timed out after #{timeout_seconds.round(2)}s"
+    end
+
+    [stdout_reader.value, stderr_reader.value, wait_thread.value]
+  end
+end
+
+def read_rolaunch_ready_seconds(ip:, ssh_user:, private_key_path:, timeout_seconds: 30, poll_interval: 0.2)
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout_seconds
+  last_error = nil
+
+  loop do
+    remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    begin
+      return read_rolaunch_ready_seconds_once(
+        ip: ip,
+        ssh_user: ssh_user,
+        private_key_path: private_key_path,
+        timeout_seconds: [remaining, 0.1].max
+      )
+    rescue RolaunchUnavailable
+      raise
+    rescue StandardError => e
+      last_error = e
+    end
+
+    remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    raise last_error if remaining <= 0
+
+    sleep [poll_interval, remaining].min
+  end
+end
+
+def read_rolaunch_ready_seconds_once(ip:, ssh_user:, private_key_path:, timeout_seconds:)
+  marker = '---ROLAUNCH-TIMINGS---'
+  remote_command = <<~SH
+    test -x /usr/bin/rolaunch || exit 44
+    sudo -n cat /var/lib/rolaunch/instance-identity.json
+    printf '\n#{marker}\n'
+    sudo -n cat /var/lib/rolaunch/timings.json
+  SH
+  ssh_cmd = [
+    'ssh',
+    '-o', 'BatchMode=yes',
+    '-o', 'IdentitiesOnly=yes',
+    '-o', 'StrictHostKeyChecking=no',
+    '-o', 'UserKnownHostsFile=/dev/null',
+    '-o', 'ConnectTimeout=2',
+    '-o', 'ServerAliveInterval=2',
+    '-o', 'ServerAliveCountMax=2',
+    '-i', private_key_path,
+    "#{ssh_user}@#{ip}",
+    remote_command
+  ]
+  stdout, stderr, status = capture3_with_timeout(*ssh_cmd, timeout_seconds: timeout_seconds)
+  raise RolaunchUnavailable, 'AMI does not use rolaunch' if status.exitstatus == 44
+  raise "unable to read rolaunch timing files: #{stderr.strip}" unless status.success?
+
+  identity_json, timings_json = stdout.split(marker, 2).map(&:strip)
+  raise 'missing rolaunch timing marker' unless timings_json
+
+  pending_time = Time.iso8601(JSON.parse(identity_json).fetch('pendingTime'))
+  done_step = JSON.parse(timings_json).find { |step| step.fetch('Name') == 'rolaunch.done' }
+  raise 'missing rolaunch.done timing step' unless done_step
+
+  Time.iso8601(done_step.fetch('Time')) - pending_time
+end
+
+def summarize_rolaunch_measurements(measured)
+  values = measured.filter_map { |result| result[:rolaunch_ready_s] }
+  expected = measured.any? { |result| result[:rolaunch_status] != 'absent' }
+
+  {
+    expected: expected,
+    complete: !expected || values.length == measured.length,
+    values: values,
+    average: values.empty? ? nil : values.sum / values.length,
+    maximum: values.max
+  }
+end
+
+def read_common_ready_seconds(ip:, ssh_user:, private_key_path:, launch_time:, timeout_seconds: 30, poll_interval: 0.2)
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout_seconds
+  last_error = nil
+
+  loop do
+    remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    begin
+      return read_common_ready_seconds_once(
+        ip: ip,
+        ssh_user: ssh_user,
+        private_key_path: private_key_path,
+        launch_time: launch_time,
+        timeout_seconds: [remaining, 0.1].max
+      )
+    rescue StandardError => e
+      last_error = e
+    end
+
+    remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    raise last_error if remaining <= 0
+
+    sleep [poll_interval, remaining].min
+  end
+end
+
+def read_common_ready_seconds_once(ip:, ssh_user:, private_key_path:, launch_time:, timeout_seconds:)
+  remote_command = <<~SH
+    set -e
+    cat /run/runs-on-boot-benchmark-ready
+  SH
+  ssh_cmd = [
+    'ssh',
+    '-o', 'BatchMode=yes',
+    '-o', 'IdentitiesOnly=yes',
+    '-o', 'StrictHostKeyChecking=no',
+    '-o', 'UserKnownHostsFile=/dev/null',
+    '-o', 'ConnectTimeout=2',
+    '-o', 'ServerAliveInterval=2',
+    '-o', 'ServerAliveCountMax=2',
+    '-i', private_key_path,
+    "#{ssh_user}@#{ip}",
+    remote_command
+  ]
+  stdout, stderr, status = capture3_with_timeout(*ssh_cmd, timeout_seconds: timeout_seconds)
+  raise "unable to read common readiness marker: #{stderr.strip}" unless status.success?
+
+  Time.iso8601(stdout.strip) - launch_time
 end
 
 def build_keypair(dir)
@@ -207,7 +394,7 @@ def build_keypair(dir)
   [private_key, File.read(public_key).strip]
 end
 
-def root_block_device_override(image, root_throughput:)
+def root_block_device_override(image, root_iops:, root_initialization_rate:, root_throughput:, root_volume_size:)
   root = image.block_device_mappings.find do |mapping|
     mapping.device_name == image.root_device_name && mapping.ebs
   end
@@ -216,19 +403,22 @@ def root_block_device_override(image, root_throughput:)
   override = {
     device_name: root.device_name,
     ebs: {
-      volume_size: root.ebs.volume_size,
+      volume_size: root_volume_size || root.ebs.volume_size,
       volume_type: root.ebs.volume_type,
       delete_on_termination: true
     }
   }
-  override[:ebs][:iops] = root.ebs.iops if root.ebs.iops
-  if root.ebs.volume_type == 'gp3' && root_throughput
-    override[:ebs][:throughput] = root_throughput
+  iops = root_iops || root.ebs.iops
+  override[:ebs][:iops] = iops if iops
+  override[:ebs][:volume_initialization_rate] = root_initialization_rate if root_initialization_rate
+  if root.ebs.volume_type == 'gp3'
+    throughput = root_throughput || root.ebs.throughput
+    override[:ebs][:throughput] = throughput if throughput
   end
   override
 end
 
-def launch_instance(ec2:, image:, instance_type:, subnet:, security_group_id:, user_data:, root_throughput:)
+def launch_instance(ec2:, image:, instance_type:, subnet:, security_group_id:, user_data:, root_iops:, root_initialization_rate:, root_throughput:, root_volume_size:)
   instance = ec2.run_instances(
     image_id: image.image_id,
     instance_type: instance_type,
@@ -237,7 +427,13 @@ def launch_instance(ec2:, image:, instance_type:, subnet:, security_group_id:, u
     instance_initiated_shutdown_behavior: 'terminate',
     user_data: Base64.encode64(user_data),
     block_device_mappings: [
-      root_block_device_override(image, root_throughput: root_throughput)
+      root_block_device_override(
+        image,
+        root_iops: root_iops,
+        root_initialization_rate: root_initialization_rate,
+        root_throughput: root_throughput,
+        root_volume_size: root_volume_size
+      )
     ],
     network_interfaces: [
       {
@@ -261,9 +457,55 @@ def launch_instance(ec2:, image:, instance_type:, subnet:, security_group_id:, u
   instance.instance_id
 end
 
+def root_volume_initialization_status(ec2:, instance_id:, root_device_name:)
+  instance = ec2.describe_instances(instance_ids: [instance_id]).reservations.first.instances.first
+  mapping = instance.block_device_mappings.find { |candidate| candidate.device_name == root_device_name }
+  unless mapping&.ebs&.volume_id
+    raise "Unable to find root volume mapping #{root_device_name.inspect} for #{instance_id}"
+  end
+
+  volume_id = mapping.ebs.volume_id
+  volume = ec2.describe_volumes(volume_ids: [volume_id]).volumes.first
+  raise "Unable to describe root volume #{volume_id} for #{instance_id}" unless volume
+
+  details = {
+    volume_id: volume_id,
+    volume_type: volume.volume_type,
+    size_gib: volume.size,
+    iops: volume.iops,
+    throughput_mibps: volume.throughput,
+    snapshot_id: volume.snapshot_id,
+    provisioned_rate_mibps: volume.volume_initialization_rate
+  }
+
+  begin
+    status = ec2.describe_volume_status(volume_ids: [volume_id]).volume_statuses.first
+    initialization = status&.initialization_status_details
+    details.merge!(
+      initialization_type: initialization&.initialization_type,
+      progress_percent: initialization&.progress,
+      estimated_seconds_remaining: initialization&.estimated_time_to_complete_in_seconds
+    )
+  rescue StandardError => e
+    details[:initialization_status_error] = "#{e.class}: #{e.message}"
+  end
+
+  details
+end
+
+def verify_root_volume_configuration!(details, requested_initialization_rate:, requested_throughput:)
+  if requested_initialization_rate && details[:provisioned_rate_mibps] != requested_initialization_rate
+    raise "Root volume initialization rate mismatch: requested #{requested_initialization_rate} MiB/s, got #{details[:provisioned_rate_mibps].inspect} (#{details.inspect})"
+  end
+
+  if requested_throughput && details[:throughput_mibps] != requested_throughput
+    raise "Root volume throughput mismatch: requested #{requested_throughput} MiB/s, got #{details[:throughput_mibps].inspect} (#{details.inspect})"
+  end
+end
+
 def measure_instance_ssh_ready(ec2:, instance_id:, ssh_user:, private_key_path:, ssh_timeout:)
   launched_at = Time.now
-  ip = wait_for_public_ip(ec2, instance_id, timeout_seconds: ssh_timeout)
+  ip, launch_time = wait_for_public_ip(ec2, instance_id, timeout_seconds: ssh_timeout)
   wait_for_ssh(
     ip: ip,
     ssh_user: ssh_user,
@@ -271,14 +513,48 @@ def measure_instance_ssh_ready(ec2:, instance_id:, ssh_user:, private_key_path:,
     timeout_seconds: ssh_timeout
   )
 
-  [ip, Time.now - launched_at]
+  [ip, Time.now - launched_at, launch_time]
 end
 
-def terminate_instance(ec2, instance_id)
+def request_instance_termination(ec2, instance_id)
   ec2.terminate_instances(instance_ids: [instance_id])
-  ec2.wait_until(:instance_terminated, instance_ids: [instance_id])
 rescue Aws::EC2::Errors::InvalidInstanceIDNotFound
   nil
+end
+
+def wait_for_instances_terminated(ec2, instance_ids)
+  return if instance_ids.empty?
+
+  ec2.wait_until(:instance_terminated, instance_ids: instance_ids)
+rescue Aws::EC2::Errors::InvalidInstanceIDNotFound
+  nil
+end
+
+def terminate_instance_and_wait(ec2, instance_id)
+  request_instance_termination(ec2, instance_id)
+  wait_for_instances_terminated(ec2, [instance_id])
+end
+
+def cleanup_instances(ec2, instance_ids)
+  requested_ids = []
+  errors = []
+
+  instance_ids.uniq.each do |instance_id|
+    begin
+      request_instance_termination(ec2, instance_id)
+      requested_ids << instance_id
+    rescue StandardError => e
+      errors << "failed to terminate #{instance_id}: #{e.message}"
+    end
+  end
+
+  begin
+    wait_for_instances_terminated(ec2, requested_ids)
+  rescue StandardError => e
+    errors << "failed while waiting for instance termination: #{e.message}"
+  end
+
+  errors
 end
 
 def delete_security_group_with_retry(ec2, security_group_id)
@@ -303,6 +579,7 @@ caller_ip = current_public_ip
 Dir.mktmpdir('measure-launch-time') do |dir|
   private_key_path, public_key = build_keypair(dir)
   security_group_id = create_temp_security_group(ec2, subnet, caller_ip)
+  launched_instance_ids = []
 
   begin
     user_data = linux_user_data(
@@ -319,7 +596,26 @@ Dir.mktmpdir('measure-launch-time') do |dir|
     puts "Region: #{options[:region]}"
     puts "Subnet: #{subnet.subnet_id}"
     puts "Security group: #{security_group_id}"
-    puts "Root throughput override: #{options[:root_throughput]} MiB/s"
+    if options[:root_iops]
+      puts "Root IOPS override: #{options[:root_iops]}"
+    else
+      puts "Root IOPS: AMI block device mapping"
+    end
+    if options[:root_initialization_rate]
+      puts "Root initialization rate: #{options[:root_initialization_rate]} MiB/s"
+    else
+      puts "Root initialization rate: AWS default"
+    end
+    if options[:root_throughput]
+      puts "Root throughput override: #{options[:root_throughput]} MiB/s"
+    else
+      puts "Root throughput: AMI block device mapping"
+    end
+    if options[:root_volume_size]
+      puts "Root volume size override: #{options[:root_volume_size]} GiB"
+    else
+      puts "Root volume size: AMI block device mapping"
+    end
     puts "Warm-up runs: #{options[:warm_runs]}"
     puts "Measured runs: #{options[:measure_runs]}"
     puts "SSH timeout: #{options[:ssh_timeout]}s"
@@ -339,50 +635,120 @@ Dir.mktmpdir('measure-launch-time') do |dir|
           subnet: subnet,
           security_group_id: security_group_id,
           user_data: user_data,
-          root_throughput: options[:root_throughput]
+          root_iops: options[:root_iops],
+          root_initialization_rate: options[:root_initialization_rate],
+          root_throughput: options[:root_throughput],
+          root_volume_size: options[:root_volume_size]
         )
-        ip, elapsed = measure_instance_ssh_ready(
+        launched_instance_ids << instance_id
+        ip, elapsed, launch_time = measure_instance_ssh_ready(
           ec2: ec2,
           instance_id: instance_id,
           ssh_user: options[:ssh_user],
           private_key_path: private_key_path,
           ssh_timeout: options[:ssh_timeout]
         )
+        rolaunch_status = 'ready'
+        common_ready = read_common_ready_seconds(
+          ip: ip,
+          ssh_user: options[:ssh_user],
+          private_key_path: private_key_path,
+          launch_time: launch_time
+        )
+        rolaunch_ready = begin
+          read_rolaunch_ready_seconds(
+            ip: ip,
+            ssh_user: options[:ssh_user],
+            private_key_path: private_key_path
+          )
+        rescue RolaunchUnavailable
+          rolaunch_status = 'absent'
+          nil
+        rescue StandardError => e
+          rolaunch_status = 'failed'
+          warn "Unable to read rolaunch readiness for #{instance_id}: #{e.message}"
+          nil
+        end
+        initialization_status = root_volume_initialization_status(
+          ec2: ec2,
+          instance_id: instance_id,
+          root_device_name: image.root_device_name
+        )
+        verify_root_volume_configuration!(
+          initialization_status,
+          requested_initialization_rate: options[:root_initialization_rate],
+          requested_throughput: options[:root_throughput]
+        )
         puts "  instance_id: #{instance_id}"
         puts "  public_ip:   #{ip}"
         puts format("  ssh_ready_s: %.2f", elapsed)
+        puts format("  common_ready_s: %.3f", common_ready)
+        puts format("  rolaunch_ready_s: %.2f", rolaunch_ready) if rolaunch_ready
+        puts "  initialization: #{initialization_status.to_json}"
         results << {
           phase: phase,
           instance_id: instance_id,
           ip: ip,
-          ssh_ready_s: elapsed
+          ssh_ready_s: elapsed,
+          common_ready_s: common_ready,
+          rolaunch_ready_s: rolaunch_ready,
+          rolaunch_status: rolaunch_status,
+          volume_initialization: initialization_status
         }
       ensure
-        terminate_instance(ec2, instance_id) if instance_id
+        terminate_instance_and_wait(ec2, instance_id) if instance_id
       end
     end
 
     measured = results.select { |r| r[:phase] == 'measure' }
     average = measured.sum { |r| r[:ssh_ready_s] } / measured.length
+    common_ready_values = measured.map { |result| result[:common_ready_s] }
+    rolaunch_summary = summarize_rolaunch_measurements(measured)
 
+    summary = {
+      ami_id: image.image_id,
+      ami_name: image.name,
+      instance_type: instance_type,
+      subnet_id: subnet.subnet_id,
+      warm_runs: options[:warm_runs],
+      measured_runs: options[:measure_runs],
+      root_initialization_rate_mibps: options[:root_initialization_rate],
+      root_iops: options[:root_iops],
+      root_throughput_mibps: options[:root_throughput],
+      root_volume_size_gib: options[:root_volume_size],
+      average_ssh_ready_s: average.round(2),
+      average_common_ready_s: (common_ready_values.sum / common_ready_values.length).round(3),
+      max_common_ready_s: common_ready_values.max.round(3),
+      rolaunch_expected: rolaunch_summary[:expected],
+      rolaunch_measurement_complete: rolaunch_summary[:complete],
+      rolaunch_measured_runs: rolaunch_summary[:values].length,
+      average_rolaunch_ready_s: rolaunch_summary[:average]&.round(2),
+      max_rolaunch_ready_s: rolaunch_summary[:maximum]&.round(2),
+      results: results
+    }
+
+    output = JSON.pretty_generate(summary)
     puts
-    puts JSON.pretty_generate(
-      {
-        ami_id: image.image_id,
-        ami_name: image.name,
-        instance_type: instance_type,
-        subnet_id: subnet.subnet_id,
-        warm_runs: options[:warm_runs],
-        measured_runs: options[:measure_runs],
-        average_ssh_ready_s: average.round(2),
-        results: results
-      }
-    )
+    puts output
+    File.write(options[:output_json], "#{output}\n") if options[:output_json]
+
+    unless rolaunch_summary[:complete]
+      raise "Incomplete rolaunch readiness: #{rolaunch_summary[:values].length}/#{measured.length} measured launches produced rolaunch.done"
+    end
   ensure
+    original_error = $!
+    cleanup_errors = cleanup_instances(ec2, launched_instance_ids)
+
     begin
       delete_security_group_with_retry(ec2, security_group_id)
     rescue Aws::EC2::Errors::ServiceError => e
-      warn "Failed to delete temporary security group #{security_group_id}: #{e.message}"
+      cleanup_errors << "failed to delete temporary security group #{security_group_id}: #{e.message}"
+    end
+
+    unless cleanup_errors.empty?
+      message = "Cleanup incomplete: #{cleanup_errors.join('; ')}"
+      warn message
+      raise message unless original_error
     end
   end
 end

@@ -26,7 +26,7 @@ patch_ubuntu() {
     exit 1
   fi
 
-  local repo_root build_dir custom_dir toolsets_dir tests_dir
+  local repo_root build_dir custom_dir custom_file toolsets_dir tests_dir
   local goarch dist_dir rolaunch_bin
   repo_root="$(cd "$(dirname "$0")/../.." && pwd)"
   build_dir="$release_dir/images/ubuntu/scripts/build"
@@ -54,6 +54,7 @@ patch_ubuntu() {
   # unresponsive package endpoint within a typical CI job timeout.
   gnu_sed -i 's/Enable retry logic for apt up to 10 times/Enable retry logic for apt up to 5 times/' "$build_dir/configure-apt.sh"
   gnu_sed -i 's/APT::Acquire::Retries \\"10\\"/Acquire::Retries \\"5\\"/' "$build_dir/configure-apt.sh"
+  gnu_sed -i '/Acquire::http::Timeout "20";/d; /Acquire::https::Timeout "20";/d' "$build_dir/configure-apt.sh"
   gnu_sed -i '/Acquire::http::Pipeline-Depth 0;/a Acquire::http::Timeout "20";' "$build_dir/configure-apt.sh"
   gnu_sed -i '/Acquire::https::Pipeline-Depth 0;/a Acquire::https::Timeout "20";' "$build_dir/configure-apt.sh"
 
@@ -61,12 +62,21 @@ patch_ubuntu() {
   mkdir -p $custom_dir
   cp -r patches/ubuntu/files $custom_dir/
   if [ "$ARCH" = "arm64" ]; then
-    gnu_sed -i 's|amd64|arm64|g' $custom_dir/files/*.sh
+    for custom_file in "$custom_dir"/files/*.sh; do
+      if [ "${custom_file##*/}" != "configure-full-rolaunch.sh" ]; then
+        gnu_sed -i 's|amd64|arm64|g' "$custom_file"
+      fi
+    done
   fi
 
-  if [ "${IMAGE_ID:-}" = "${DIST}-minimal-${ARCH}" ]; then
-    build_minimal_rolaunch
-  fi
+  case "${IMAGE_ID:-}" in
+    "${DIST}-minimal-${ARCH}")
+      build_rolaunch "$custom_dir/files/rolaunch"
+      ;;
+    ubuntu26-full-x64|ubuntu26-full-arm64)
+      build_rolaunch "$build_dir/rolaunch"
+      ;;
+  esac
 
   ## arm64: rewrite arch references in upstream build scripts and toolsets
   if [ "$ARCH" = "arm64" ]; then
@@ -150,14 +160,16 @@ patch_ubuntu() {
   gnu_sed -i 's|mkdir $AGENT_TOOLSDIRECTORY|mkdir -p $AGENT_TOOLSDIRECTORY|' $build_dir/configure-environment.sh
 }
 
-build_minimal_rolaunch() {
+build_rolaunch() {
+  local destination="$1"
+
   mkdir -p "$dist_dir"
   rm -f "$rolaunch_bin"
-  (cd tools/rolaunch && mise exec go@1.26.1 -- env CGO_ENABLED=0 GOOS=linux GOARCH=$goarch go build -trimpath -ldflags='-s -w' -o "$rolaunch_bin" .)
+  (cd tools/rolaunch && mise exec go@1.26.1 -- env CGO_ENABLED=0 GOOS=linux GOARCH="$goarch" go build -trimpath -ldflags='-s -w' -o "$rolaunch_bin" .)
   if ! command -v upx >/dev/null; then
     echo "upx is required to compress rolaunch for packer upload" >&2
     exit 1
   fi
   upx -f -1 "$rolaunch_bin"
-  cp "$rolaunch_bin" "$custom_dir/files/rolaunch"
+  cp "$rolaunch_bin" "$destination"
 }

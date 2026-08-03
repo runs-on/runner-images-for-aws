@@ -26,6 +26,7 @@ import (
 const (
 	imdsPublicKeysMetadataPath = "public-keys"
 	imdsPublicKeySuffix        = "openssh-key"
+	imdsLocalHostnamePath      = "local-hostname"
 	runsOnInstanceConfigPath   = "/runs-on/instance-config.json"
 	runsOnRunnerConfigPath     = "/runs-on/config.json"
 )
@@ -119,6 +120,17 @@ func (s *awsState) fetchInstanceIdentity(ctx context.Context, cfg config) (insta
 	}
 	if identity.Region == "" {
 		return instanceIdentity{}, fmt.Errorf("received empty region from IMDS")
+	}
+	if !cfg.isFullMode() {
+		return identity, nil
+	}
+
+	localHostname, found, err := s.fetchMetadataPath(ctx, cfg, imdsLocalHostnamePath)
+	if err != nil {
+		return instanceIdentity{}, err
+	}
+	if found {
+		identity.LocalHostname = strings.TrimSpace(string(localHostname))
 	}
 
 	return identity, nil

@@ -250,6 +250,7 @@ images:
       - install-zstd.sh
     instance_type: m8a.large
     volume_size: 30
+    volume_throughput: 400
     source_ami_name: ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-amd64-server-*
     source_ami_owner: 099720109477
     description: RunsOn Ubuntu26 x64
@@ -284,9 +285,37 @@ images:
       - install-zstd.sh
     instance_type: m8g.large
     volume_size: 30
+    volume_throughput: 400
     source_ami_name: ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-arm64-server-*
     source_ami_owner: 099720109477
     description: RunsOn Ubuntu26 arm64
+
+  - id: ubuntu26-gpu-x64
+    template: ubuntu-gpu-x64
+    instance_type: g4dn.xlarge
+    volume_size: 40
+    volume_throughput: 400
+    source_ami_name: runs-on-dev-ubuntu26-full-x64-*
+    source_ami_owner: 135269210855
+    description: RunsOn Ubuntu26 GPU optimized x64
+
+  - id: ubuntu26-stepsecurity-x64
+    template: ubuntu-stepsecurity-x64
+    instance_type: m8a.large
+    volume_size: 30
+    volume_throughput: 400
+    source_ami_name: runs-on-dev-ubuntu26-full-x64-*
+    source_ami_owner: 135269210855
+    description: RunsOn Ubuntu26 + StepSecurity x64
+
+  - id: ubuntu26-stepsecurity-arm64
+    template: ubuntu-stepsecurity-arm64
+    instance_type: m8g.large
+    volume_size: 30
+    volume_throughput: 400
+    source_ami_name: runs-on-dev-ubuntu26-full-arm64-*
+    source_ami_owner: 135269210855
+    description: RunsOn Ubuntu26 + StepSecurity arm64
 
   - id: ubuntu24-gpu-x64
     template: ubuntu-gpu-x64
