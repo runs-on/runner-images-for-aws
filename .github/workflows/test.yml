@@ -204,6 +204,9 @@ jobs:
                 [[ " $expected_cmdline " == *' panic=-1 '* ]]
                 [[ " $(< /proc/cmdline) " != *' BOOT_IMAGE='* ]]
                 [[ " $(< /proc/cmdline) " != *' initrd='* ]]
+                test "$(tr ' ' '\n' < /proc/cmdline | grep -c '^console=')" = 1
+                [[ " $(< /proc/cmdline) " == *' console=null '* ]]
+                ! grep -Eq '(^| )earlycon(=| |$)' /proc/cmdline
 
                 kernel_release="$(sudo cat "$direct_uefi_state/kernel-release")"
                 kernel_format="$(sudo cat "$direct_uefi_state/kernel-source-format")"
