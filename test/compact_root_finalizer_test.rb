@@ -273,6 +273,30 @@ class CompactRootFinalizerTest < Minitest::Test
     end
   end
 
+  def test_tpm_acl_normalization_accepts_an_already_clean_descendant
+    Dir.mktmpdir("compact-root-clean-acl") do |dir|
+      root = File.join(dir, "root")
+      keystore = File.join(root, "var/lib/tpm2-tss/system/keystore")
+      evidence = File.join(dir, "removed.getfacl")
+      command = <<~BASH
+        source #{Shellwords.escape(SCRIPT)}
+        trap - EXIT INT TERM
+        mkdir -p #{Shellwords.escape(keystore)}
+        getfacl() { :; }
+        setfacl() { return 99; }
+        remove_irrelevant_tpm_acl \
+          #{Shellwords.escape(root)} \
+          #{Shellwords.escape(evidence)}
+        [[ -f #{Shellwords.escape(evidence)} ]]
+        [[ ! -s #{Shellwords.escape(evidence)} ]]
+      BASH
+
+      _stdout, stderr, status = Open3.capture3("bash", "-c", command)
+
+      assert status.success?, stderr
+    end
+  end
+
   def test_boot_packages_are_held_and_recorded
     Dir.mktmpdir("compact-root-boot-holds") do |dir|
       held = File.join(dir, "held")
