@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPT = (
@@ -57,6 +58,46 @@ class CompactRootTreeManifestTest(unittest.TestCase):
             manifest = MODULE.build_manifest(root, ("dynamic",))
 
             self.assertEqual([".", "kept"], [entry["path"] for entry in manifest["entries"]])
+
+    def test_cross_filesystems_includes_overlay_lower_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            payload = root / "payload"
+            payload.write_text("content", encoding="utf-8")
+            real_scandir = os.scandir
+
+            class MixedDeviceEntry:
+                def __init__(self, entry):
+                    self.entry = entry
+                    self.name = entry.name
+                    self.path = entry.path
+
+                def stat(self, *, follow_symlinks=True):
+                    result = self.entry.stat(follow_symlinks=follow_symlinks)
+                    values = list(result)
+                    values[2] = result.st_dev + 1
+                    return os.stat_result(values)
+
+            class MixedDeviceScandir:
+                def __init__(self, path):
+                    self.path = path
+
+                def __enter__(self):
+                    with real_scandir(self.path) as entries:
+                        return iter(MixedDeviceEntry(entry) for entry in list(entries))
+
+                def __exit__(self, *_args):
+                    return False
+
+            with mock.patch.object(MODULE.os, "scandir", MixedDeviceScandir):
+                same_device = MODULE.build_manifest(root, ())
+                mixed_devices = MODULE.build_manifest(root, (), cross_filesystems=True)
+
+            self.assertEqual(["."], [entry["path"] for entry in same_device["entries"]])
+            self.assertEqual(
+                [".", "payload"],
+                [entry["path"] for entry in mixed_devices["entries"]],
+            )
 
 
 if __name__ == "__main__":

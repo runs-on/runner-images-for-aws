@@ -625,7 +625,11 @@ main() {
   chmod --reference=/ "${target_mount}/runs-on-root/upper"
   touch --reference=/ "${target_mount}/runs-on-root/upper"
   mount -t overlay overlay -o "lowerdir=${lower},upperdir=${target_mount}/runs-on-root/upper,workdir=${target_mount}/runs-on-root/work" "${merged}"
-  "${asset_dir}/compact-root-tree-manifest.py" "${merged}" "${work_dir}/merged-tree-full.json"
+  # OverlayFS may report lower-backed non-directories with the lower
+  # filesystem's st_dev when xino is unavailable. This isolated validation
+  # tree has no nested mounts, so include both OverlayFS and lower devices.
+  "${asset_dir}/compact-root-tree-manifest.py" \
+    "${merged}" "${work_dir}/merged-tree-full.json" --cross-filesystems
   cmp -s "${work_dir}/source-tree-full.json" "${work_dir}/merged-tree-full.json" || fail "merged tree differs from finalized source"
   umount "${merged}"
   rm -rf -- "${target_mount}/runs-on-root/work"

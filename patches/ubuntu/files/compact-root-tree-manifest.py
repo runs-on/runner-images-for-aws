@@ -54,7 +54,11 @@ def excluded(relative: str, exclusions: tuple[str, ...]) -> bool:
     return any(relative == item or relative.startswith(f"{item}/") for item in exclusions)
 
 
-def walk_paths(root: Path, exclusions: tuple[str, ...]) -> list[tuple[str, Path, os.stat_result]]:
+def walk_paths(
+    root: Path,
+    exclusions: tuple[str, ...],
+    cross_filesystems: bool = False,
+) -> list[tuple[str, Path, os.stat_result]]:
     root_stat = root.lstat()
     root_device = root_stat.st_dev
     found: list[tuple[str, Path, os.stat_result]] = [(".", root, root_stat)]
@@ -71,7 +75,7 @@ def walk_paths(root: Path, exclusions: tuple[str, ...]) -> list[tuple[str, Path,
             # SquashFS -one-file-system records a mountpoint directory but does
             # not traverse the mounted filesystem. Explicit exclusions cover
             # the mountpoints whose directory metadata is intentionally rebuilt.
-            if file_stat.st_dev != root_device:
+            if not cross_filesystems and file_stat.st_dev != root_device:
                 continue
             found.append((relative, path, file_stat))
             if stat.S_ISDIR(file_stat.st_mode):
@@ -81,8 +85,12 @@ def walk_paths(root: Path, exclusions: tuple[str, ...]) -> list[tuple[str, Path,
     return found
 
 
-def build_manifest(root: Path, exclusions: tuple[str, ...]) -> dict[str, object]:
-    paths = walk_paths(root, exclusions)
+def build_manifest(
+    root: Path,
+    exclusions: tuple[str, ...],
+    cross_filesystems: bool = False,
+) -> dict[str, object]:
+    paths = walk_paths(root, exclusions, cross_filesystems)
     inode_paths: dict[tuple[int, int], list[str]] = defaultdict(list)
     for relative, _path, file_stat in paths:
         if stat.S_ISREG(file_stat.st_mode):
@@ -141,6 +149,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("root", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--exclude", action="append", default=[])
+    parser.add_argument(
+        "--cross-filesystems",
+        action="store_true",
+        help="include entries whose reported device differs from the root device",
+    )
     return parser.parse_args()
 
 
@@ -148,7 +161,7 @@ def main() -> None:
     args = parse_args()
     root = args.root.resolve()
     exclusions = tuple(sorted({item.strip("/") for item in args.exclude if item.strip("/")}))
-    manifest = build_manifest(root, exclusions)
+    manifest = build_manifest(root, exclusions, args.cross_filesystems)
     args.output.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )

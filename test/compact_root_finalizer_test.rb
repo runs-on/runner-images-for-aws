@@ -208,6 +208,12 @@ class CompactRootFinalizerTest < Minitest::Test
     refute_includes script, 'report["output_count"] * 100 >= report["input_count"] * 70'
   end
 
+  def test_merged_overlay_manifest_accepts_lower_device_numbers
+    script = File.read(SCRIPT)
+
+    assert_includes script, '"${merged}" "${work_dir}/merged-tree-full.json" --cross-filesystems'
+  end
+
   def test_boot_paths_use_fresh_target_and_stable_direct_kernel
     script = File.read(SCRIPT)
 
