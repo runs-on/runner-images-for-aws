@@ -39,23 +39,48 @@ partition_path() {
 }
 
 unmount_tree() {
-  local root="$1" mount
+  local root="$1" mount mount_table remaining='' unmount_failed=false
   local -a mounts=()
-  mapfile -t mounts < <(findmnt -Rnr -o TARGET --target "${root}" 2>/dev/null | sort -r)
+  mount_table="$(findmnt -rn -o TARGET)" || return 1
+  while IFS= read -r mount; do
+    case "${mount}" in
+      "${root}" | "${root}"/*) mounts+=("${mount}") ;;
+    esac
+  done < <(printf '%s\n' "${mount_table}" | sort -r)
   for mount in "${mounts[@]}"; do
-    umount "${mount}" 2>/dev/null || true
+    if ! umount "${mount}" 2>/dev/null; then
+      printf '[compact-finalizer] ERROR: cannot unmount %s\n' "${mount}" >&2
+      unmount_failed=true
+    fi
   done
+  mount_table="$(findmnt -rn -o TARGET)" || return 1
+  while IFS= read -r mount; do
+    case "${mount}" in
+      "${root}" | "${root}"/*)
+        remaining="${mount}"
+        break
+        ;;
+    esac
+  done <<< "${mount_table}"
+  [[ -z "${remaining}" ]] || {
+    printf '[compact-finalizer] ERROR: mount remains below %s: %s\n' "${root}" "${remaining}" >&2
+    return 1
+  }
+  [[ "${unmount_failed}" == false ]]
 }
 
 cleanup() {
-  local status=$?
+  local status=$? validation_safe=true target_safe=true
   trap - EXIT INT TERM
-  unmount_tree "${validation_dir}"
-  unmount_tree "${target_mount}"
-  if [[ -d "${validation_dir}" && ! -L "${validation_dir}" ]]; then
+  unmount_tree "${validation_dir}" || { validation_safe=false; status=1; }
+  unmount_tree "${target_mount}" || { target_safe=false; status=1; }
+  if [[ "${validation_safe}" == true && -d "${validation_dir}" && ! -L "${validation_dir}" ]]; then
     rm -rf -- "${validation_dir}"
   fi
-  if [[ -d "${work_dir}" && ! -L "${work_dir}" ]]; then
+  if [[ "${target_safe}" == true && -d "${target_mount}" && ! -L "${target_mount}" ]]; then
+    rmdir --ignore-fail-on-non-empty "${target_mount}" 2>/dev/null || true
+  fi
+  if [[ "${validation_safe}" == true && "${target_safe}" == true && -d "${work_dir}" && ! -L "${work_dir}" ]]; then
     rm -rf -- "${work_dir}"
   fi
   exit "${status}"
@@ -260,6 +285,27 @@ validate_copy_manifest() {
   cmp -s "${work_dir}/${label}-source.json" "${work_dir}/${label}-target.json" || fail "persistent tree differs: ${label}"
 }
 
+assert_isolated_source_view() {
+  local source_root="$1"
+  local mount_count=0 mount_target='' candidate
+  while IFS= read -r candidate; do
+    mount_count=$((mount_count + 1))
+    mount_target="${candidate}"
+  done < <(findmnt -Rnr -o TARGET --target "${source_root}")
+  [[ ${mount_count} -eq 1 && "${mount_target}" == "${source_root}" ]] \
+    || fail "capture source view contains a nested mount"
+}
+
+create_source_view() {
+  local source_root="$1"
+  install -d -m 0755 "${source_root}"
+  # A plain bind is intentionally non-recursive: it exposes the merged root
+  # while hiding /proc, /run, persistent bind mounts, and any future submounts.
+  mount --bind / "${source_root}"
+  mount --make-private "${source_root}"
+  assert_isolated_source_view "${source_root}"
+}
+
 assert_variant() {
   local root="$1"
   [[ -x "${root}/usr/bin/rolaunch" ]] || fail "final root lacks rolaunch"
@@ -356,7 +402,8 @@ remove_irrelevant_tpm_acl() {
 }
 
 build_squash() {
-  local kernel_release="$1"
+  local source_root="$1"
+  local kernel_release="$2"
   local excludes="${work_dir}/squash-excludes"
   local profile="${work_dir}/boot.sort"
   local profile_report="${work_dir}/boot-profile.json"
@@ -365,20 +412,21 @@ build_squash() {
   write_squash_excludes "${excludes}"
   echo "${profile_sha256}  ${asset_dir}/compact-root.boot-profile" | sha256sum -c -
   "${asset_dir}/filter-compact-root-boot-profile.py" \
-    "${asset_dir}/compact-root.boot-profile" / "${profile}" \
+    "${asset_dir}/compact-root.boot-profile" "${source_root}" "${profile}" \
     --kernel-release "${kernel_release}" \
     --exclude boot --exclude dev --exclude proc --exclude sys --exclude run \
     --exclude tmp --exclude var/tmp --exclude mnt --exclude home/runner/_work \
     --exclude var/lib/docker --exclude var/lib/containerd --exclude var/lib/containers \
     --exclude var/lib/runs-on-compact-build --exclude var/log/journal \
+    --cross-filesystems \
     --report "${profile_report}" \
     --min-output-count 900 \
     --min-coverage-percent 99
   grep -q '^usr/lib/systemd/systemd ' "${profile}" || fail "boot profile lacks systemd"
   grep -q '^usr/bin/rolaunch ' "${profile}" || fail "boot profile lacks rolaunch"
 
-  mksquashfs / "${squash}" \
-    -noappend -no-recovery -no-progress -exit-on-error -one-file-system -xattrs \
+  mksquashfs "${source_root}" "${squash}" \
+    -noappend -no-recovery -no-progress -exit-on-error -xattrs \
     -processors "$(nproc)" -comp zstd -Xcompression-level 3 -b 256K \
     -sort "${profile}" -wildcards -ef "${excludes}" 2>&1 | tee "${log_file}"
   [[ -s "${squash}" ]] || fail "SquashFS output is empty"
@@ -387,6 +435,9 @@ build_squash() {
   fi
   if grep -qi 'unrecognised xattr prefix' "${log_file}"; then
     fail "mksquashfs emitted an unknown xattr warning"
+  fi
+  if grep -qi 'is on a different filesystem, ignored' "${log_file}"; then
+    fail "mksquashfs omitted a cross-device source entry"
   fi
   unsquashfs -stat "${squash}" | tee "${work_dir}/squash.stat"
   grep -q 'Compression zstd' "${work_dir}/squash.stat" || fail "SquashFS compression differs from zstd"
@@ -555,11 +606,18 @@ main() {
   overlay_module="$(find_overlay_module "${kernel_release}")"
   /bin/busybox sh -n "${asset_dir}/compact-root-direct-init"
 
+  local source_root="${validation_dir}/source"
+  create_source_view "${source_root}"
   local -a exclude_args=()
   local exclusion
   while IFS= read -r exclusion; do exclude_args+=(--exclude "${exclusion}"); done < <(manifest_exclude_args)
-  "${asset_dir}/compact-root-tree-manifest.py" / "${work_dir}/source-tree-full.json" "${exclude_args[@]}"
-  build_squash "${kernel_release}"
+  "${asset_dir}/compact-root-tree-manifest.py" \
+    "${source_root}" "${work_dir}/source-tree-full.json" \
+    "${exclude_args[@]}" --cross-filesystems
+  build_squash "${source_root}" "${kernel_release}"
+  assert_isolated_source_view "${source_root}"
+  umount "${source_root}"
+  rmdir "${source_root}"
   staged_squash="${work_dir}/rootfs.squashfs"
   [[ "${staged_squash}" == "${work_dir}/rootfs.squashfs" && -s "${staged_squash}" ]] || fail "SquashFS builder returned an invalid path"
 
@@ -651,7 +709,11 @@ main() {
 
   local path
   for path in home/runner/_work mnt tmp var/tmp var/lib/docker var/lib/containerd var/lib/containers; do
-    install -d "/${path}"
+    if [[ "${path}" == home/runner/_work ]]; then
+      install -d -m 0755 -o runner -g runner "/${path}"
+    else
+      install -d "/${path}"
+    fi
     copy_tree "/${path}" "${target_mount}/runs-on-root/persist/${path}"
     validate_copy_manifest "/${path}" "${target_mount}/runs-on-root/persist/${path}" "persist-${path//\//-}"
   done

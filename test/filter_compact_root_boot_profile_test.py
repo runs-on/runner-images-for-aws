@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPT = (
@@ -19,6 +20,37 @@ SPEC.loader.exec_module(MODULE)
 
 
 class FilterCompactRootBootProfileTest(unittest.TestCase):
+    def test_cross_filesystems_includes_overlay_lower_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            payload = root / "payload"
+            payload.write_text("content", encoding="utf-8")
+            real_stat = Path.stat
+
+            def mixed_device_stat(path, *args, **kwargs):
+                result = real_stat(path, *args, **kwargs)
+                if path == payload:
+                    values = list(result)
+                    values[2] = result.st_dev + 1
+                    return os.stat_result(values)
+                return result
+
+            with mock.patch.object(Path, "stat", mixed_device_stat):
+                same_device, same_report = MODULE.filter_profile(
+                    root, [("payload", 100)], "new-aws"
+                )
+                mixed_devices, mixed_report = MODULE.filter_profile(
+                    root,
+                    [("payload", 100)],
+                    "new-aws",
+                    cross_filesystems=True,
+                )
+
+            self.assertEqual([], same_device)
+            self.assertEqual(1, same_report["excluded_count"])
+            self.assertEqual([("payload", 100)], mixed_devices)
+            self.assertEqual(0, mixed_report["excluded_count"])
+
     def test_resolves_symlinks_kernel_paths_and_hardlinks(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

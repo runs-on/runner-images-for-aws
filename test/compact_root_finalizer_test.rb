@@ -262,6 +262,103 @@ class CompactRootFinalizerTest < Minitest::Test
     assert_includes script, '"${merged}" "${work_dir}/merged-tree-full.json" --cross-filesystems'
   end
 
+  def test_capture_uses_an_isolated_non_recursive_view
+    script = File.read(SCRIPT)
+
+    assert_includes script, 'mount --bind / "${source_root}"'
+    assert_includes script, 'mount --make-private "${source_root}"'
+    assert_includes script, 'findmnt -Rnr -o TARGET --target "${source_root}"'
+    assert_includes script, '"${exclude_args[@]}" --cross-filesystems'
+    assert_includes script, '--cross-filesystems \\'
+    assert_includes script, 'mksquashfs "${source_root}" "${squash}"'
+    refute_includes script, '-one-file-system'
+    assert_includes script, 'is on a different filesystem, ignored'
+    assert_operator script.index('assert_isolated_source_view "${source_root}"', script.index('build_squash "${source_root}"')), :<, script.index('umount "${source_root}"')
+  end
+
+  def test_capture_view_rejects_nested_mounts
+    command = <<~BASH
+      source #{Shellwords.escape(SCRIPT)}
+      trap - EXIT INT TERM
+      findmnt() {
+        printf '%s\n' /capture /capture/nested
+      }
+      assert_isolated_source_view /capture
+    BASH
+
+    _stdout, stderr, status = Open3.capture3("bash", "-c", command)
+
+    refute status.success?
+    assert_includes stderr, "capture source view contains a nested mount"
+  end
+
+  def test_cleanup_unmounts_only_nested_mounts_before_removal
+    Dir.mktmpdir("compact-root-unmount") do |dir|
+      calls = File.join(dir, "umount.calls")
+      command = <<~BASH
+        source #{Shellwords.escape(SCRIPT)}
+        trap - EXIT INT TERM
+        after=false
+        findmnt() {
+          if [[ "${after}" == true ]]; then
+            printf '%s\n' / /run /srv
+          else
+            printf '%s\n' \
+              / \
+              /run \
+              /run/capture/source \
+              /run/capture/lower \
+              /srv \
+              /srv/unrelated
+          fi
+        }
+        umount() {
+          printf '%s\n' "$1" >> #{Shellwords.escape(calls)}
+          after=true
+        }
+        unmount_tree /run/capture
+      BASH
+
+      _stdout, stderr, status = Open3.capture3("bash", "-c", command)
+
+      assert status.success?, stderr
+      assert_equal(
+        ["/run/capture/source", "/run/capture/lower"],
+        File.readlines(calls, chomp: true)
+      )
+    end
+    script = File.read(SCRIPT)
+    assert_includes script, '"${validation_safe}" == true'
+    assert_includes script, 'mount remains below %s'
+  end
+
+  def test_cleanup_refuses_removal_when_a_mount_remains
+    command = <<~BASH
+      source #{Shellwords.escape(SCRIPT)}
+      trap - EXIT INT TERM
+      findmnt() {
+        printf '%s\n' / /run/capture/source
+      }
+      umount() {
+        return 1
+      }
+      unmount_tree /run/capture
+    BASH
+
+    _stdout, stderr, status = Open3.capture3("bash", "-c", command)
+
+    refute status.success?
+    assert_includes stderr, "cannot unmount /run/capture/source"
+    assert_includes stderr, "mount remains below /run/capture"
+  end
+
+  def test_workspace_persistent_tree_is_owned_by_runner
+    script = File.read(SCRIPT)
+
+    assert_includes script, 'install -d -m 0755 -o runner -g runner "/${path}"'
+    assert_operator script.index('install -d -m 0755 -o runner -g runner "/${path}"'), :<, script.index('copy_tree "/${path}"')
+  end
+
   def test_boot_paths_use_fresh_target_and_stable_direct_kernel
     script = File.read(SCRIPT)
 

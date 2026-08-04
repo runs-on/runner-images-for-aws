@@ -82,6 +82,7 @@ def filter_profile(
     entries: list[tuple[str, int]],
     kernel_release: str,
     exclusions: tuple[str, ...] = (),
+    cross_filesystems: bool = False,
 ) -> tuple[list[tuple[str, int]], dict[str, int]]:
     filtered: list[tuple[str, int]] = []
     seen_inodes: set[tuple[int, int]] = set()
@@ -117,7 +118,7 @@ def filter_profile(
         if not stat.S_ISREG(file_stat.st_mode):
             report["non_regular_count"] += 1
             continue
-        if file_stat.st_dev != root_device:
+        if not cross_filesystems and file_stat.st_dev != root_device:
             report["excluded_count"] += 1
             continue
         inode = (file_stat.st_dev, file_stat.st_ino)
@@ -166,6 +167,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--kernel-release", required=True)
     parser.add_argument("--report", type=Path)
     parser.add_argument("--exclude", action="append", default=[])
+    parser.add_argument(
+        "--cross-filesystems",
+        action="store_true",
+        help="include files whose reported device differs from the root device",
+    )
     parser.add_argument("--min-output-count", type=int, default=0)
     parser.add_argument("--min-coverage-percent", type=int, default=0)
     return parser.parse_args()
@@ -176,7 +182,11 @@ def main() -> None:
     entries = parse_profile(args.profile)
     exclusions = tuple(sorted({item.strip("/") for item in args.exclude if item.strip("/")}))
     filtered, report = filter_profile(
-        args.root.resolve(), entries, args.kernel_release, exclusions
+        args.root.resolve(),
+        entries,
+        args.kernel_release,
+        exclusions,
+        args.cross_filesystems,
     )
     args.output.write_text(
         "".join(f"{path} {weight}\n" for path, weight in filtered),
