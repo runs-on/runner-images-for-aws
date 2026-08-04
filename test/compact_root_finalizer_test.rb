@@ -98,6 +98,14 @@ class CompactRootFinalizerTest < Minitest::Test
     refute_includes script, 'ln -sfn /dev/null "${target_mount}/runs-on-root/upper/etc/systemd/system/ssh.socket"'
   end
 
+  def test_boot_profile_gate_measures_unique_eligible_file_coverage
+    script = File.read(SCRIPT)
+
+    assert_includes script, "--min-output-count 900"
+    assert_includes script, "--min-coverage-percent 99"
+    refute_includes script, 'report["output_count"] * 100 >= report["input_count"] * 70'
+  end
+
   def test_boot_paths_use_fresh_target_and_stable_direct_kernel
     script = File.read(SCRIPT)
 

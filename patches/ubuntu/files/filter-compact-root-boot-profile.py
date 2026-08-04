@@ -128,7 +128,34 @@ def filter_profile(
         filtered.append((resolved_relative, weight))
 
     report["output_count"] = len(filtered)
+    report["eligible_count"] = (
+        report["output_count"] + report["missing_count"] + report["unsafe_count"]
+    )
     return filtered, report
+
+
+def validate_report(
+    report: dict[str, int], min_output_count: int, min_coverage_percent: int
+) -> None:
+    if not 0 <= min_coverage_percent <= 100:
+        raise ValueError("coverage percentage must be between 0 and 100")
+    if report["unsafe_count"] != 0:
+        raise ValueError(f"profile contains unsafe paths: {report['unsafe_count']}")
+    if report["output_count"] < min_output_count:
+        raise ValueError(
+            "profile contains too few unique files: "
+            f"{report['output_count']} < {min_output_count}"
+        )
+    eligible_count = report["eligible_count"]
+    if eligible_count == 0 or (
+        report["output_count"] * 100
+        < eligible_count * min_coverage_percent
+    ):
+        raise ValueError(
+            "profile coverage is too low: "
+            f"{report['output_count']}/{eligible_count} unique eligible files "
+            f"< {min_coverage_percent}%"
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -139,6 +166,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--kernel-release", required=True)
     parser.add_argument("--report", type=Path)
     parser.add_argument("--exclude", action="append", default=[])
+    parser.add_argument("--min-output-count", type=int, default=0)
+    parser.add_argument("--min-coverage-percent", type=int, default=0)
     return parser.parse_args()
 
 
@@ -159,6 +188,14 @@ def main() -> None:
         "[compact-boot-profile] "
         + " ".join(f"{name}={value}" for name, value in report.items())
     )
+    try:
+        validate_report(
+            report,
+            min_output_count=args.min_output_count,
+            min_coverage_percent=args.min_coverage_percent,
+        )
+    except ValueError as error:
+        raise SystemExit(f"boot profile rejected: {error}") from error
 
 
 if __name__ == "__main__":

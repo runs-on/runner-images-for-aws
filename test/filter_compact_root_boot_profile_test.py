@@ -58,6 +58,33 @@ class FilterCompactRootBootProfileTest(unittest.TestCase):
             self.assertEqual(1, report["duplicate_inode_count"])
             self.assertEqual(1, report["missing_count"])
             self.assertEqual(1, report["non_regular_count"])
+            self.assertEqual(4, report["eligible_count"])
+
+    def test_acceptance_uses_unique_eligible_file_coverage(self):
+        report = {
+            "input_count": 1390,
+            "output_count": 924,
+            "missing_count": 3,
+            "non_regular_count": 27,
+            "duplicate_inode_count": 434,
+            "unsafe_count": 0,
+            "excluded_count": 2,
+            "eligible_count": 927,
+        }
+
+        MODULE.validate_report(report, min_output_count=900, min_coverage_percent=99)
+
+        too_few = report | {"output_count": 899, "eligible_count": 902}
+        with self.assertRaisesRegex(ValueError, "unique files"):
+            MODULE.validate_report(too_few, min_output_count=900, min_coverage_percent=99)
+
+        incomplete = report | {"missing_count": 20, "eligible_count": 944}
+        with self.assertRaisesRegex(ValueError, "coverage"):
+            MODULE.validate_report(incomplete, min_output_count=900, min_coverage_percent=99)
+
+        unsafe = report | {"unsafe_count": 1, "eligible_count": 928}
+        with self.assertRaisesRegex(ValueError, "unsafe"):
+            MODULE.validate_report(unsafe, min_output_count=900, min_coverage_percent=99)
 
     def test_absolute_symlink_stays_inside_supplied_root(self):
         with tempfile.TemporaryDirectory() as directory:

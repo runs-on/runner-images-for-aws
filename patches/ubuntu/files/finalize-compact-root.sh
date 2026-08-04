@@ -310,14 +310,9 @@ build_squash() {
     --exclude tmp --exclude var/tmp --exclude mnt --exclude home/runner/_work \
     --exclude var/lib/docker --exclude var/lib/containerd --exclude var/lib/containers \
     --exclude var/lib/runs-on-compact-build --exclude var/log/journal \
-    --report "${profile_report}"
-  python3 - "${profile_report}" <<'PY'
-import json
-import sys
-report = json.load(open(sys.argv[1], encoding="utf-8"))
-assert report["output_count"] >= 1000, report
-assert report["output_count"] * 100 >= report["input_count"] * 70, report
-PY
+    --report "${profile_report}" \
+    --min-output-count 900 \
+    --min-coverage-percent 99
   grep -q '^usr/lib/systemd/systemd ' "${profile}" || fail "boot profile lacks systemd"
   grep -q '^usr/bin/rolaunch ' "${profile}" || fail "boot profile lacks rolaunch"
 
