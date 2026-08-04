@@ -770,7 +770,15 @@ func maybeResizeRootFilesystem(ctx context.Context) (bool, error) {
 	switch mount.fsType {
 	case "ext2", "ext3", "ext4":
 		cmdName = "resize2fs"
-		cmdArgs = []string{mount.source}
+		resizeSource := mount.source
+		if mount.path != "/" {
+			const rootDeviceAlias = "/dev/root"
+			if err := ensureDeviceAlias(rootDeviceAlias, mount.source); err != nil {
+				return false, err
+			}
+			resizeSource = rootDeviceAlias
+		}
+		cmdArgs = []string{resizeSource}
 	case "xfs":
 		cmdName = "xfs_growfs"
 		cmdArgs = []string{mount.path}

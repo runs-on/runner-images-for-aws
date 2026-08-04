@@ -55,6 +55,47 @@ func TestFilesystemSizeAtUsesBackingPath(t *testing.T) {
 	}
 }
 
+func TestEnsureDeviceAliasCreatesSymlinkToSource(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "device")
+	alias := filepath.Join(dir, "root")
+	if err := os.WriteFile(source, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ensureDeviceAlias(alias, source); err != nil {
+		t.Fatal(err)
+	}
+	aliasInfo, err := os.Stat(alias)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceInfo, err := os.Stat(source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(aliasInfo, sourceInfo) {
+		t.Fatalf("%s does not resolve to %s", alias, source)
+	}
+}
+
+func TestEnsureDeviceAliasRejectsDifferentExistingTarget(t *testing.T) {
+	dir := t.TempDir()
+	source := filepath.Join(dir, "device")
+	alias := filepath.Join(dir, "root")
+	if err := os.WriteFile(source, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(alias, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := ensureDeviceAlias(alias, source)
+	if err == nil || !strings.Contains(err.Error(), "does not resolve") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestMountedPathInfoResolvesDevRootFromMountDeviceNumber(t *testing.T) {
 	sysfsRoot := t.TempDir()
 	devicePath := filepath.Join(sysfsRoot, "devices", "pci0000:00", "nvme", "nvme0", "nvme0n1", "nvme0n1p1")

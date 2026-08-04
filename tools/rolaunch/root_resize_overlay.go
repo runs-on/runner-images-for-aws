@@ -168,3 +168,26 @@ func filesystemSizeAt(path string, statfs func(string, *syscall.Statfs_t) error)
 	}
 	return int64(filesystem.Blocks) * int64(filesystem.Bsize), nil
 }
+
+func ensureDeviceAlias(aliasPath, sourcePath string) error {
+	sourceInfo, err := os.Stat(sourcePath)
+	if err != nil {
+		return fmt.Errorf("stat device source %s: %w", sourcePath, err)
+	}
+
+	aliasInfo, err := os.Stat(aliasPath)
+	if err == nil {
+		if !os.SameFile(aliasInfo, sourceInfo) {
+			return fmt.Errorf("device alias %s does not resolve to %s", aliasPath, sourcePath)
+		}
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return fmt.Errorf("stat device alias %s: %w", aliasPath, err)
+	}
+
+	if err := os.Symlink(sourcePath, aliasPath); err != nil {
+		return fmt.Errorf("create device alias %s for %s: %w", aliasPath, sourcePath, err)
+	}
+	return nil
+}
