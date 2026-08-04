@@ -1,0 +1,124 @@
+#!/bin/busybox sh
+
+# Independent GRUB/initramfs fallback which preserves the primary writable upper.
+set -eu
+
+BB=/bin/busybox
+SQUASH_THREADS=percpu
+SYS_CLASS_BLOCK=${RUNS_ON_RECOVERY_SYS_CLASS_BLOCK:-/sys/class/block}
+DEV_ROOT=${RUNS_ON_RECOVERY_DEV_ROOT:-/dev}
+
+log() {
+  echo "[runs-on-recovery-init] $*" > /dev/console 2>/dev/null || true
+}
+
+fatal() {
+  log "$*; recovery boot failed, starting a serial emergency shell"
+  ${BB} sync || true
+  exec ${BB} sh </dev/console >/dev/console 2>&1
+}
+
+resolve_partuuid_device() {
+  desired_partuuid=$1
+  attempt=0
+  while [ "${attempt}" -lt 100 ]; do
+    for uevent in "${SYS_CLASS_BLOCK}"/*/uevent; do
+      [ -r "${uevent}" ] || continue
+      candidate_devname=''
+      candidate_partuuid=''
+      while IFS='=' read -r key value; do
+        case "${key}" in
+          DEVNAME) candidate_devname=${value} ;;
+          PARTUUID) candidate_partuuid=${value} ;;
+        esac
+      done < "${uevent}"
+      [ -n "${candidate_devname}" ] && [ -n "${candidate_partuuid}" ] || continue
+      [ "${candidate_partuuid}" = "${desired_partuuid}" ] || continue
+      candidate="${DEV_ROOT}/${candidate_devname}"
+      [ -b "${candidate}" ] || continue
+      printf '%s\n' "${candidate}"
+      return 0
+    done
+    ${BB} sleep 0.1
+    attempt=$((attempt + 1))
+  done
+  return 1
+}
+
+${BB} mkdir -p /dev /proc /sys /bootstrap
+${BB} mount -t devtmpfs devtmpfs /dev || fatal "cannot mount devtmpfs"
+${BB} mount -t proc proc /proc || fatal "cannot mount proc"
+${BB} mount -t sysfs sysfs /sys || fatal "cannot mount sysfs"
+${BB} mount --make-rprivate / || fatal "cannot make initramfs mounts private"
+
+CMDLINE=$(${BB} cat /proc/cmdline)
+ROOT_PARTUUID=''
+for argument in ${CMDLINE}; do
+  case "${argument}" in
+    root=PARTUUID=*) ROOT_PARTUUID=${argument#root=PARTUUID=} ;;
+    runs_on.squash_threads=single) SQUASH_THREADS=single ;;
+    runs_on.squash_threads=percpu) SQUASH_THREADS=percpu ;;
+  esac
+done
+[ -n "${ROOT_PARTUUID}" ] || fatal "root PARTUUID is missing"
+
+ROOT_DEVICE=$(resolve_partuuid_device "${ROOT_PARTUUID}" || true)
+[ -n "${ROOT_DEVICE}" ] || fatal "cannot find root partition ${ROOT_PARTUUID}"
+
+${BB} mount -t ext4 -o rw "${ROOT_DEVICE}" /bootstrap || fatal "cannot mount bootstrap ext4"
+STATE=/bootstrap/runs-on-root
+RUNTIME=${STATE}/recovery-runtime
+LOWER=${RUNTIME}/lower
+NEWROOT=${RUNTIME}/newroot
+
+[ -s "${STATE}/rootfs.squashfs" ] || fatal "SquashFS image is missing"
+[ -s /overlay.ko ] || fatal "recovery OverlayFS module is missing"
+${BB} mkdir -p "${LOWER}" "${NEWROOT}"
+if [ ! -d /sys/module/overlay ]; then
+  ${BB} insmod /overlay.ko || fatal "cannot load recovery OverlayFS"
+fi
+${BB} mount -t squashfs -o "loop,ro,nodev,threads=${SQUASH_THREADS}" \
+  "${STATE}/rootfs.squashfs" "${LOWER}" || fatal "cannot mount SquashFS lower"
+${BB} mount -t overlay overlay \
+  -o "lowerdir=${LOWER},upperdir=${STATE}/upper,workdir=${STATE}/work" \
+  "${NEWROOT}" || fatal "cannot mount recovery OverlayFS root"
+
+${BB} mkdir -p \
+  "${NEWROOT}/.recovery-initramfs" \
+  "${NEWROOT}/dev" \
+  "${NEWROOT}/proc" \
+  "${NEWROOT}/sys" \
+  "${NEWROOT}/run"
+${BB} mount --move /dev "${NEWROOT}/dev" || fatal "cannot move dev"
+${BB} mount --move /proc "${NEWROOT}/proc" || fatal "cannot move proc"
+${BB} mount --move /sys "${NEWROOT}/sys" || fatal "cannot move sys"
+
+cd "${NEWROOT}"
+${BB} pivot_root . .recovery-initramfs || fatal "cannot pivot to recovered OverlayFS root"
+
+BB=/.recovery-initramfs/bin/busybox
+STATE=/.recovery-initramfs/bootstrap/runs-on-root
+persist=${STATE}/persist
+for path in \
+  home/runner/_work \
+  mnt \
+  tmp \
+  var/tmp \
+  var/lib/docker \
+  var/lib/containerd \
+  var/lib/containers; do
+  source_path="${persist}/${path}"
+  target_path="/${path}"
+  [ -d "${source_path}" ] || fatal "persistent source is missing: ${path}"
+  ${BB} mkdir -p "${target_path}"
+  ${BB} mount --bind "${source_path}" "${target_path}" || fatal "cannot bind ${path}"
+done
+
+${BB} mkdir -p /etc/runs-on-overlay
+echo /.recovery-initramfs/bootstrap > /etc/runs-on-overlay/backing-root-mount
+echo grub-initramfs-recovery > /etc/runs-on-overlay/boot-path
+echo squashfs > /etc/runs-on-overlay/lower-type
+echo overlay > /etc/runs-on-overlay/root-type
+
+log "starting systemd through independent GRUB recovery initramfs"
+exec /sbin/init

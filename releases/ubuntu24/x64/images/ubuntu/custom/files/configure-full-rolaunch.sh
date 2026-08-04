@@ -47,8 +47,11 @@ install -D -m 0755 "${ROLAUNCH_SOURCE}" /usr/bin/rolaunch
 cat > /etc/systemd/system/rolaunch.service <<'EOF'
 [Unit]
 Description=ROLaunch
+DefaultDependencies=no
 Wants=systemd-networkd.service systemd-resolved.service
 After=systemd-networkd.service systemd-resolved.service
+Conflicts=shutdown.target
+Before=multi-user.target shutdown.target
 
 [Service]
 Type=oneshot
