@@ -203,6 +203,23 @@ class DirectUefiTest < Minitest::Test
     assert_equal "root=PARTUUID=abc ro panic=-1 console=null quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false\n", stdout
   end
 
+  def test_compact_cmdline_replaces_root_and_deduplicates_immutable_arguments
+    command = "compose_direct_cmdline root=PARTUUID=old rw panic=-1 init=/runs-on-root/init runs_on.immutable=1 runs_on.squash_threads=single console=ttyS0"
+    env = {
+      "DIRECT_UEFI_ROOT_PARTUUID" => "fresh-root",
+      "DIRECT_UEFI_EXTRA_ARGUMENTS" => "init=/runs-on-root/init runs_on.immutable=1 runs_on.squash_threads=percpu"
+    }
+
+    stdout, stderr, status = run_function(command, env)
+
+    assert status.success?, stderr
+    assert_equal 1, stdout.scan("root=PARTUUID=").length
+    assert_includes stdout, "root=PARTUUID=fresh-root"
+    assert_equal 1, stdout.scan("init=/runs-on-root/init").length
+    assert_includes stdout, "runs_on.squash_threads=percpu"
+    refute_includes stdout, "runs_on.squash_threads=single"
+  end
+
   def test_exact_label_parser_handles_verbose_output
     output = <<~EFI
       BootCurrent: 0004
@@ -310,7 +327,10 @@ class DirectUefiTest < Minitest::Test
     refute_includes script, "gzip -cd"
     assert_includes script, "linux-image-${kernel_release}"
     assert_operator script.index('delete_boot_entries_for_label "${label_direct}"'), :<, script.index("efibootmgr --create")
-    assert_includes script, "-name 'vmlinuz-*.efi*' -delete"
+    assert_includes script, "-name 'vmlinuz*.efi*' -delete"
+    assert_includes script, 'direct_filename="vmlinuz.efi"'
+    assert_includes script, "mounted target ESP does not belong"
+    assert_includes script, "target ESP PARTUUID"
     assert_operator script.index("efibootmgr --bootnext"), :>, script.index("efibootmgr --bootorder")
     assert_includes script, '"${prepared_order%%,*}" == "${fallback_bootnum}"'
     assert_includes script, '"${prepared_order##*,}" == "${direct_bootnum}"'

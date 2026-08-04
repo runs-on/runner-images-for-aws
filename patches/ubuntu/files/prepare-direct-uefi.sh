@@ -6,7 +6,7 @@ export LC_ALL=C
 
 readonly label_direct="RunsOn direct Linux"
 readonly label_fallback="RunsOn GRUB fallback"
-readonly state_dir="/var/lib/runs-on-direct-uefi"
+readonly state_dir="${DIRECT_UEFI_STATE_DIR:-/var/lib/runs-on-direct-uefi}"
 
 fallback_hashes_before=''
 fallback_hashes_after=''
@@ -176,16 +176,33 @@ validate_direct_cmdline() {
 
 compose_direct_cmdline() {
   local argument kernel_cmdline=''
+  local root_partuuid="${DIRECT_UEFI_ROOT_PARTUUID:-}"
+  local extra_arguments="${DIRECT_UEFI_EXTRA_ARGUMENTS:-}"
+  local -a extra_kernel_arguments=()
 
   for argument in "$@"; do
     case "${argument}" in
       BOOT_IMAGE=*|initrd=*|initrdfail|initrdless_boot_fallback_triggered|console=*|earlycon|earlycon=*|quiet|loglevel=*|systemd.show_status=*|rd.systemd.show_status=*)
+        ;;
+      root=PARTUUID=*)
+        [[ -z "${root_partuuid}" ]] && kernel_cmdline+="${kernel_cmdline:+ }${argument}"
+        ;;
+      init=/runs-on-root/init|runs_on.immutable=*|runs_on.squash_threads=*)
+        [[ -z "${extra_arguments}" ]] && kernel_cmdline+="${kernel_cmdline:+ }${argument}"
         ;;
       *)
         kernel_cmdline+="${kernel_cmdline:+ }${argument}"
         ;;
     esac
   done
+  [[ -z "${root_partuuid}" ]] || kernel_cmdline="root=PARTUUID=${root_partuuid}${kernel_cmdline:+ ${kernel_cmdline}}"
+  if [[ -n "${extra_arguments}" ]]; then
+    read -ra extra_kernel_arguments <<< "${extra_arguments}"
+    for argument in "${extra_kernel_arguments[@]}"; do
+      [[ "${argument}" != *[[:space:]]* ]] || fail "invalid whitespace in Direct UEFI extra argument"
+      kernel_cmdline+="${kernel_cmdline:+ }${argument}"
+    done
+  fi
   kernel_cmdline+="${kernel_cmdline:+ }console=null quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false"
   printf '%s\n' "${kernel_cmdline}"
 }
@@ -240,6 +257,14 @@ write_fallback_hashes() {
   [[ -s "${destination}" ]] || fail "no fallback EFI files were hashed"
 }
 
+normalize_esp_hash_paths() {
+  local source="$1"
+  local destination="$2"
+  local esp_mount="$3"
+
+  sed "s#  ${esp_mount%/}/#  /boot/efi/#" "${source}" > "${destination}"
+}
+
 write_state() {
   local name="$1"
   local value="$2"
@@ -272,22 +297,20 @@ main() {
   [[ -d /sys/firmware/efi/efivars ]] || fail "builder did not boot through UEFI"
   command -v efibootmgr >/dev/null || fail "efibootmgr is missing"
 
-  local kernel_release kernel_path kernel_config kernel_magic
+  local kernel_release kernel_path kernel_config kernel_magic kernel_boot_dir
   local esp_mount esp_source esp_parent esp_part esp_disk
   local fallback_loader='' loader
   local kernel_cmdline='' config_option direct_filename direct_path direct_loader
   local kernel_copy_size esp_available original_order fallback_bootnum direct_bootnum new_order
-  local prepared_output prepared_next prepared_order direct_verbose installed_direct_kernel installed_direct_count
-  local -a fallback_loader_paths=(
-    /boot/efi/EFI/ubuntu/shimx64.efi
-    /boot/efi/EFI/ubuntu/grubx64.efi
-    /boot/efi/EFI/BOOT/BOOTX64.EFI
-  )
+  local prepared_output prepared_next prepared_order direct_verbose direct_verbose_upper esp_partuuid
+  local installed_direct_kernel installed_direct_count
+  local -a fallback_loader_paths=()
   local -a fallback_directories=() kernel_arguments=()
 
-  kernel_release="$(select_latest_aws_kernel /boot)"
-  kernel_path="/boot/vmlinuz-${kernel_release}"
-  kernel_config="/boot/config-${kernel_release}"
+  kernel_boot_dir="${DIRECT_UEFI_KERNEL_BOOT_DIR:-/boot}"
+  kernel_release="$(select_latest_aws_kernel "${kernel_boot_dir}")"
+  kernel_path="${kernel_boot_dir}/vmlinuz-${kernel_release}"
+  kernel_config="${kernel_boot_dir}/config-${kernel_release}"
   [[ -f "${kernel_config}" ]] || fail "kernel config is missing: ${kernel_config}"
   grep -qx 'CONFIG_EFI_STUB=y' "${kernel_config}" || fail "linux-aws kernel lacks CONFIG_EFI_STUB=y"
   for config_option in CONFIG_BLK_DEV_NVME CONFIG_NVME_CORE CONFIG_EXT4_FS; do
@@ -298,20 +321,40 @@ main() {
   [[ "${kernel_magic}" == "4d5a" ]] || fail "amd64 linux-aws kernel is not a raw PE/COFF EFI image"
   validate_pe_image "${kernel_path}"
 
-  esp_mount="$(findmnt -nro TARGET /boot/efi)"
-  esp_source="$(findmnt -nro SOURCE /boot/efi)"
-  [[ "${esp_mount}" == "/boot/efi" && -n "${esp_source}" ]] || fail "EFI system partition is not mounted at /boot/efi"
-  esp_source="$(readlink -f "${esp_source}")"
-  # Consume all lsblk output. Exiting after the first line can turn a valid
-  # pipeline into status 141 under pipefail.
-  esp_parent="$(lsblk -nro PKNAME "${esp_source}" | awk '!found { print; found = 1 }')"
-  esp_part="$(lsblk -nro PARTN "${esp_source}" | awk '!found { print; found = 1 }')"
-  [[ -n "${esp_parent}" && "${esp_part}" =~ ^[0-9]+$ ]] || fail "cannot resolve ESP disk and partition"
-  esp_disk="/dev/${esp_parent}"
+  esp_mount="${DIRECT_UEFI_ESP_MOUNT:-$(findmnt -nro TARGET /boot/efi)}"
+  [[ -n "${esp_mount}" && "$(findmnt -nro TARGET --target "${esp_mount}")" == "${esp_mount}" ]] || \
+    fail "EFI system partition is not mounted at ${esp_mount:-<unset>}"
+  if [[ -n "${DIRECT_UEFI_DISK:-}" || -n "${DIRECT_UEFI_ESP_PARTITION:-}" ]]; then
+    [[ -b "${DIRECT_UEFI_DISK:-}" && "${DIRECT_UEFI_ESP_PARTITION:-}" =~ ^[0-9]+$ ]] || \
+      fail "target EFI disk and partition override must be supplied together"
+    esp_disk="$(readlink -f "${DIRECT_UEFI_DISK}")"
+    esp_part="${DIRECT_UEFI_ESP_PARTITION}"
+    esp_source="$(readlink -f "$(findmnt -nro SOURCE --target "${esp_mount}")")"
+    esp_parent="$(lsblk -nro PKNAME "${esp_source}" | awk '!found { print; found = 1 }')"
+    [[ -n "${esp_parent}" ]] || fail "cannot resolve target ESP parent disk"
+    [[ "$(readlink -f "/dev/${esp_parent}")" == "${esp_disk}" ]] || \
+      fail "mounted target ESP does not belong to ${esp_disk}"
+    [[ "$(lsblk -nro PARTN "${esp_source}" | awk '!found { print; found = 1 }')" == "${esp_part}" ]] || \
+      fail "mounted target ESP is not partition ${esp_part}"
+  else
+    esp_source="$(readlink -f "$(findmnt -nro SOURCE --target "${esp_mount}")")"
+    # Consume all lsblk output. Exiting after the first line can turn a valid
+    # pipeline into status 141 under pipefail.
+    esp_parent="$(lsblk -nro PKNAME "${esp_source}" | awk '!found { print; found = 1 }')"
+    esp_part="$(lsblk -nro PARTN "${esp_source}" | awk '!found { print; found = 1 }')"
+    [[ -n "${esp_parent}" && "${esp_part}" =~ ^[0-9]+$ ]] || fail "cannot resolve ESP disk and partition"
+    esp_disk="/dev/${esp_parent}"
+  fi
+
+  fallback_loader_paths=(
+    "${esp_mount}/EFI/ubuntu/shimx64.efi"
+    "${esp_mount}/EFI/ubuntu/grubx64.efi"
+    "${esp_mount}/EFI/BOOT/BOOTX64.EFI"
+  )
 
   for loader in "${fallback_loader_paths[@]}"; do
     if [[ -f "${loader}" ]]; then
-      fallback_loader="\\${loader#/boot/efi/}"
+      fallback_loader="\\${loader#"${esp_mount%/}/"}"
       fallback_loader="${fallback_loader//\//\\}"
       break
     fi
@@ -321,6 +364,10 @@ main() {
   read -ra kernel_arguments < /proc/cmdline
   kernel_cmdline="$(compose_direct_cmdline "${kernel_arguments[@]}")"
   validate_direct_cmdline "${kernel_cmdline}"
+  if [[ -n "${DIRECT_UEFI_ROOT_PARTUUID:-}" ]]; then
+    [[ " ${kernel_cmdline} " == *" root=PARTUUID=${DIRECT_UEFI_ROOT_PARTUUID} "* ]] || \
+      fail "direct kernel command line does not use the requested target root PARTUUID"
+  fi
 
   install -d -m 0755 "${esp_mount}/EFI/runs-on" "${state_dir}"
   for loader in "${esp_mount}/EFI/ubuntu" "${esp_mount}/EFI/BOOT"; do
@@ -333,9 +380,9 @@ main() {
 
   delete_boot_entries_for_label "${label_direct}"
   delete_boot_entries_for_label "${label_fallback}"
-  find "${esp_mount}/EFI/runs-on" -maxdepth 1 -type f -name 'vmlinuz-*.efi*' -delete
+  find "${esp_mount}/EFI/runs-on" -maxdepth 1 -type f -name 'vmlinuz*.efi*' -delete
 
-  direct_filename="vmlinuz-${kernel_release}.efi"
+  direct_filename="vmlinuz.efi"
   direct_path="${esp_mount}/EFI/runs-on/${direct_filename}"
   direct_loader="\\EFI\\runs-on\\${direct_filename}"
   kernel_copy_size="$(stat -c '%s' "${kernel_path}")"
@@ -373,22 +420,31 @@ main() {
   prepared_next="$(awk -F': ' '/^BootNext:/ && !found { print toupper($2); found = 1 }' <<< "${prepared_output}")"
   prepared_order="$(awk -F': ' '/^BootOrder:/ && !found { print toupper($2); found = 1 }' <<< "${prepared_output}")"
   direct_verbose="$(awk -v boot="${direct_bootnum}" '$0 ~ "^Boot" boot "[* ]" && !found { print; found = 1 }' <<< "${prepared_output}")"
+  direct_verbose_upper="$(tr '[:lower:]' '[:upper:]' <<< "${direct_verbose}")"
+  esp_partuuid="$(blkid -s PARTUUID -o value "${esp_source}")"
   [[ "${direct_verbose}" == *'HD('* ]] || fail "direct entry does not use a portable HD() device path"
   [[ "${direct_verbose}" != *'NVMe('* ]] || fail "direct entry contains an instance-specific NVMe device path"
+  [[ "${direct_verbose_upper}" == *"GPT,${esp_partuuid^^},"* ]] || \
+    fail "direct entry HD() path does not use the mounted target ESP PARTUUID"
   [[ "${prepared_next}" == "${direct_bootnum}" ]] || fail "direct entry was not armed through BootNext"
   [[ "${prepared_order}" == "${new_order}" ]] || fail "firmware BootOrder differs from the requested order"
   [[ "${prepared_order%%,*}" == "${fallback_bootnum}" ]] || fail "GRUB fallback is not first in BootOrder"
   [[ "${prepared_order##*,}" == "${direct_bootnum}" ]] || fail "direct entry is not last in BootOrder"
 
-  installed_direct_kernel="$(find "${esp_mount}/EFI/runs-on" -maxdepth 1 -type f -name 'vmlinuz-*.efi' -print)"
+  installed_direct_kernel="$(find "${esp_mount}/EFI/runs-on" -maxdepth 1 -type f -name 'vmlinuz.efi' -print)"
   installed_direct_count="$(awk 'NF { count++ } END { print count + 0 }' <<< "${installed_direct_kernel}")"
   [[ "${installed_direct_count}" -eq 1 ]] || fail "EFI system partition does not contain exactly one direct kernel"
   cmp -s "${kernel_path}" "${installed_direct_kernel}" || fail "direct kernel copy differs from the selected linux-aws kernel"
-  sha256sum "${installed_direct_kernel}" > "${state_dir}/direct-kernel.sha256"
+  sha256sum "${installed_direct_kernel}" > "${state_dir}/direct-kernel.sha256.actual"
+  normalize_esp_hash_paths \
+    "${state_dir}/direct-kernel.sha256.actual" \
+    "${state_dir}/direct-kernel.sha256" \
+    "${esp_mount}"
+  rm -f "${state_dir}/direct-kernel.sha256.actual"
 
   write_fallback_hashes "${fallback_hashes_after}" "${fallback_directories[@]}"
   cmp -s "${fallback_hashes_before}" "${fallback_hashes_after}" || fail "fallback EFI files changed during direct boot preparation"
-  install -m 0644 "${fallback_hashes_after}" "${state_dir}/fallback.sha256"
+  normalize_esp_hash_paths "${fallback_hashes_after}" "${state_dir}/fallback.sha256" "${esp_mount}"
 
   write_state expected-boot-current "${direct_bootnum}"
   write_state fallback-bootnum "${fallback_bootnum}"

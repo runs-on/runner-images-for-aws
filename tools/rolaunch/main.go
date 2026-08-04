@@ -615,17 +615,17 @@ func waitForRootFilesystemResize(done <-chan rootResizeResult) bool {
 }
 
 func maybeResizeRootFilesystem(ctx context.Context) (bool, error) {
-	rootPartition, fsType, err := rootMountInfo()
+	mount, err := resolveRootResizeMount(defaultBackingRootMarker, rootMountInfo, mountedPathInfo)
 	if err != nil {
 		return false, err
 	}
 
-	device, partNum, err := parseBlockDevicePartition(rootPartition)
+	device, partNum, err := parseBlockDevicePartition(mount.source)
 	if err != nil {
 		return false, err
 	}
 
-	partName := filepath.Base(rootPartition)
+	partName := filepath.Base(mount.source)
 	diskName := filepath.Base(device)
 
 	partSize, err := readSysfsSize(partName)
@@ -645,11 +645,10 @@ func maybeResizeRootFilesystem(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("read partition start for %s: %w", partName, err)
 	}
 
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs("/", &stat); err != nil {
-		return false, fmt.Errorf("statfs /: %w", err)
+	fsSize, err := filesystemSizeAt(mount.path, syscall.Statfs)
+	if err != nil {
+		return false, err
 	}
-	fsSize := int64(stat.Blocks) * int64(stat.Bsize)
 
 	growableSectors := growableSectorsAtEnd(diskSectors, partStartSectors, partSectors)
 	needGrowpart := diskSectors > 0 && partSectors > 0 && growableSectors > diskSectors/100
@@ -661,9 +660,10 @@ func maybeResizeRootFilesystem(ctx context.Context) (bool, error) {
 	}
 
 	log.Printf(
-		"root resize needed: root=%s fs=%s part_start=%d part_size=%d fs_size=%d growable=%d needGrowpart=%v needResizeFs=%v",
-		rootPartition,
-		fsType,
+		"root resize needed: mount=%s source=%s fs=%s part_start=%d part_size=%d fs_size=%d growable=%d needGrowpart=%v needResizeFs=%v",
+		mount.path,
+		mount.source,
+		mount.fsType,
 		partStartSectors,
 		partSize,
 		fsSize,
@@ -705,15 +705,15 @@ func maybeResizeRootFilesystem(ctx context.Context) (bool, error) {
 		cmdArgs []string
 	)
 
-	switch fsType {
+	switch mount.fsType {
 	case "ext2", "ext3", "ext4":
 		cmdName = "resize2fs"
-		cmdArgs = []string{rootPartition}
+		cmdArgs = []string{mount.source}
 	case "xfs":
 		cmdName = "xfs_growfs"
-		cmdArgs = []string{"/"}
+		cmdArgs = []string{mount.path}
 	default:
-		log.Printf("warning: unsupported root filesystem %q, skipping resize", fsType)
+		log.Printf("warning: unsupported root filesystem %q, skipping resize", mount.fsType)
 		return false, nil
 	}
 

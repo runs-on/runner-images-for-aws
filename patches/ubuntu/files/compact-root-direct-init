@@ -1,0 +1,95 @@
+#!/runs-on-root/busybox sh
+
+# Direct UEFI init for the immutable SquashFS lower and persistent OverlayFS upper.
+set -eu
+
+BB=/runs-on-root/busybox
+STATE=/runs-on-root
+RUNTIME=${STATE}/runtime
+LOWER=${RUNTIME}/lower
+NEWROOT=${RUNTIME}/newroot
+SQUASH_THREADS=percpu
+
+log() {
+  echo "[runs-on-compact-init] $*" > /dev/console 2>/dev/null || true
+}
+
+fail_to_recovery() {
+  log "$*; rebooting into the independent GRUB recovery path"
+  ${BB} sync || true
+  ${BB} sleep 1
+  ${BB} reboot -f
+  while :; do ${BB} sleep 60; done
+}
+
+${BB} mkdir -p /dev /proc /sys "${LOWER}" "${NEWROOT}"
+[ -r /proc/cmdline ] || ${BB} mount -t proc proc /proc || fail_to_recovery "cannot mount proc"
+[ -d /sys/class ] || ${BB} mount -t sysfs sysfs /sys || fail_to_recovery "cannot mount sysfs"
+[ -c /dev/console ] || ${BB} mount -t devtmpfs devtmpfs /dev || fail_to_recovery "cannot mount devtmpfs"
+${BB} mount --make-rprivate / || fail_to_recovery "cannot make root mounts private"
+${BB} mount -o remount,rw / || fail_to_recovery "cannot make bootstrap root writable"
+
+CMDLINE=$(${BB} cat /proc/cmdline)
+case " ${CMDLINE} " in
+  *' runs_on.immutable=1 '*) ;;
+  *) fail_to_recovery "immutable-root selector is missing" ;;
+esac
+case " ${CMDLINE} " in
+  *' runs_on.squash_threads=single '*) SQUASH_THREADS=single ;;
+  *' runs_on.squash_threads=percpu '*) SQUASH_THREADS=percpu ;;
+esac
+
+[ -s "${STATE}/rootfs.squashfs" ] || fail_to_recovery "SquashFS image is missing"
+[ -s "${STATE}/overlay.ko" ] || fail_to_recovery "OverlayFS module is missing"
+[ -x "${STATE}/busybox" ] || fail_to_recovery "static BusyBox is missing"
+
+if [ ! -d /sys/module/overlay ]; then
+  ${BB} insmod "${STATE}/overlay.ko" || fail_to_recovery "cannot load OverlayFS"
+fi
+
+${BB} mount -t squashfs -o "loop,ro,nodev,threads=${SQUASH_THREADS}" \
+  "${STATE}/rootfs.squashfs" "${LOWER}" || fail_to_recovery "cannot mount SquashFS lower"
+${BB} mount -t overlay overlay \
+  -o "lowerdir=${LOWER},upperdir=${STATE}/upper,workdir=${STATE}/work" \
+  "${NEWROOT}" || fail_to_recovery "cannot mount OverlayFS root"
+
+${BB} mkdir -p \
+  "${NEWROOT}/.bootstrap" \
+  "${NEWROOT}/dev" \
+  "${NEWROOT}/proc" \
+  "${NEWROOT}/sys" \
+  "${NEWROOT}/run"
+${BB} mount --move /dev "${NEWROOT}/dev" || fail_to_recovery "cannot move dev"
+${BB} mount --move /proc "${NEWROOT}/proc" || fail_to_recovery "cannot move proc"
+${BB} mount --move /sys "${NEWROOT}/sys" || fail_to_recovery "cannot move sys"
+
+cd "${NEWROOT}"
+${BB} pivot_root . .bootstrap || fail_to_recovery "cannot pivot to OverlayFS root"
+
+BB=/.bootstrap/runs-on-root/busybox
+STATE=/.bootstrap/runs-on-root
+persist=${STATE}/persist
+
+for path in \
+  home/runner/_work \
+  mnt \
+  tmp \
+  var/tmp \
+  var/lib/docker \
+  var/lib/containerd \
+  var/lib/containers; do
+  source_path="${persist}/${path}"
+  target_path="/${path}"
+  [ -d "${source_path}" ] || fail_to_recovery "persistent source is missing: ${path}"
+  ${BB} mkdir -p "${target_path}"
+  ${BB} mount --bind "${source_path}" "${target_path}" || fail_to_recovery "cannot bind ${path}"
+done
+
+${BB} mkdir -p /etc/runs-on-overlay
+echo /.bootstrap > /etc/runs-on-overlay/backing-root-mount
+echo direct-uefi > /etc/runs-on-overlay/boot-path
+echo squashfs > /etc/runs-on-overlay/lower-type
+echo overlay > /etc/runs-on-overlay/root-type
+
+log "starting systemd on compact SquashFS + OverlayFS root"
+exec /sbin/init
