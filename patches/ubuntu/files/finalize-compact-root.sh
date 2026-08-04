@@ -12,7 +12,7 @@ readonly target_mapping="/dev/sdf"
 readonly target_mount="/srv/runs-on-compact-target"
 readonly work_dir="/var/lib/runs-on-compact-build"
 readonly validation_dir="/run/runs-on-compact-validation"
-readonly profile_sha256="4aeb92333b17c6f235dffe7be52391dc689b8a25d701f054c6d2ac96e57ec73d"
+readonly profile_sha256="c8b12d9a28f22ca811aa96869c3a7c2ef24c87ce95a6228bbac866a07e990360"
 
 target_disk=''
 target_p1=''

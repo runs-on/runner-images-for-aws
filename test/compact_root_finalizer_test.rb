@@ -1,4 +1,5 @@
 require "minitest/autorun"
+require "digest"
 require "fileutils"
 require "open3"
 require "shellwords"
@@ -38,7 +39,11 @@ class CompactRootFinalizerTest < Minitest::Test
   end
 
   def test_basic_target_probe_is_in_boot_profile
-    assert_match(/^usr\/bin\/systemctl [0-9]+$/, File.read(BOOT_PROFILE))
+    profile = File.read(BOOT_PROFILE)
+    script = File.read(SCRIPT)
+
+    assert_match(/^usr\/bin\/systemctl [0-9]+$/, profile)
+    assert_includes script, %(readonly profile_sha256="#{Digest::SHA256.hexdigest(profile)}")
   end
 
   def test_direct_init_persists_failures_before_recovery_reboot
