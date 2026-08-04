@@ -451,25 +451,32 @@ build_squash() {
   grep -q 'Block size 262144' "${work_dir}/squash.stat" || fail "SquashFS block size differs from 256 KiB"
 }
 
+squash_header_is_early() {
+  local first_block="${1:-}"
+  [[ "${first_block}" =~ ^[0-9]+$ && "${first_block}" -lt 262144 ]]
+}
+
 place_squash_first() {
   local source="$1" root="$2"
   local staged="${root}/rootfs.squashfs"
-  local size first_block extent_count
+  local size filesystem_block_size first_block extent_count
   size="$(stat -c %s "${source}")"
   [[ "${size}" =~ ^[0-9]+$ && "${size}" -gt 16777216 ]] || fail "SquashFS is unexpectedly small"
+  filesystem_block_size="$(stat -f -c %S "${root}")"
+  [[ "${filesystem_block_size}" == 4096 ]] || fail "target ext4 block size is not 4096 bytes: ${filesystem_block_size:-unknown}"
   fallocate -l "${size}" "${staged}"
   sync
   filefrag -e -v "${staged}" | tee "${work_dir}/rootfs.preallocated.filefrag"
   first_block="$(awk '$1 == "0:" { value=$4; sub(/\.\..*/, "", value); print value; exit }' "${work_dir}/rootfs.preallocated.filefrag")"
   extent_count="$(awk '/extents? found$/ { print $(NF - 2); exit }' "${work_dir}/rootfs.preallocated.filefrag")"
-  [[ "${first_block}" =~ ^[0-9]+$ && "${first_block}" -lt 1048576 ]] || fail "preallocated SquashFS header allocated too high: ${first_block:-unknown}"
+  squash_header_is_early "${first_block}" || fail "preallocated SquashFS header allocated too high: ${first_block:-unknown}"
   [[ "${extent_count}" =~ ^[0-9]+$ && "${extent_count}" -le 20 ]] || fail "preallocated SquashFS is too fragmented: ${extent_count:-unknown}"
   dd if="${source}" of="${staged}" bs=16M iflag=fullblock oflag=direct conv=notrunc status=progress
   sync
   filefrag -e -v "${staged}" | tee "${work_dir}/rootfs.filefrag"
   first_block="$(awk '$1 == "0:" { value=$4; sub(/\.\..*/, "", value); print value; exit }' "${work_dir}/rootfs.filefrag")"
   extent_count="$(awk '/extents? found$/ { print $(NF - 2); exit }' "${work_dir}/rootfs.filefrag")"
-  [[ "${first_block}" =~ ^[0-9]+$ && "${first_block}" -lt 1048576 ]] || fail "SquashFS header allocated too high: ${first_block:-unknown}"
+  squash_header_is_early "${first_block}" || fail "SquashFS header allocated too high: ${first_block:-unknown}"
   [[ "${extent_count}" =~ ^[0-9]+$ && "${extent_count}" -le 20 ]] || fail "SquashFS is too fragmented: ${extent_count:-unknown}"
   grep -Eq 'unwritten|delalloc' "${work_dir}/rootfs.filefrag" && fail "final SquashFS has unwritten or delayed extents"
   install -d -m 0700 "${root}/runs-on-root"

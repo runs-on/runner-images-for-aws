@@ -109,10 +109,28 @@ class CompactRootFinalizerTest < Minitest::Test
     refute_nil write
     assert_operator preallocate, :<, write
     refute_includes script, '.root-allocation-seed'
-    assert_includes script, '"${first_block}" -lt 1048576'
+    assert_includes script, '[[ "${filesystem_block_size}" == 4096 ]]'
+    assert_equal 2, script.scan('squash_header_is_early "${first_block}"').length
     assert_includes script, '"${extent_count}" -le 20'
     refute_match(/\b(?:blkdiscard|fstrim)\b/, script)
     refute_includes script, "materialize-sparse-ebs"
+  end
+
+  def test_squash_header_gate_rejects_late_and_unknown_blocks
+    command = <<~BASH
+      source #{Shellwords.escape(SCRIPT)}
+      trap - EXIT INT TERM
+      squash_header_is_early 34816
+      squash_header_is_early 262143
+      ! squash_header_is_early 262144
+      ! squash_header_is_early 7569408
+      ! squash_header_is_early ''
+      ! squash_header_is_early unknown
+    BASH
+
+    _stdout, stderr, status = Open3.capture3("bash", "-c", command)
+
+    assert status.success?, stderr
   end
 
   def test_unsupported_tpm_acl_is_removed_and_boot_paths_share_the_upper
