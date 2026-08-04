@@ -25,19 +25,19 @@ resolve_partuuid_device() {
     for uevent in "${SYS_CLASS_BLOCK}"/*/uevent; do
       [ -r "${uevent}" ] || continue
       candidate_devname=''
+      candidate_partuuid=''
       while IFS='=' read -r key value; do
         case "${key}" in
           DEVNAME) candidate_devname=${value} ;;
+          PARTUUID) candidate_partuuid=${value} ;;
         esac
       done < "${uevent}"
-      [ -n "${candidate_devname}" ] || continue
+      [ -n "${candidate_devname}" ] && [ -n "${candidate_partuuid}" ] || continue
+      [ "${candidate_partuuid}" = "${desired_partuuid}" ] || continue
       candidate="${DEV_ROOT}/${candidate_devname}"
       [ -b "${candidate}" ] || continue
-      candidate_partuuid=$(${BB} blkid -s PARTUUID -o value "${candidate}" 2>/dev/null || true)
-      if [ "${candidate_partuuid}" = "${desired_partuuid}" ]; then
-        printf '%s\n' "${candidate}"
-        return 0
-      fi
+      printf '%s\n' "${candidate}"
+      return 0
     done
     ${BB} sleep 0.1
     attempt=$((attempt + 1))

@@ -427,7 +427,7 @@ install_recovery_initramfs() {
   install -m 0755 "${asset_dir}/compact-root-recovery-init" "${stage}/init"
   install -m 0755 /bin/busybox "${stage}/bin/busybox"
   install -m 0644 "${overlay_module}" "${stage}/overlay.ko"
-  for applet in blkid cat insmod mkdir mount pivot_root reboot sh sleep sync; do
+  for applet in cat insmod mkdir mount pivot_root reboot sh sleep sync; do
     /bin/busybox --list | grep -qx "${applet}" || fail "static BusyBox lacks ${applet}"
   done
   /bin/busybox sh -n "${stage}/init"

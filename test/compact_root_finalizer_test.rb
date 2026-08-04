@@ -1,4 +1,5 @@
 require "minitest/autorun"
+require "fileutils"
 require "open3"
 require "shellwords"
 require "tmpdir"
@@ -111,8 +112,9 @@ class CompactRootFinalizerTest < Minitest::Test
       refute_includes File.read(path), 'compact-root-acl.py', path
     end
     assert_includes recovery, 'upperdir=${STATE}/upper,workdir=${STATE}/work'
-    assert_includes recovery, '${BB} blkid -s PARTUUID -o value "${candidate}"'
-    refute_match(/PARTUUID\) candidate_partuuid=/, recovery)
+    assert_includes recovery, 'PARTUUID) candidate_partuuid=${value} ;;'
+    assert_includes recovery, '[ "${candidate_partuuid}" = "${desired_partuuid}" ] || continue'
+    refute_includes recovery, '${BB} blkid'
     refute_includes recovery, "recovery-upper"
     refute_includes recovery, "recovery-work"
   end
@@ -149,6 +151,38 @@ class CompactRootFinalizerTest < Minitest::Test
         [[ -s #{Shellwords.escape(evidence)} ]]
         [[ "$(< #{Shellwords.escape(calls)})" == \
           '--remove-all --remove-default -- #{keystore}' ]]
+      BASH
+
+      _stdout, stderr, status = Open3.capture3("bash", "-c", command)
+
+      assert status.success?, stderr
+    end
+  end
+
+  def test_recovery_resolves_partuuid_from_kernel_uevent
+    recovery = File.read(RECOVERY_INIT)
+    resolver = recovery[/^resolve_partuuid_device\(\) \{\n.*?^\}\n/m]
+    refute_nil resolver
+    block_device = Dir.glob("/dev/**/*").find { |path| File.blockdev?(path) }
+    skip "test host exposes no block device" unless block_device
+
+    Dir.mktmpdir("compact-root-partuuid") do |dir|
+      sys_class = File.join(dir, "sys/class/block")
+      uevent_dir = File.join(sys_class, "nvme0n1p1")
+      FileUtils.mkdir_p(uevent_dir)
+      File.write(
+        File.join(uevent_dir, "uevent"),
+        "MAJOR=259\nMINOR=1\nDEVNAME=#{File.basename(block_device)}\n" \
+          "DEVTYPE=partition\nPARTN=1\nPARTUUID=01234567-89ab-cdef-0123-456789abcdef\n"
+      )
+      command = <<~BASH
+        set -eu
+        BB=/bin/false
+        SYS_CLASS_BLOCK=#{Shellwords.escape(sys_class)}
+        DEV_ROOT=#{Shellwords.escape(File.dirname(block_device))}
+        #{resolver}
+        resolved="$(resolve_partuuid_device 01234567-89ab-cdef-0123-456789abcdef)"
+        [[ "${resolved}" == #{Shellwords.escape(block_device)} ]]
       BASH
 
       _stdout, stderr, status = Open3.capture3("bash", "-c", command)
