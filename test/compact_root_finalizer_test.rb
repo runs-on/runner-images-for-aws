@@ -16,6 +16,8 @@ class CompactRootFinalizerTest < Minitest::Test
   ].map { |name| File.join(ROOT, "patches/ubuntu/templates", name) }.freeze
   AFTER_REBOOT = File.join(ROOT, "patches/ubuntu/files/after-reboot.sh")
   RESIZE_WAIT = File.join(ROOT, "patches/ubuntu/files/wait-for-compact-root-resize.sh")
+  WORKFLOW_TEST = File.join(ROOT, ".github/workflows/test.yml")
+  BLOCK_DEVICE_RESOLVERS = [SCRIPT, AFTER_REBOOT, RESIZE_WAIT].freeze
 
   def test_shell_syntax
     [SCRIPT, DIRECT_INIT, RECOVERY_INIT, AFTER_REBOOT, RESIZE_WAIT].each do |path|
@@ -58,10 +60,56 @@ class CompactRootFinalizerTest < Minitest::Test
     script = File.read(AFTER_REBOOT)
 
     assert_includes script, "/etc/runs-on-overlay/backing-root-mount"
-    assert_includes script, 'findmnt -nro SOURCE --target "${root_mount}"'
+    assert_includes script, 'resolve_mount_block_device "${root_mount}"'
+    assert_includes script, '${SYS_DEV_BLOCK:-/sys/dev/block}/${device_number}'
     assert_includes script, '"${root_fstype}" =~ ^ext[234]$'
     assert_includes script, 'tune2fs -c 0 "${root_source}"'
     refute_includes script, "grep \" / \""
+  end
+
+  def test_mount_block_device_resolver_handles_dev_root_through_sysfs
+    resolvers = BLOCK_DEVICE_RESOLVERS.map do |path|
+      resolver = File.read(path)[/^resolve_mount_block_device\(\) \{\n.*?^\}\n/m]
+      refute_nil resolver, path
+      resolver
+    end
+    assert_equal 1, resolvers.uniq.length
+
+    block_device = Dir.glob("/dev/**/*").find { |path| File.blockdev?(path) }
+    skip "test host exposes no block device" unless block_device
+
+    Dir.mktmpdir("compact-root-mount-device") do |dir|
+      sys_devices = File.join(dir, "sys/devices/virtual/block", File.basename(block_device))
+      sys_dev_block = File.join(dir, "sys/dev/block")
+      FileUtils.mkdir_p(sys_devices)
+      FileUtils.mkdir_p(sys_dev_block)
+      File.symlink(sys_devices, File.join(sys_dev_block, "259:1"))
+      command = <<~BASH
+        set -eu
+        SYS_DEV_BLOCK=#{Shellwords.escape(sys_dev_block)}
+        DEV_ROOT=#{Shellwords.escape(File.dirname(block_device))}
+        findmnt() {
+          case " $* " in
+            *' SOURCE '*) printf '/dev/root\\n' ;;
+            *' MAJ:MIN '*) printf '259:1\\n' ;;
+            *) return 1 ;;
+          esac
+        }
+        readlink() {
+          if [[ "$*" == '-f /dev/root' ]]; then
+            return 1
+          fi
+          command readlink "$@"
+        }
+        #{resolvers.first}
+        resolved="$(resolve_mount_block_device /.bootstrap)"
+        [[ "${resolved}" == #{Shellwords.escape(block_device)} ]]
+      BASH
+
+      _stdout, stderr, status = Open3.capture3("bash", "-c", command)
+
+      assert status.success?, stderr
+    end
   end
 
   def test_fresh_target_is_resolved_and_rejected_fail_closed
@@ -153,6 +201,15 @@ class CompactRootFinalizerTest < Minitest::Test
     refute_includes recovery, '${BB} blkid'
     refute_includes recovery, "recovery-upper"
     refute_includes recovery, "recovery-work"
+  end
+
+  def test_workflow_requires_compact_tpm_acl_to_be_empty
+    workflow = File.read(WORKFLOW_TEST)
+
+    assert_includes workflow, 'test ! -s "$runtime_acl"'
+    assert_includes workflow, 'test ! -s "$upper_acl"'
+    refute_match(/^\s*test -s "\$runtime_acl"/, workflow)
+    refute_match(/^\s*test -s "\$upper_acl"/, workflow)
   end
 
   def test_tpm_acl_normalization_removes_only_the_expected_acl

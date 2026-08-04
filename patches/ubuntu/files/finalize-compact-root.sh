@@ -113,6 +113,24 @@ resolve_backing_root_mount() {
   printf '%s\n' "${value}"
 }
 
+resolve_mount_block_device() {
+  local mount="$1" source resolved device_number sys_path
+  source="$(findmnt -nro SOURCE --target "${mount}")" || return 1
+  resolved="$(readlink -f "${source}" 2>/dev/null || true)"
+  if [[ -n "${resolved}" && -b "${resolved}" ]]; then
+    printf '%s\n' "${resolved}"
+    return
+  fi
+
+  device_number="$(findmnt -nro MAJ:MIN --target "${mount}")" || return 1
+  [[ "${device_number}" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+  sys_path="$(readlink -f "${SYS_DEV_BLOCK:-/sys/dev/block}/${device_number}" 2>/dev/null || true)"
+  [[ -n "${sys_path}" ]] || return 1
+  resolved="${DEV_ROOT:-/dev}/${sys_path##*/}"
+  [[ -b "${resolved}" ]] || return 1
+  printf '%s\n' "${resolved}"
+}
+
 resolve_ebs_target() {
   local disk mapping
   local -a matches=()
@@ -637,7 +655,7 @@ main() {
 
   local backing_mount source_root_partition source_parent source_disk expected_bytes
   backing_mount="$(resolve_backing_root_mount)"
-  source_root_partition="$(readlink -f "$(findmnt -nro SOURCE --target "${backing_mount}")")"
+  source_root_partition="$(resolve_mount_block_device "${backing_mount}")" || fail "cannot resolve backing root block device"
   source_parent="$(lsblk -nro PKNAME "${source_root_partition}" | awk '!seen {print; seen=1}')"
   [[ -n "${source_parent}" && "$(lsblk -nro PARTN "${source_root_partition}" | awk '!seen {print; seen=1}')" == 1 ]] || fail "builder backing root is not partition 1"
   source_disk="$(readlink -f "/dev/${source_parent}")"

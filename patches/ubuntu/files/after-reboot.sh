@@ -1,6 +1,24 @@
 #!/usr/bin/env bash
 set -ex
 
+resolve_mount_block_device() {
+  local mount="$1" source resolved device_number sys_path
+  source="$(findmnt -nro SOURCE --target "${mount}")" || return 1
+  resolved="$(readlink -f "${source}" 2>/dev/null || true)"
+  if [[ -n "${resolved}" && -b "${resolved}" ]]; then
+    printf '%s\n' "${resolved}"
+    return
+  fi
+
+  device_number="$(findmnt -nro MAJ:MIN --target "${mount}")" || return 1
+  [[ "${device_number}" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+  sys_path="$(readlink -f "${SYS_DEV_BLOCK:-/sys/dev/block}/${device_number}" 2>/dev/null || true)"
+  [[ -n "${sys_path}" ]] || return 1
+  resolved="${DEV_ROOT:-/dev}/${sys_path##*/}"
+  [[ -b "${resolved}" ]] || return 1
+  printf '%s\n' "${resolved}"
+}
+
 # Check the real ext filesystem, not the OverlayFS facade used by compact roots.
 root_mount=/
 backing_marker=/etc/runs-on-overlay/backing-root-mount
@@ -13,7 +31,7 @@ if [[ -e "${backing_marker}" ]]; then
   [[ "$(readlink -m "${root_mount}")" == "${root_mount}" ]]
 fi
 [[ "$(findmnt -nro TARGET --target "${root_mount}")" == "${root_mount}" ]]
-root_source="$(readlink -f "$(findmnt -nro SOURCE --target "${root_mount}")")"
+root_source="$(resolve_mount_block_device "${root_mount}")"
 root_fstype="$(findmnt -nro FSTYPE --target "${root_mount}")"
 [[ -b "${root_source}" && "${root_fstype}" =~ ^ext[234]$ ]]
 tune2fs -c 0 "${root_source}"

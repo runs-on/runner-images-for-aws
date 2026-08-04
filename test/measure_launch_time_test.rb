@@ -1,5 +1,6 @@
 require "minitest/autorun"
 require "aws-sdk-ec2"
+require "bigdecimal"
 require "json"
 require "open3"
 require "rbconfig"
@@ -294,6 +295,124 @@ class MeasureLaunchTimeTest < Minitest::Test
     assert_empty summary[:values]
   end
 
+  def test_rolaunch_benchmark_remains_report_only_without_limits
+    @harness.verify_rolaunch_benchmark!(
+      results: [{ phase: "measure", instance_id: "", rolaunch_status: "absent", rolaunch_ready_s: nil }],
+      warm_runs: 0,
+      measure_runs: 1
+    )
+  end
+
+  def test_rolaunch_benchmark_accepts_inclusive_average_and_strict_maximum
+    @harness.verify_rolaunch_benchmark!(
+      results: rolaunch_benchmark_results(warm_values: [7.9], measured_values: [7.33125, 7.33125]),
+      warm_runs: 1,
+      measure_runs: 2,
+      average_at_most: BigDecimal("7.33125"),
+      max_below: BigDecimal("10")
+    )
+  end
+
+  def test_rolaunch_benchmark_compares_unrounded_average
+    [7.331251, 7.334].each do |value|
+      error = assert_raises(RuntimeError) do
+        @harness.verify_rolaunch_benchmark!(
+          results: rolaunch_benchmark_results(warm_values: [7.0], measured_values: [value]),
+          warm_runs: 1,
+          measure_runs: 1,
+          average_at_most: BigDecimal("7.33125")
+        )
+      end
+
+      assert_includes error.message, "exceeds 7.33125s"
+    end
+  end
+
+  def test_rolaunch_benchmark_maximum_is_strict
+    passing = rolaunch_benchmark_results(warm_values: [9.0], measured_values: [9.999999])
+    @harness.verify_rolaunch_benchmark!(
+      results: passing,
+      warm_runs: 1,
+      measure_runs: 1,
+      max_below: BigDecimal("10")
+    )
+
+    error = assert_raises(RuntimeError) do
+      @harness.verify_rolaunch_benchmark!(
+        results: rolaunch_benchmark_results(warm_values: [9.0], measured_values: [10.0]),
+        warm_runs: 1,
+        measure_runs: 1,
+        max_below: BigDecimal("10")
+      )
+    end
+    assert_includes error.message, "is not below 10.0s"
+  end
+
+  def test_rolaunch_benchmark_requires_exact_phases
+    error = assert_raises(RuntimeError) do
+      @harness.verify_rolaunch_benchmark!(
+        results: rolaunch_benchmark_results(warm_values: [], measured_values: [7.0, 7.0]),
+        warm_runs: 1,
+        measure_runs: 1,
+        average_at_most: BigDecimal("8")
+      )
+    end
+
+    assert_includes error.message, "run set differs"
+  end
+
+  def test_rolaunch_benchmark_requires_unique_instance_ids
+    results = rolaunch_benchmark_results(warm_values: [7.0], measured_values: [7.0])
+    results.last[:instance_id] = results.first[:instance_id]
+
+    error = assert_raises(RuntimeError) do
+      @harness.verify_rolaunch_benchmark!(
+        results: results,
+        warm_runs: 1,
+        measure_runs: 1,
+        average_at_most: BigDecimal("8")
+      )
+    end
+
+    assert_includes error.message, "unique nonempty instance ID"
+  end
+
+  def test_rolaunch_benchmark_requires_ready_warm_and_measured_results
+    results = rolaunch_benchmark_results(warm_values: [7.0], measured_values: [7.0])
+    results.first[:rolaunch_status] = "failed"
+    results.first[:rolaunch_ready_s] = nil
+
+    error = assert_raises(RuntimeError) do
+      @harness.verify_rolaunch_benchmark!(
+        results: results,
+        warm_runs: 1,
+        measure_runs: 1,
+        max_below: BigDecimal("10")
+      )
+    end
+
+    assert_includes error.message, results.first[:instance_id]
+  end
+
+  def test_rolaunch_benchmark_cli_exposes_and_validates_optional_limits
+    stdout, stderr, status = Open3.capture3(RbConfig.ruby, HELPER_PATH, "--help")
+    assert status.success?, stderr
+    assert_includes stdout, "--require-average-rolaunch-ready-at-most"
+    assert_includes stdout, "--require-max-rolaunch-ready-below"
+
+    %w[invalid 0 -1 NaN Infinity].each do |value|
+      _stdout, invalid_stderr, invalid_status = Open3.capture3(
+        RbConfig.ruby,
+        HELPER_PATH,
+        "ami-test",
+        "--require-average-rolaunch-ready-at-most",
+        value
+      )
+      refute invalid_status.success?, value
+      assert_includes invalid_stderr, "must be a finite positive number", value
+    end
+  end
+
   def test_root_block_device_override_uses_explicit_gp3_throughput
     image = image_with_root_throughput(400)
 
@@ -566,6 +685,17 @@ class MeasureLaunchTimeTest < Minitest::Test
   end
 
   private
+
+  def rolaunch_benchmark_results(warm_values:, measured_values:)
+    (warm_values.map { |value| ["warm", value] } + measured_values.map { |value| ["measure", value] }).each_with_index.map do |(phase, value), index|
+      {
+        phase: phase,
+        instance_id: "i-benchmark-#{index}",
+        rolaunch_status: "ready",
+        rolaunch_ready_s: value
+      }
+    end
+  end
 
   def stub_volume_inspection_client
     ec2 = Aws::EC2::Client.new(stub_responses: true)

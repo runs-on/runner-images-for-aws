@@ -3,6 +3,24 @@
 set -euo pipefail
 export LC_ALL=C
 
+resolve_mount_block_device() {
+  local mount="$1" source resolved device_number sys_path
+  source="$(findmnt -nro SOURCE --target "${mount}")" || return 1
+  resolved="$(readlink -f "${source}" 2>/dev/null || true)"
+  if [[ -n "${resolved}" && -b "${resolved}" ]]; then
+    printf '%s\n' "${resolved}"
+    return
+  fi
+
+  device_number="$(findmnt -nro MAJ:MIN --target "${mount}")" || return 1
+  [[ "${device_number}" =~ ^[0-9]+:[0-9]+$ ]] || return 1
+  sys_path="$(readlink -f "${SYS_DEV_BLOCK:-/sys/dev/block}/${device_number}" 2>/dev/null || true)"
+  [[ -n "${sys_path}" ]] || return 1
+  resolved="${DEV_ROOT:-/dev}/${sys_path##*/}"
+  [[ -b "${resolved}" ]] || return 1
+  printf '%s\n' "${resolved}"
+}
+
 if [[ "${IMAGE_OS:-}" != ubuntu26 ]]; then
   exit 0
 fi
@@ -38,7 +56,7 @@ backing_mount="${marker_lines[0]}"
   exit 1
 }
 
-partition="$(readlink -f "$(findmnt -nro SOURCE --target "${backing_mount}")")"
+partition="$(resolve_mount_block_device "${backing_mount}")"
 fstype="$(findmnt -nro FSTYPE --target "${backing_mount}")"
 parent="$(lsblk -nro PKNAME "${partition}" | awk '!seen {print; seen=1}')"
 part_number="$(lsblk -nro PARTN "${partition}" | awk '!seen {print; seen=1}')"

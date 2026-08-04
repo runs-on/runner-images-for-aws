@@ -3,6 +3,7 @@
 require 'bundler/setup'
 require 'aws-sdk-ec2'
 require 'base64'
+require 'bigdecimal'
 require 'fileutils'
 require 'json'
 require 'open-uri'
@@ -31,6 +32,8 @@ usage = Slop::Options.new do |opts|
   opts.integer '--root-volume-size', 'Override root volume size in GiB'
   opts.integer '--warm-runs', 'Warm-up launches before measurement', default: 3
   opts.integer '--measure-runs', 'Measured launches after warm-up', default: 3
+  opts.string '--require-average-rolaunch-ready-at-most', 'Fail unless measured rolaunch mean is at most this many seconds'
+  opts.string '--require-max-rolaunch-ready-below', 'Fail unless every measured rolaunch time is below this many seconds'
   opts.bool '-h', '--help', 'Show help'
 end
 
@@ -62,6 +65,24 @@ end
 if options[:measure_runs] <= 0
   warn "--measure-runs must be greater than zero"
   exit 1
+end
+
+{
+  require_average_rolaunch_ready_at_most: '--require-average-rolaunch-ready-at-most',
+  require_max_rolaunch_ready_below: '--require-max-rolaunch-ready-below'
+}.each do |key, flag|
+  next unless options[key]
+
+  begin
+    threshold = BigDecimal(options[key])
+  rescue ArgumentError
+    threshold = nil
+  end
+  unless threshold&.finite? && threshold.positive?
+    warn "#{flag} must be a finite positive number"
+    exit 1
+  end
+  options[key] = threshold
 end
 
 def linux_user_data(ssh_user:, public_key:)
@@ -344,6 +365,42 @@ def summarize_rolaunch_measurements(measured)
     average: values.empty? ? nil : values.sum / values.length,
     maximum: values.max
   }
+end
+
+def verify_rolaunch_benchmark!(results:, warm_runs:, measure_runs:, average_at_most: nil, max_below: nil)
+  return unless average_at_most || max_below
+
+  expected_phases = Array.new(warm_runs, 'warm') + Array.new(measure_runs, 'measure')
+  actual_phases = results.map { |result| result[:phase] }
+  unless actual_phases == expected_phases
+    raise "Rolaunch benchmark run set differs from #{warm_runs} warm and #{measure_runs} measured launches"
+  end
+
+  instance_ids = results.map { |result| result[:instance_id].to_s }
+  if instance_ids.any?(&:empty?) || instance_ids.uniq.length != instance_ids.length
+    raise 'Rolaunch benchmark requires a unique nonempty instance ID for every launch'
+  end
+
+  invalid = results.reject do |result|
+    value = result[:rolaunch_ready_s]
+    parsed = value && BigDecimal(value.to_s)
+    result[:rolaunch_status] == 'ready' && parsed&.finite? && parsed >= 0
+  rescue ArgumentError
+    false
+  end
+  unless invalid.empty?
+    raise "Rolaunch benchmark requires rolaunch.done for every launch; invalid instances: #{invalid.map { |result| result[:instance_id] }.join(', ')}"
+  end
+
+  measured_values = results.last(measure_runs).map { |result| BigDecimal(result.fetch(:rolaunch_ready_s).to_s) }
+  if average_at_most && measured_values.sum > average_at_most * measured_values.length
+    average = measured_values.sum / measured_values.length
+    raise "Average rolaunch readiness #{average.to_s('F')}s exceeds #{average_at_most.to_s('F')}s"
+  end
+  if max_below && measured_values.any? { |value| value >= max_below }
+    maximum = measured_values.max
+    raise "Maximum rolaunch readiness #{maximum.to_s('F')}s is not below #{max_below.to_s('F')}s"
+  end
 end
 
 def read_common_ready_seconds(ip:, ssh_user:, private_key_path:, launch_time:, timeout_seconds: 30, poll_interval: 0.2)
@@ -635,6 +692,12 @@ Dir.mktmpdir('measure-launch-time') do |dir|
     puts "Warm-up runs: #{options[:warm_runs]}"
     puts "Measured runs: #{options[:measure_runs]}"
     puts "SSH timeout: #{options[:ssh_timeout]}s"
+    if options[:require_average_rolaunch_ready_at_most]
+      puts "Required rolaunch mean: <= #{options[:require_average_rolaunch_ready_at_most].to_s('F')}s"
+    end
+    if options[:require_max_rolaunch_ready_below]
+      puts "Required rolaunch maximum: < #{options[:require_max_rolaunch_ready_below].to_s('F')}s"
+    end
 
     total_runs.times do |idx|
       phase = idx < options[:warm_runs] ? 'warm' : 'measure'
@@ -738,8 +801,8 @@ Dir.mktmpdir('measure-launch-time') do |dir|
       rolaunch_expected: rolaunch_summary[:expected],
       rolaunch_measurement_complete: rolaunch_summary[:complete],
       rolaunch_measured_runs: rolaunch_summary[:values].length,
-      average_rolaunch_ready_s: rolaunch_summary[:average]&.round(2),
-      max_rolaunch_ready_s: rolaunch_summary[:maximum]&.round(2),
+      average_rolaunch_ready_s: rolaunch_summary[:average],
+      max_rolaunch_ready_s: rolaunch_summary[:maximum],
       results: results
     }
 
@@ -747,6 +810,14 @@ Dir.mktmpdir('measure-launch-time') do |dir|
     puts
     puts output
     File.write(options[:output_json], "#{output}\n") if options[:output_json]
+
+    verify_rolaunch_benchmark!(
+      results: results,
+      warm_runs: options[:warm_runs],
+      measure_runs: options[:measure_runs],
+      average_at_most: options[:require_average_rolaunch_ready_at_most],
+      max_below: options[:require_max_rolaunch_ready_below]
+    )
 
     unless rolaunch_summary[:complete]
       raise "Incomplete rolaunch readiness: #{rolaunch_summary[:values].length}/#{measured.length} measured launches produced rolaunch.done"

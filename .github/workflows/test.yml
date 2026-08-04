@@ -235,8 +235,8 @@ jobs:
                   upper_acl="$(mktemp)"
                   sudo getfacl --omit-header --numeric --physical --skip-base /var/lib/tpm2-tss/system/keystore > "$runtime_acl"
                   sudo getfacl --omit-header --numeric --physical --skip-base "$backing_mount/runs-on-root/upper/var/lib/tpm2-tss/system/keystore" > "$upper_acl"
-                  test -s "$runtime_acl"
-                  test -s "$upper_acl"
+                  test ! -s "$runtime_acl"
+                  test ! -s "$upper_acl"
                   cmp "$runtime_acl" "$upper_acl"
                   rm -f "$runtime_acl" "$upper_acl"
                 fi
