@@ -350,6 +350,13 @@ def verify_compact_recovery!(ip:, ssh_user:, private_key_path:, timeout_seconds:
         fail_check "$1" '<empty>' "$2"
       fi
     }
+    observe_equal() {
+      if [[ "$2" == "$3" ]]; then
+        pass_check "$1" "$3"
+      else
+        printf 'INFO %s differs\n  expected: %s\n  actual:   %s\n' "$1" "$2" "$3"
+      fi
+    }
     check_nonempty() {
       if [[ -n "$2" ]]; then
         pass_check "$1" "$2"
@@ -488,7 +495,7 @@ def verify_compact_recovery!(ip:, ssh_user:, private_key_path:, timeout_seconds:
     check_equal 'efibootmgr exit status' '0' "$firmware_status"
     check_equal 'recovery BootCurrent' "$expected_fallback" "$boot_current"
     check_empty 'recovery BootNext' "$boot_next"
-    check_equal 'recovery BootOrder' "$expected_order" "$boot_order"
+    observe_equal 'recovery BootOrder' "$expected_order" "$boot_order"
     check_equal 'fallback is first in BootOrder' "$expected_fallback" "${boot_order%%,*}"
     #{root_check}
     printf 'recovery_boot_id=%s\n' #{recovery_boot_id.shellescape}

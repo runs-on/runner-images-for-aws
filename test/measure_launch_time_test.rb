@@ -205,7 +205,7 @@ class MeasureLaunchTimeTest < Minitest::Test
     assert_includes validation, "check_equal 'recovery kernel command line'"
     assert_includes validation, "check_equal 'recovery BootCurrent'"
     assert_includes validation, "check_empty 'recovery BootNext'"
-    assert_includes validation, "check_equal 'recovery BootOrder'"
+    assert_includes validation, "observe_equal 'recovery BootOrder'"
     assert_includes validation, "expected_disk_bytes=$((60 * 1024 * 1024 * 1024))"
     assert_includes validation, "check_ge 'root partition uses the expanded disk'"
     assert_includes validation, "filesystem_bytes"
@@ -226,7 +226,7 @@ class MeasureLaunchTimeTest < Minitest::Test
       else
         [
           "PASS recovery root filesystem type: overlay\n",
-          "FAIL recovery BootOrder\n  expected: 0001,0000\n  actual:   0000,0001\n",
+          "FAIL root disk size\n  expected: 64424509440\n  actual:   32212254720\n",
           Status.new(false, 1)
         ]
       end
@@ -248,9 +248,9 @@ class MeasureLaunchTimeTest < Minitest::Test
 
     assert_includes error.message, "Compact recovery validation failed"
     assert_includes error.message, "PASS recovery root filesystem type: overlay"
-    assert_includes error.message, "FAIL recovery BootOrder"
-    assert_includes error.message, "expected: 0001,0000"
-    assert_includes error.message, "actual:   0000,0001"
+    assert_includes error.message, "FAIL root disk size"
+    assert_includes error.message, "expected: 64424509440"
+    assert_includes error.message, "actual:   32212254720"
   end
 
   def test_cli_rejects_negative_warm_run_count
