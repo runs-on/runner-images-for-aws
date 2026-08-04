@@ -214,7 +214,6 @@ source "amazon-ebssurrogate" "compact_root" {
     volume_type           = var.volume_type
     volume_size           = var.volume_size
     iops                  = 3000
-    throughput            = var.volume_throughput
     delete_on_termination = true
   }
 

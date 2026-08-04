@@ -138,6 +138,14 @@ class UbuntuTemplateTest < Minitest::Test
       assert_match(%r{device_name\s*=\s*"/dev/sda1".*?omit_from_artifact\s*=\s*true}m, surrogate, path)
       assert_match(%r{device_name\s*=\s*"/dev/sdf".*?volume_size\s*=\s*var\.volume_size}m, surrogate, path)
       assert_match(%r{source_device_name\s*=\s*"/dev/sdf".*?device_name\s*=\s*"/dev/sda1"}m, surrogate, path)
+      target_mapping = surrogate.scan(/launch_block_device_mappings \{.*?^\s*\}/m).find do |mapping|
+        mapping.include?('device_name           = "/dev/sdf"')
+      end
+      ami_root_device = surrogate[/ami_root_device \{.*?^\s*\}/m]
+      refute_nil target_mapping, path
+      refute_nil ami_root_device, path
+      assert_includes target_mapping, "throughput            = var.volume_throughput", path
+      refute_includes ami_root_device, "throughput", path
       assert_equal 4, surrogate.scan("ami_name = var.ami_name").length, path
       refute_includes surrogate, "snapshot_id", path
       refute_includes surrogate, "uefi_data", path
