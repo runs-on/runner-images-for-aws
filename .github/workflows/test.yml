@@ -238,6 +238,7 @@ jobs:
 
                 if [[ " $expected_cmdline " == *' runs_on.immutable=1 '* ]]; then
                   test "$(findmnt -nro FSTYPE /)" = overlay
+                  sudo awk '$2 == "/boot/efi" && ("," $4 ",") ~ /,noauto,/ && ("," $4 ",") ~ /,x-systemd\.automount,/ { found = 1 } END { exit found ? 0 : 1 }' /etc/fstab
                   backing_mount="$(< /etc/runs-on-overlay/backing-root-mount)"
                   test "$(findmnt -nro FSTYPE --target "$backing_mount")" = ext4
                   test "$(sudo findmnt -nro FSTYPE --target "$backing_mount/runs-on-root/runtime/lower")" = squashfs

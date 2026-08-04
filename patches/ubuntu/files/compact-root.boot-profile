@@ -983,6 +983,7 @@ usr/bin/python3 31786
 usr/bin/dbus-daemon 31785
 usr/bin/python3.14 31784
 etc/default/sysstat 31783
+usr/bin/systemctl 31782
 usr/bin/rolaunch 31782
 usr/lib/x86_64-linux-gnu/libdbus-1.so.3 31781
 usr/lib/x86_64-linux-gnu/libdbus-1.so.3.38.3 31780

@@ -284,6 +284,13 @@ class UbuntuTemplateTest < Minitest::Test
     assert_match(/systemctl mask .*cloud-init-main\.service/m, content)
     refute_match(/Wants=.*cloud-init/, content)
     assert_includes content, "ExecStart=/usr/bin/rolaunch --mode=full"
+    assert_includes content, "DefaultDependencies=no"
+    assert_includes content, "Wants=systemd-networkd.service systemd-resolved.service"
+    assert_includes content, "After=systemd-networkd.service systemd-resolved.service"
+    assert_includes content, "Conflicts=shutdown.target"
+    assert_includes content, "Before=multi-user.target shutdown.target"
+    refute_includes content, "After=basic.target"
+    refute_includes content, "Before=basic.target"
     refute_includes content, "Before=network-online.target"
     assert_includes content, "systemd-networkd-wait-online.service"
     assert_match(/systemctl mask .*systemd-networkd-wait-online\.service/m, content)

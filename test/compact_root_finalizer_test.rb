@@ -7,6 +7,7 @@ require "tmpdir"
 class CompactRootFinalizerTest < Minitest::Test
   ROOT = File.expand_path("..", __dir__)
   SCRIPT = File.join(ROOT, "patches/ubuntu/files/finalize-compact-root.sh")
+  BOOT_PROFILE = File.join(ROOT, "patches/ubuntu/files/compact-root.boot-profile")
   DIRECT_INIT = File.join(ROOT, "patches/ubuntu/files/compact-root-direct-init")
   RECOVERY_INIT = File.join(ROOT, "patches/ubuntu/files/compact-root-recovery-init")
   TEMPLATES = %w[
@@ -24,6 +25,20 @@ class CompactRootFinalizerTest < Minitest::Test
       _stdout, stderr, status = Open3.capture3("bash", "-n", path)
       assert status.success?, "#{path}: #{stderr}"
     end
+  end
+
+  def test_esp_is_a_lazy_automount
+    script = File.read(SCRIPT)
+    function = script[/^write_effective_fstab\(\) \{\n.*?^\}\n/m]
+
+    refute_nil function
+    assert_includes function, 'add_option(add_option($4, "noauto"), "x-systemd.automount")'
+    assert_includes function, 'effective ESP mount is not lazy'
+    assert_equal 1, function.scan('add_option(add_option($4, "noauto"), "x-systemd.automount")').length
+  end
+
+  def test_basic_target_probe_is_in_boot_profile
+    assert_match(/^usr\/bin\/systemctl [0-9]+$/, File.read(BOOT_PROFILE))
   end
 
   def test_direct_init_persists_failures_before_recovery_reboot

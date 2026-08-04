@@ -565,13 +565,24 @@ write_effective_fstab() {
   local root="$1"
   install -d -m 0755 "${root}/runs-on-root/upper/etc"
   awk '
+    function add_option(options, option) {
+      if (("," options ",") ~ ("," option ",")) return options
+      return options "," option
+    }
     $2 == "/" { next }
     $2 == "/boot" { $1 = "LABEL=BOOT" }
-    $2 == "/boot/efi" { $1 = "LABEL=UEFI" }
+    $2 == "/boot/efi" {
+      $1 = "LABEL=UEFI"
+      $4 = add_option(add_option($4, "noauto"), "x-systemd.automount")
+    }
     { print }
   ' /etc/fstab > "${root}/runs-on-root/upper/etc/fstab"
   grep -Eq '^LABEL=BOOT[[:space:]]+/boot[[:space:]]' "${root}/runs-on-root/upper/etc/fstab" || fail "effective fstab lacks LABEL=BOOT"
   grep -Eq '^LABEL=UEFI[[:space:]]+/boot/efi[[:space:]]' "${root}/runs-on-root/upper/etc/fstab" || fail "effective fstab lacks LABEL=UEFI"
+  awk '
+    $2 == "/boot/efi" && ("," $4 ",") !~ /,noauto,/ { exit 1 }
+    $2 == "/boot/efi" && ("," $4 ",") !~ /,x-systemd\.automount,/ { exit 1 }
+  ' "${root}/runs-on-root/upper/etc/fstab" || fail "effective ESP mount is not lazy"
 }
 
 write_recovery_cmdline() {
