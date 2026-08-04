@@ -483,9 +483,10 @@ main() {
   rm -f /var/lib/dbus/machine-id
   clean_socket_nodes
   assert_variant /
-  local ssh_unit
+  local ssh_unit ssh_unit_state
   for ssh_unit in ssh.service ssh.socket; do
-    systemctl is-enabled "${ssh_unit}" 2>/dev/null | grep -qx disabled || fail "${ssh_unit} must be disabled before finalization"
+    ssh_unit_state="$(systemctl is-enabled "${ssh_unit}" 2>/dev/null || true)"
+    [[ "${ssh_unit_state}" == disabled ]] || fail "${ssh_unit} must be disabled before finalization; got ${ssh_unit_state:-missing}"
   done
 
   local kernel_release kernel_config config_option overlay_module staged_squash

@@ -91,7 +91,9 @@ class CompactRootFinalizerTest < Minitest::Test
     script = File.read(SCRIPT)
 
     assert_includes script, "for ssh_unit in ssh.service ssh.socket"
-    assert_includes script, 'grep -qx disabled'
+    assert_includes script, 'ssh_unit_state="$(systemctl is-enabled "${ssh_unit}" 2>/dev/null || true)"'
+    assert_includes script, '[[ "${ssh_unit_state}" == disabled ]]'
+    refute_includes script, 'systemctl is-enabled "${ssh_unit}" 2>/dev/null | grep'
     refute_includes script, 'ln -sfn /dev/null "${target_mount}/runs-on-root/upper/etc/systemd/system/ssh.service"'
     refute_includes script, 'ln -sfn /dev/null "${target_mount}/runs-on-root/upper/etc/systemd/system/ssh.socket"'
   end
