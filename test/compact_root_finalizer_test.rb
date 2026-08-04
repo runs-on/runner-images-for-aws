@@ -207,6 +207,7 @@ class CompactRootFinalizerTest < Minitest::Test
     workflow = File.read(WORKFLOW_TEST)
 
     assert_includes workflow, 'test ! -s "$runtime_acl"'
+    assert_includes workflow, 'if sudo test -e "$upper_keystore"; then'
     assert_includes workflow, 'test ! -s "$upper_acl"'
     refute_match(/^\s*test -s "\$runtime_acl"/, workflow)
     refute_match(/^\s*test -s "\$upper_acl"/, workflow)
