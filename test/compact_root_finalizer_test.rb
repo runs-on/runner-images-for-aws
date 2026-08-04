@@ -99,12 +99,16 @@ class CompactRootFinalizerTest < Minitest::Test
     assert_includes File.read(SCRIPT), 'type=${type:-missing}'
   end
 
-  def test_direct_target_uses_winner_squash_placement_without_discard
+  def test_direct_target_preallocates_the_complete_squashfs_before_writing
     script = File.read(SCRIPT)
 
     assert_includes script, "-E nodiscard,lazy_itable_init=0,lazy_journal_init=0"
-    assert_operator script.index('fallocate -l 16M "${seed}"'), :<, script.index('bs=16M count=1')
-    assert_operator script.index('bs=16M count=1'), :<, script.index('fallocate -l "${size}"')
+    preallocate = script.index('fallocate -l "${size}" "${staged}"')
+    write = script.index('dd if="${source}" of="${staged}"')
+    refute_nil preallocate
+    refute_nil write
+    assert_operator preallocate, :<, write
+    refute_includes script, '.root-allocation-seed'
     assert_includes script, '"${first_block}" -lt 1048576'
     assert_includes script, '"${extent_count}" -le 20'
     refute_match(/\b(?:blkdiscard|fstrim)\b/, script)
