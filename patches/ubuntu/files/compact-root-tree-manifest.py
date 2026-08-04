@@ -14,9 +14,6 @@ from collections import defaultdict
 from pathlib import Path
 
 
-POSIX_ACL_XATTRS = {"system.posix_acl_access", "system.posix_acl_default"}
-
-
 def digest_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb", buffering=0) as source:
@@ -43,13 +40,11 @@ def path_type(mode: int) -> str:
     raise RuntimeError(f"unsupported mode: {mode:o}")
 
 
-def read_xattrs(path: Path, ignore_posix_acl: bool) -> dict[str, str]:
+def read_xattrs(path: Path) -> dict[str, str]:
     attributes: dict[str, str] = {}
     if not hasattr(os, "listxattr"):
         return attributes
     for name in sorted(os.listxattr(path, follow_symlinks=False)):
-        if ignore_posix_acl and name in POSIX_ACL_XATTRS:
-            continue
         value = os.getxattr(path, name, follow_symlinks=False)
         attributes[name] = base64.b64encode(value).decode("ascii")
     return attributes
@@ -86,9 +81,7 @@ def walk_paths(root: Path, exclusions: tuple[str, ...]) -> list[tuple[str, Path,
     return found
 
 
-def build_manifest(
-    root: Path, exclusions: tuple[str, ...], ignore_posix_acl: bool
-) -> dict[str, object]:
+def build_manifest(root: Path, exclusions: tuple[str, ...]) -> dict[str, object]:
     paths = walk_paths(root, exclusions)
     inode_paths: dict[tuple[int, int], list[str]] = defaultdict(list)
     for relative, _path, file_stat in paths:
@@ -110,7 +103,7 @@ def build_manifest(
     xattr_count = 0
     for relative, path, file_stat in paths:
         kind = path_type(file_stat.st_mode)
-        attributes = read_xattrs(path, ignore_posix_acl)
+        attributes = read_xattrs(path)
         xattr_count += len(attributes)
         capability_count += int("security.capability" in attributes)
         entry: dict[str, object] = {
@@ -148,7 +141,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("root", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--exclude", action="append", default=[])
-    parser.add_argument("--ignore-posix-acl", action="store_true")
     return parser.parse_args()
 
 
@@ -156,7 +148,7 @@ def main() -> None:
     args = parse_args()
     root = args.root.resolve()
     exclusions = tuple(sorted({item.strip("/") for item in args.exclude if item.strip("/")}))
-    manifest = build_manifest(root, exclusions, args.ignore_posix_acl)
+    manifest = build_manifest(root, exclusions)
     args.output.write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )

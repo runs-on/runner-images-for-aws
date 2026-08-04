@@ -96,20 +96,65 @@ class CompactRootFinalizerTest < Minitest::Test
     refute_includes script, "materialize-sparse-ebs"
   end
 
-  def test_acl_and_same_upper_contracts_are_mandatory
+  def test_unsupported_tpm_acl_is_removed_and_boot_paths_share_the_upper
     script = File.read(SCRIPT)
     recovery = File.read(RECOVERY_INIT)
 
-    assert_includes script, 'acl_directory_count"] > 0'
     assert_includes script, 'var/lib/tpm2-tss/system/keystore'
-    assert_includes script, 'compact-root-acl.py" restore'
-    assert_includes script, 'restored ACL manifest differs'
-    assert_includes script, 'TPM keystore ACL was not copied into the persistent upper'
+    assert_includes script, 'setfacl --remove-all --remove-default'
+    assert_includes script, 'expected TPM keystore default ACL is missing'
+    assert_includes script, 'TPM keystore still has an extended POSIX ACL'
+    refute_includes script, 'compact-root-acl.py'
+    refute_includes script, '--ignore-posix-acl'
+    refute_includes script, "grep -Ev 'system\\.posix_acl_"
+    TEMPLATES.each do |path|
+      refute_includes File.read(path), 'compact-root-acl.py', path
+    end
     assert_includes recovery, 'upperdir=${STATE}/upper,workdir=${STATE}/work'
     assert_includes recovery, '${BB} blkid -s PARTUUID -o value "${candidate}"'
     refute_match(/PARTUUID\) candidate_partuuid=/, recovery)
     refute_includes recovery, "recovery-upper"
     refute_includes recovery, "recovery-work"
+  end
+
+  def test_tpm_acl_normalization_removes_only_the_expected_acl
+    Dir.mktmpdir("compact-root-acl-normalization") do |dir|
+      root = File.join(dir, "root")
+      keystore = File.join(root, "var/lib/tpm2-tss/system/keystore")
+      evidence = File.join(dir, "removed.getfacl")
+      marker = File.join(dir, "removed")
+      calls = File.join(dir, "setfacl.calls")
+      command = <<~BASH
+        source #{Shellwords.escape(SCRIPT)}
+        trap - EXIT INT TERM
+        mkdir -p #{Shellwords.escape(keystore)}
+        getfacl() {
+          if [[ ! -e #{Shellwords.escape(marker)} ]]; then
+            printf '%s\n' \
+              '# file: #{keystore}' \
+              '# owner: 0' \
+              '# group: 0' \
+              'default:user::rwx' \
+              'default:group::---' \
+              'default:other::---'
+          fi
+        }
+        setfacl() {
+          printf '%s\n' "$*" > #{Shellwords.escape(calls)}
+          : > #{Shellwords.escape(marker)}
+        }
+        remove_irrelevant_tpm_acl \
+          #{Shellwords.escape(root)} \
+          #{Shellwords.escape(evidence)}
+        [[ -s #{Shellwords.escape(evidence)} ]]
+        [[ "$(< #{Shellwords.escape(calls)})" == \
+          '--remove-all --remove-default -- #{keystore}' ]]
+      BASH
+
+      _stdout, stderr, status = Open3.capture3("bash", "-c", command)
+
+      assert status.success?, stderr
+    end
   end
 
   def test_native_ssh_stays_disabled_but_can_be_enabled_by_builder_user_data
@@ -128,7 +173,8 @@ class CompactRootFinalizerTest < Minitest::Test
     main_index = script.index("\nmain() {")
     quiesce_index = script.index("\n  quiesce_root_writers\n", main_index)
     socket_cleanup_index = script.index("\n  clean_socket_nodes\n", main_index)
-    manifest_index = script.index('"${work_dir}/source-acl.json"', main_index)
+    acl_removal_index = script.index("\n  remove_irrelevant_tpm_acl / ", main_index)
+    manifest_index = script.index('"${work_dir}/source-tree-full.json"', main_index)
 
     %w[
       amazon-ssm-agent.service
@@ -147,7 +193,10 @@ class CompactRootFinalizerTest < Minitest::Test
     assert_includes script, 'systemctl stop "${unit}"'
     assert_includes script, 'systemctl is-active "${unit}"'
     refute_nil quiesce_index
+    refute_nil acl_removal_index
     assert_operator quiesce_index, :<, socket_cleanup_index
+    assert_operator socket_cleanup_index, :<, acl_removal_index
+    assert_operator acl_removal_index, :<, manifest_index
     assert_operator socket_cleanup_index, :<, manifest_index
   end
 

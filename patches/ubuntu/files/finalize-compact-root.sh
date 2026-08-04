@@ -338,6 +338,23 @@ clean_socket_nodes() {
   [[ -z "$(find / -xdev -type s -print -quit)" ]] || fail "a socket node remains in the source root"
 }
 
+remove_irrelevant_tpm_acl() {
+  local root="$1" evidence="$2"
+  local acl_path="${root%/}/var/lib/tpm2-tss/system/keystore"
+  local before_acl after_acl
+  [[ "${root}" == /* && -d "${root}" && ! -L "${root}" ]] \
+    || fail "invalid ACL normalization root: ${root:-missing}"
+  [[ -d "${acl_path}" ]] || fail "expected TPM keystore directory is missing"
+  before_acl="$(getfacl --absolute-names --numeric --skip-base --physical -- "${acl_path}")"
+  [[ "${before_acl}" == *$'default:'* ]] \
+    || fail "expected TPM keystore default ACL is missing"
+  printf '%s\n' "${before_acl}" > "${evidence}"
+  setfacl --remove-all --remove-default -- "${acl_path}"
+  after_acl="$(getfacl --absolute-names --numeric --skip-base --physical -- "${acl_path}")"
+  [[ -z "${after_acl}" ]] || fail "TPM keystore still has an extended POSIX ACL"
+  log "removed unsupported TPM keystore POSIX ACL"
+}
+
 build_squash() {
   local kernel_release="$1"
   local excludes="${work_dir}/squash-excludes"
@@ -365,10 +382,10 @@ build_squash() {
     -processors "$(nproc)" -comp zstd -Xcompression-level 3 -b 256K \
     -sort "${profile}" -wildcards -ef "${excludes}" 2>&1 | tee "${log_file}"
   [[ -s "${squash}" ]] || fail "SquashFS output is empty"
-  if grep -i 'warning' "${log_file}" | grep -Ev 'system\.posix_acl_(access|default)' | grep -q .; then
+  if grep -qi 'warning' "${log_file}"; then
     fail "mksquashfs emitted an unexpected warning"
   fi
-  if grep -i 'unrecognised xattr prefix' "${log_file}" | grep -Ev 'system\.posix_acl_(access|default)' | grep -q .; then
+  if grep -qi 'unrecognised xattr prefix' "${log_file}"; then
     fail "mksquashfs emitted an unknown xattr warning"
   fi
   unsquashfs -stat "${squash}" | tee "${work_dir}/squash.stat"
@@ -507,7 +524,7 @@ main() {
   for command in blkid blockdev cmp cpio dd e2fsck ebsnvme-id fallocate filefrag findmnt fsck.vfat getfacl grub-install lsblk mkfs.ext4 mkfs.vfat mksquashfs mount partprobe rsync setfacl sgdisk unsquashfs; do
     require_command "${command}"
   done
-  for helper in compact-root-acl.py compact-root-direct-init compact-root-recovery-init compact-root-tree-manifest.py compact-root.boot-profile filter-compact-root-boot-profile.py prepare-direct-uefi.sh; do
+  for helper in compact-root-direct-init compact-root-recovery-init compact-root-tree-manifest.py compact-root.boot-profile filter-compact-root-boot-profile.py prepare-direct-uefi.sh; do
     [[ -s "${asset_dir}/${helper}" ]] || fail "compact-root asset is missing: ${helper}"
   done
   [[ ! -e "${work_dir}" ]] || fail "compact build work directory already exists"
@@ -520,6 +537,7 @@ main() {
   truncate -s 0 /etc/machine-id
   rm -f /var/lib/dbus/machine-id
   clean_socket_nodes
+  remove_irrelevant_tpm_acl / "${work_dir}/removed-tpm-keystore.getfacl"
   assert_variant /
   local ssh_unit ssh_unit_state
   for ssh_unit in ssh.service ssh.socket; do
@@ -540,15 +558,6 @@ main() {
   local -a exclude_args=()
   local exclusion
   while IFS= read -r exclusion; do exclude_args+=(--exclude "${exclusion}"); done < <(manifest_exclude_args)
-  "${asset_dir}/compact-root-acl.py" capture / "${work_dir}/source-acl.json" "${exclude_args[@]}"
-  python3 - "${work_dir}/source-acl.json" <<'PY'
-import json
-import sys
-manifest = json.load(open(sys.argv[1], encoding="utf-8"))
-assert manifest["acl_directory_count"] > 0, manifest
-assert any(entry["path"] == "var/lib/tpm2-tss/system/keystore" for entry in manifest["entries"]), manifest
-PY
-  "${asset_dir}/compact-root-tree-manifest.py" / "${work_dir}/source-tree-no-acl.json" --ignore-posix-acl "${exclude_args[@]}"
   "${asset_dir}/compact-root-tree-manifest.py" / "${work_dir}/source-tree-full.json" "${exclude_args[@]}"
   build_squash "${kernel_release}"
   staged_squash="${work_dir}/rootfs.squashfs"
@@ -609,21 +618,15 @@ PY
   install -d -m 0755 "${lower}" "${merged}"
   mount -t squashfs -o loop,ro "${target_mount}/runs-on-root/rootfs.squashfs" "${lower}"
   assert_variant "${lower}"
-  "${asset_dir}/compact-root-tree-manifest.py" "${lower}" "${work_dir}/lower-tree-no-acl.json" --ignore-posix-acl
-  cmp -s "${work_dir}/source-tree-no-acl.json" "${work_dir}/lower-tree-no-acl.json" || fail "SquashFS lower differs from finalized source"
+  "${asset_dir}/compact-root-tree-manifest.py" "${lower}" "${work_dir}/lower-tree-full.json"
+  cmp -s "${work_dir}/source-tree-full.json" "${work_dir}/lower-tree-full.json" || fail "SquashFS lower differs from finalized source"
 
   chown --reference=/ "${target_mount}/runs-on-root/upper"
   chmod --reference=/ "${target_mount}/runs-on-root/upper"
   touch --reference=/ "${target_mount}/runs-on-root/upper"
   mount -t overlay overlay -o "lowerdir=${lower},upperdir=${target_mount}/runs-on-root/upper,workdir=${target_mount}/runs-on-root/work" "${merged}"
-  "${asset_dir}/compact-root-acl.py" restore / "${merged}" "${work_dir}/source-acl.json"
-  "${asset_dir}/compact-root-acl.py" capture "${merged}" "${work_dir}/merged-acl.json"
-  cmp -s "${work_dir}/source-acl.json" "${work_dir}/merged-acl.json" || fail "restored ACL manifest differs"
-  getfacl --absolute-names --numeric --physical "${merged}/var/lib/tpm2-tss/system/keystore" | tee "${work_dir}/keystore-merged.getfacl"
-  [[ -d "${target_mount}/runs-on-root/upper/var/lib/tpm2-tss/system/keystore" ]] || fail "TPM keystore ACL was not copied into the persistent upper"
-  getfacl --absolute-names --numeric --physical "${target_mount}/runs-on-root/upper/var/lib/tpm2-tss/system/keystore" | tee "${work_dir}/keystore-upper.getfacl"
   "${asset_dir}/compact-root-tree-manifest.py" "${merged}" "${work_dir}/merged-tree-full.json"
-  cmp -s "${work_dir}/source-tree-full.json" "${work_dir}/merged-tree-full.json" || fail "ACL-restored merged tree differs from finalized source"
+  cmp -s "${work_dir}/source-tree-full.json" "${work_dir}/merged-tree-full.json" || fail "merged tree differs from finalized source"
   umount "${merged}"
   rm -rf -- "${target_mount}/runs-on-root/work"
   install -d -m 0700 "${target_mount}/runs-on-root/work"

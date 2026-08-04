@@ -34,7 +34,7 @@ class CompactRootTreeManifestTest(unittest.TestCase):
                 except OSError as error:
                     self.skipTest(f"filesystem has no user xattr support: {error}")
 
-            manifest = MODULE.build_manifest(root, (), False)
+            manifest = MODULE.build_manifest(root, ())
             entries = {entry["path"]: entry for entry in manifest["entries"]}
 
             self.assertEqual(4, manifest["entry_count"])
@@ -54,7 +54,7 @@ class CompactRootTreeManifestTest(unittest.TestCase):
             (excluded / "value").write_text("dynamic", encoding="utf-8")
             (root / "kept").write_text("kept", encoding="utf-8")
 
-            manifest = MODULE.build_manifest(root, ("dynamic",), False)
+            manifest = MODULE.build_manifest(root, ("dynamic",))
 
             self.assertEqual([".", "kept"], [entry["path"] for entry in manifest["entries"]])
 

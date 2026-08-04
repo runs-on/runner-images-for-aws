@@ -312,7 +312,6 @@ build {
     only        = ["amazon-ebssurrogate.compact_root"]
     destination = "/run/runs-on-compact-root/"
     sources = [
-      "${path.root}/../custom/files/compact-root-acl.py",
       "${path.root}/../custom/files/compact-root-direct-init",
       "${path.root}/../custom/files/compact-root-recovery-init",
       "${path.root}/../custom/files/compact-root-tree-manifest.py",
