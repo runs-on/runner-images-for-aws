@@ -87,6 +87,15 @@ class CompactRootFinalizerTest < Minitest::Test
     refute_includes recovery, "recovery-work"
   end
 
+  def test_native_ssh_stays_disabled_but_can_be_enabled_by_builder_user_data
+    script = File.read(SCRIPT)
+
+    assert_includes script, "for ssh_unit in ssh.service ssh.socket"
+    assert_includes script, 'grep -qx disabled'
+    refute_includes script, 'ln -sfn /dev/null "${target_mount}/runs-on-root/upper/etc/systemd/system/ssh.service"'
+    refute_includes script, 'ln -sfn /dev/null "${target_mount}/runs-on-root/upper/etc/systemd/system/ssh.socket"'
+  end
+
   def test_boot_paths_use_fresh_target_and_stable_direct_kernel
     script = File.read(SCRIPT)
 

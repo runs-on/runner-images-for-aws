@@ -483,7 +483,10 @@ main() {
   rm -f /var/lib/dbus/machine-id
   clean_socket_nodes
   assert_variant /
-  systemctl is-enabled ssh.service 2>/dev/null | grep -Eq '^(disabled|masked)$' || fail "ssh.service must be disabled before finalization"
+  local ssh_unit
+  for ssh_unit in ssh.service ssh.socket; do
+    systemctl is-enabled "${ssh_unit}" 2>/dev/null | grep -qx disabled || fail "${ssh_unit} must be disabled before finalization"
+  done
 
   local kernel_release kernel_config config_option overlay_module staged_squash
   kernel_release="$(select_kernel /boot)"
@@ -607,9 +610,7 @@ PY
     validate_copy_manifest "/${path}" "${target_mount}/runs-on-root/persist/${path}" "persist-${path//\//-}"
   done
   write_effective_fstab "${target_mount}"
-  install -d -m 0755 "${target_mount}/runs-on-root/upper/boot/efi" "${target_mount}/runs-on-root/upper/etc/systemd/system"
-  ln -sfn /dev/null "${target_mount}/runs-on-root/upper/etc/systemd/system/ssh.service"
-  ln -sfn /dev/null "${target_mount}/runs-on-root/upper/etc/systemd/system/ssh.socket"
+  install -d -m 0755 "${target_mount}/runs-on-root/upper/boot/efi"
 
   install -d -m 0755 "${target_mount}/boot"
   mount -o rw "${target_p13}" "${target_mount}/boot"

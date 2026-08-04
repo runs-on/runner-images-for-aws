@@ -531,7 +531,9 @@ begin
   built_image = BuildResources.find_and_validate_build_image!(
     ec2_client: ec2_client,
     ami_name: ami_name,
-    compact_snapshot_limit_gib: (image.fetch('compact_snapshot_limit_gib') if compact_root_image)
+    compact_snapshot_limit_gib: (image.fetch('compact_snapshot_limit_gib') if compact_root_image),
+    compact_root_volume_size_gib: (image.fetch('volume_size') if compact_root_image),
+    compact_root_throughput_mibps: (image.fetch('volume_throughput') if compact_root_image)
   )
   ami_id = built_image.image_id
   puts "Found AMI ID: #{ami_id} for AMI name: #{ami_name} in #{options[:region]}"

@@ -1,6 +1,12 @@
 # frozen_string_literal: true
 
 module BuildResources
+  COMPACT_ROOT_ARCHITECTURE = "x86_64"
+  COMPACT_ROOT_BOOT_MODE = "uefi-preferred"
+  COMPACT_ROOT_DEVICE_NAME = "/dev/sda1"
+  COMPACT_ROOT_IOPS = 3_000
+  SNAPSHOT_DELETE_RETRY_DELAYS = [1, 2, 4, 8, 16, 30, 60, 60].freeze
+
   module_function
 
   def exact_tag?(resource, key, value)
@@ -33,8 +39,32 @@ module BuildResources
     images.first
   end
 
-  def validate_compact_snapshot!(ec2_client:, image:, limit_gib:, output: $stdout)
+  def validate_compact_image!(
+    ec2_client:,
+    image:,
+    limit_gib:,
+    expected_volume_size_gib:,
+    expected_throughput_mibps:,
+    output: $stdout
+  )
     fail("Compact snapshot limit must be a positive number of GiB") unless limit_gib.positive?
+    unless expected_volume_size_gib&.positive? && expected_throughput_mibps&.positive?
+      fail("Compact AMI volume size and throughput must be positive")
+    end
+
+    expected_image_values = {
+      architecture: COMPACT_ROOT_ARCHITECTURE,
+      boot_mode: COMPACT_ROOT_BOOT_MODE,
+      ena_support: true,
+      imds_support: "v2.0",
+      root_device_name: COMPACT_ROOT_DEVICE_NAME
+    }
+    expected_image_values.each do |attribute, expected|
+      actual = image.public_send(attribute)
+      next if actual == expected
+
+      fail("Compact AMI #{image.image_id} has #{attribute}=#{actual.inspect}; expected #{expected.inspect}")
+    end
 
     limit_bytes = limit_gib * 1024 * 1024 * 1024
     mappings = Array(image.block_device_mappings).select { |mapping| mapping.ebs&.snapshot_id }
@@ -42,7 +72,27 @@ module BuildResources
       fail("Compact AMI #{image.image_id} must contain exactly one snapshot-backed root mapping")
     end
 
-    snapshot_id = mappings.first.ebs.snapshot_id
+    root_ebs = mappings.first.ebs
+    expected_root_values = {
+      volume_size: expected_volume_size_gib,
+      volume_type: "gp3",
+      iops: COMPACT_ROOT_IOPS,
+      throughput: expected_throughput_mibps
+    }
+    expected_root_values.each do |attribute, expected|
+      actual = root_ebs.public_send(attribute)
+      next if actual == expected
+
+      fail("Compact AMI #{image.image_id} root has #{attribute}=#{actual.inspect}; expected #{expected.inspect}")
+    end
+
+    output.puts(
+      "Compact AMI #{image.image_id} contract: #{image.boot_mode}, #{image.architecture}, " \
+      "ENA=#{image.ena_support}, IMDS=#{image.imds_support}, root=#{image.root_device_name}, " \
+      "#{root_ebs.volume_type} #{root_ebs.volume_size} GiB/#{root_ebs.iops} IOPS/#{root_ebs.throughput} MiB/s"
+    )
+
+    snapshot_id = root_ebs.snapshot_id
     snapshots = ec2_client.describe_snapshots(snapshot_ids: [snapshot_id]).snapshots
     snapshot = snapshots.find { |candidate| candidate.snapshot_id == snapshot_id }
     fail("Compact root snapshot #{snapshot_id} was not found") unless snapshot
@@ -73,6 +123,8 @@ module BuildResources
     ec2_client:,
     ami_name:,
     compact_snapshot_limit_gib: nil,
+    compact_root_volume_size_gib: nil,
+    compact_root_throughput_mibps: nil,
     output: $stdout,
     sleeper: Kernel.method(:sleep)
   )
@@ -83,10 +135,12 @@ module BuildResources
       require_ami_name_tag: compact_root
     )
     if compact_root
-      validate_compact_snapshot!(
+      validate_compact_image!(
         ec2_client: ec2_client,
         image: image,
         limit_gib: compact_snapshot_limit_gib,
+        expected_volume_size_gib: compact_root_volume_size_gib,
+        expected_throughput_mibps: compact_root_throughput_mibps,
         output: output
       )
     end
@@ -147,15 +201,40 @@ module BuildResources
       ).snapshots.select { |snapshot| exact_tag?(snapshot, "ami_name", ami_name) }
     end || []
     snapshot_ids = tagged_snapshots.map(&:snapshot_id)
+    atomically_deleted_snapshot_ids = []
+    retry_snapshot_ids = []
+    skipped_snapshot_ids = []
 
     images.each do |image|
       referenced_snapshot_ids = Array(image.block_device_mappings).filter_map do |mapping|
         mapping.ebs&.snapshot_id
       end
+      deregister_result = nil
       deregistered = cleanup_action(errors, output, "deregister AMI #{image.image_id}") do
-        ec2_client.deregister_image(image_id: image.image_id)
+        deregister_result = ec2_client.deregister_image(
+          image_id: image.image_id,
+          delete_associated_snapshots: true
+        )
+        fail("EC2 returned an unsuccessful result") unless deregister_result[:return]
       end
-      snapshot_ids.concat(referenced_snapshot_ids) if deregistered
+      next unless deregistered
+
+      deletion_results = Array(deregister_result.delete_snapshot_results)
+      deletion_results.each do |result|
+        case result.return_code
+        when "success"
+          atomically_deleted_snapshot_ids << result.snapshot_id
+        when "skipped"
+          skipped_snapshot_ids << result.snapshot_id
+        else
+          retry_snapshot_ids << result.snapshot_id
+          output.puts(
+            "Cleanup: atomic deletion of snapshot #{result.snapshot_id} returned #{result.return_code}; retrying separately"
+          )
+        end
+      end
+      reported_snapshot_ids = deletion_results.map(&:snapshot_id)
+      retry_snapshot_ids.concat(referenced_snapshot_ids - reported_snapshot_ids)
     end
 
     volumes = cleanup_query(errors, output, "find available tagged volumes") do
@@ -172,7 +251,20 @@ module BuildResources
       end
     end
 
-    snapshot_ids.uniq.each do |snapshot_id|
+    atomically_deleted_snapshot_ids.uniq!
+    retry_snapshot_ids = retry_snapshot_ids.uniq - atomically_deleted_snapshot_ids
+    skipped_snapshot_ids = skipped_snapshot_ids.uniq - atomically_deleted_snapshot_ids - retry_snapshot_ids
+    skipped_snapshot_ids.each do |snapshot_id|
+      record_cleanup_error(
+        errors,
+        output,
+        "delete snapshot #{snapshot_id}",
+        RuntimeError.new("EC2 skipped atomic deletion because the snapshot remains associated with another AMI")
+      )
+    end
+
+    snapshot_ids = (snapshot_ids + retry_snapshot_ids).uniq - atomically_deleted_snapshot_ids - skipped_snapshot_ids
+    snapshot_ids.each do |snapshot_id|
       cleanup_action_with_retry(errors, output, "delete snapshot #{snapshot_id}", sleeper: sleeper) do
         ec2_client.delete_snapshot(snapshot_id: snapshot_id)
       end
@@ -200,17 +292,17 @@ module BuildResources
   private_class_method :cleanup_action
 
   def cleanup_action_with_retry(errors, output, description, sleeper:)
-    delays = [1, 2, 4, 8, 16]
     attempts = 0
     begin
       attempts += 1
-      output.puts("Cleanup: #{description} (attempt #{attempts}/#{delays.length})")
+      max_attempts = SNAPSHOT_DELETE_RETRY_DELAYS.length + 1
+      output.puts("Cleanup: #{description} (attempt #{attempts}/#{max_attempts})")
       yield
       true
     rescue StandardError => e
-      if attempts < delays.length
+      if attempts <= SNAPSHOT_DELETE_RETRY_DELAYS.length
         output.puts("Cleanup retry for #{description}: #{e.class}: #{e.message}")
-        sleeper.call(delays.fetch(attempts - 1))
+        sleeper.call(SNAPSHOT_DELETE_RETRY_DELAYS.fetch(attempts - 1))
         retry
       end
 
