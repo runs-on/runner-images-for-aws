@@ -15,6 +15,13 @@ log() {
 }
 
 fail_to_recovery() {
+  failure_path=${STATE}/direct-init.failure
+  {
+    printf '%s\n' "$*"
+    [ ! -r /proc/cmdline ] || ${BB} cat /proc/cmdline
+  } > "${failure_path}.new" 2>/dev/null \
+    && ${BB} mv "${failure_path}.new" "${failure_path}" \
+    || true
   log "$*; rebooting into the independent GRUB recovery path"
   ${BB} sync || true
   ${BB} sleep 1

@@ -220,7 +220,7 @@ class DirectUefiTest < Minitest::Test
     command = "compose_direct_cmdline root=PARTUUID=old rw panic=-1 init=/runs-on-root/init runs_on.immutable=1 runs_on.squash_threads=single console=ttyS0"
     env = {
       "DIRECT_UEFI_ROOT_PARTUUID" => "fresh-root",
-      "DIRECT_UEFI_EXTRA_ARGUMENTS" => "init=/runs-on-root/init runs_on.immutable=1 runs_on.squash_threads=percpu"
+      "DIRECT_UEFI_EXTRA_ARGUMENTS" => "rw init=/runs-on-root/init runs_on.immutable=1 runs_on.squash_threads=percpu"
     }
 
     stdout, stderr, status = run_function(command, env)
@@ -229,8 +229,22 @@ class DirectUefiTest < Minitest::Test
     assert_equal 1, stdout.scan("root=PARTUUID=").length
     assert_includes stdout, "root=PARTUUID=fresh-root"
     assert_equal 1, stdout.scan("init=/runs-on-root/init").length
+    assert_equal 1, stdout.split.count("rw")
+    refute_includes stdout.split, "ro"
     assert_includes stdout, "runs_on.squash_threads=percpu"
     refute_includes stdout, "runs_on.squash_threads=single"
+  end
+
+  def test_direct_cmdline_rejects_missing_or_conflicting_root_modes
+    base = "root=PARTUUID=abc panic=-1 console=null quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false"
+
+    _stdout, stderr, status = run_function("validate_direct_cmdline #{Shellwords.escape(base)}")
+    refute status.success?
+    assert_includes stderr, "exactly one ro or rw"
+
+    _stdout, stderr, status = run_function("validate_direct_cmdline #{Shellwords.escape("#{base} ro rw")}")
+    refute status.success?
+    assert_includes stderr, "exactly one ro or rw"
   end
 
   def test_exact_label_parser_handles_verbose_output

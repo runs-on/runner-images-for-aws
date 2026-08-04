@@ -427,7 +427,7 @@ install_recovery_initramfs() {
   install -m 0755 "${asset_dir}/compact-root-recovery-init" "${stage}/init"
   install -m 0755 /bin/busybox "${stage}/bin/busybox"
   install -m 0644 "${overlay_module}" "${stage}/overlay.ko"
-  for applet in cat insmod mkdir mount pivot_root reboot sh sleep sync; do
+  for applet in cat insmod mkdir mount mv pivot_root reboot sh sleep sync; do
     /bin/busybox --list | grep -qx "${applet}" || fail "static BusyBox lacks ${applet}"
   done
   /bin/busybox sh -n "${stage}/init"
@@ -686,7 +686,7 @@ EOF
   DIRECT_UEFI_ESP_PARTITION=15 \
   DIRECT_UEFI_KERNEL_BOOT_DIR="${target_mount}/boot" \
   DIRECT_UEFI_ROOT_PARTUUID="${root_partuuid}" \
-  DIRECT_UEFI_EXTRA_ARGUMENTS='init=/runs-on-root/init runs_on.immutable=1 runs_on.squash_threads=percpu' \
+  DIRECT_UEFI_EXTRA_ARGUMENTS='rw init=/runs-on-root/init runs_on.immutable=1 runs_on.squash_threads=percpu' \
   DIRECT_UEFI_STATE_DIR="${direct_state_dir}" \
     "${asset_dir}/prepare-direct-uefi.sh"
   recovery_cmdline_path="${direct_state_dir}/expected-recovery-cmdline"

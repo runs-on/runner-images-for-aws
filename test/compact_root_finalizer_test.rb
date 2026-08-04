@@ -7,6 +7,7 @@ require "tmpdir"
 class CompactRootFinalizerTest < Minitest::Test
   ROOT = File.expand_path("..", __dir__)
   SCRIPT = File.join(ROOT, "patches/ubuntu/files/finalize-compact-root.sh")
+  DIRECT_INIT = File.join(ROOT, "patches/ubuntu/files/compact-root-direct-init")
   RECOVERY_INIT = File.join(ROOT, "patches/ubuntu/files/compact-root-recovery-init")
   TEMPLATES = %w[
     ubuntu-full-x64.pkr.hcl
@@ -17,10 +18,23 @@ class CompactRootFinalizerTest < Minitest::Test
   RESIZE_WAIT = File.join(ROOT, "patches/ubuntu/files/wait-for-compact-root-resize.sh")
 
   def test_shell_syntax
-    [SCRIPT, RECOVERY_INIT, AFTER_REBOOT, RESIZE_WAIT].each do |path|
+    [SCRIPT, DIRECT_INIT, RECOVERY_INIT, AFTER_REBOOT, RESIZE_WAIT].each do |path|
       _stdout, stderr, status = Open3.capture3("bash", "-n", path)
       assert status.success?, "#{path}: #{stderr}"
     end
+  end
+
+  def test_direct_init_persists_failures_before_recovery_reboot
+    script = File.read(DIRECT_INIT)
+    failure_index = script.index('${STATE}/direct-init.failure')
+    sync_index = script.index('${BB} sync || true')
+    reboot_index = script.index('${BB} reboot -f')
+
+    refute_nil failure_index
+    assert_includes script, '[ ! -r /proc/cmdline ] || ${BB} cat /proc/cmdline'
+    assert_includes script, '${BB} mv "${failure_path}.new" "${failure_path}"'
+    assert_operator failure_index, :<, sync_index
+    assert_operator sync_index, :<, reboot_index
   end
 
   def test_descendants_wait_for_backing_partition_and_ext4_growth
@@ -253,6 +267,7 @@ class CompactRootFinalizerTest < Minitest::Test
 
     assert_includes script, 'grub-install --target=i386-pc'
     assert_includes script, 'DIRECT_UEFI_DISK="${target_disk}"'
+    assert_includes script, "DIRECT_UEFI_EXTRA_ARGUMENTS='rw init=/runs-on-root/init"
     assert_includes script, "target root PARTUUID was reused"
     assert_includes script, "target BIOS PARTUUID was reused"
     assert_includes script, "target filesystem identity was reused"
@@ -271,7 +286,7 @@ class CompactRootFinalizerTest < Minitest::Test
       recovery = File.join(dir, "expected-recovery-cmdline")
       File.write(
         direct,
-        "root=PARTUUID=fresh ro console=null quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false init=/runs-on-root/init runs_on.immutable=1 runs_on.squash_threads=percpu\n"
+        "root=PARTUUID=fresh rw console=null quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false init=/runs-on-root/init runs_on.immutable=1 runs_on.squash_threads=percpu\n"
       )
       command = <<~BASH
         source #{Shellwords.escape(SCRIPT)}
@@ -283,7 +298,7 @@ class CompactRootFinalizerTest < Minitest::Test
 
       assert status.success?, stderr
       assert_equal(
-        "root=PARTUUID=fresh ro runs_on.immutable=1 runs_on.squash_threads=percpu console=ttyS0 runs_on.recovery=1\n",
+        "root=PARTUUID=fresh rw runs_on.immutable=1 runs_on.squash_threads=percpu console=ttyS0 runs_on.recovery=1\n",
         File.read(recovery)
       )
       assert_equal 0o644, File.stat(recovery).mode & 0o777
