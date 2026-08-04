@@ -142,6 +142,11 @@ partition_name() {
   sgdisk -i "${number}" "${disk}" | sed -n "s/^Partition name: '\(.*\)'$/\1/p"
 }
 
+valid_partition_type_guid() {
+  local type_code="$1"
+  [[ "${type_code}" =~ ^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$ ]]
+}
+
 partition_target() {
   local source_disk="$1" destination_disk="$2"
   local number first last type name
@@ -151,15 +156,18 @@ partition_target() {
     last="$(partition_field "${source_disk}" "${number}" 'Last sector')"
     type="$(partition_field "${source_disk}" "${number}" 'Partition GUID code')"
     name="$(partition_name "${source_disk}" "${number}")"
-    [[ "${first}" =~ ^[0-9]+$ && "${last}" =~ ^[0-9]+$ && "${type}" =~ ^[0-9A-Fa-f]{4}$ ]] || \
-      fail "cannot read source partition ${number} geometry"
+    if ! [[ "${first}" =~ ^[0-9]+$ && "${last}" =~ ^[0-9]+$ ]] || ! valid_partition_type_guid "${type}"; then
+      fail "cannot read source partition ${number} geometry: first=${first:-missing} last=${last:-missing} type=${type:-missing}"
+    fi
     sgdisk --new="${number}:${first}:${last}" --typecode="${number}:${type}" "${destination_disk}"
     [[ -z "${name}" ]] || sgdisk --change-name="${number}:${name}" "${destination_disk}"
   done
   first="$(partition_field "${source_disk}" 1 'First sector')"
   type="$(partition_field "${source_disk}" 1 'Partition GUID code')"
   name="$(partition_name "${source_disk}" 1)"
-  [[ "${first}" =~ ^[0-9]+$ && "${type}" =~ ^[0-9A-Fa-f]{4}$ ]] || fail "cannot read source root geometry"
+  if ! [[ "${first}" =~ ^[0-9]+$ ]] || ! valid_partition_type_guid "${type}"; then
+    fail "cannot read source root geometry: first=${first:-missing} type=${type:-missing}"
+  fi
   sgdisk --new="1:${first}:0" --typecode="1:${type}" "${destination_disk}"
   [[ -z "${name}" ]] || sgdisk --change-name="1:${name}" "${destination_disk}"
   sgdisk --randomize-guids "${destination_disk}"

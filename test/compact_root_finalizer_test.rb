@@ -59,6 +59,31 @@ class CompactRootFinalizerTest < Minitest::Test
     assert_includes script, 'fresh target already contains a recognized signature'
   end
 
+  def test_partition_type_requires_a_canonical_gpt_guid
+    command = <<~BASH
+      source #{Shellwords.escape(SCRIPT)}
+      trap - EXIT INT TERM
+      sgdisk() {
+        printf '%s\n' \
+          'Partition GUID code: BC13C2FF-59E6-4262-A352-B275FD6F7172 (XBOOTLDR partition)' \
+          'Partition unique GUID: 78CF0641-D0E8-4107-B856-6980732F3C6F'
+      }
+      parsed_type="$(partition_field /dev/fake 13 'Partition GUID code')"
+      [[ "${parsed_type}" == BC13C2FF-59E6-4262-A352-B275FD6F7172 ]]
+      valid_partition_type_guid "${parsed_type}"
+      valid_partition_type_guid BC13C2FF-59E6-4262-A352-B275FD6F7172
+      valid_partition_type_guid 4f68bce3-e8cd-4db1-96e7-fbcaf984b709
+      ! valid_partition_type_guid 8300
+      ! valid_partition_type_guid BC13C2FF-59E6-4262-A352
+      ! valid_partition_type_guid 'BC13C2FF-59E6-4262-A352-B275FD6F7172 (XBOOTLDR)'
+    BASH
+
+    _stdout, stderr, status = Open3.capture3("bash", "-c", command)
+
+    assert status.success?, stderr
+    assert_includes File.read(SCRIPT), 'type=${type:-missing}'
+  end
+
   def test_direct_target_uses_winner_squash_placement_without_discard
     script = File.read(SCRIPT)
 
