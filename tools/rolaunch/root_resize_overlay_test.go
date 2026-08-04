@@ -54,3 +54,38 @@ func TestFilesystemSizeAtUsesBackingPath(t *testing.T) {
 		t.Fatalf("path=%q size=%d err=%v", usedPath, size, err)
 	}
 }
+
+func TestMountedPathInfoResolvesDevRootFromMountDeviceNumber(t *testing.T) {
+	sysfsRoot := t.TempDir()
+	devicePath := filepath.Join(sysfsRoot, "devices", "pci0000:00", "nvme", "nvme0", "nvme0n1", "nvme0n1p1")
+	if err := os.MkdirAll(filepath.Dir(devicePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(devicePath, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deviceLink := filepath.Join(sysfsRoot, "dev", "block", "259:1")
+	if err := os.MkdirAll(filepath.Dir(deviceLink), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(devicePath, deviceLink); err != nil {
+		t.Fatal(err)
+	}
+
+	rawMountInfo := []byte("29 23 259:1 / /.bootstrap rw,relatime - ext4 /dev/root rw\n")
+	source, fsType, err := mountedPathInfoFrom(rawMountInfo, "/.bootstrap", sysfsRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if source != "/dev/nvme0n1p1" || fsType != "ext4" {
+		t.Fatalf("source=%q fsType=%q", source, fsType)
+	}
+}
+
+func TestMountedPathInfoRejectsUnresolvedDevRoot(t *testing.T) {
+	rawMountInfo := []byte("29 23 259:1 / /.bootstrap rw,relatime - ext4 /dev/root rw\n")
+	_, _, err := mountedPathInfoFrom(rawMountInfo, "/.bootstrap", t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "resolve mount /.bootstrap source /dev/root through device 259:1") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

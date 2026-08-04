@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"unicode"
@@ -89,10 +90,10 @@ func mountedPathInfo(mountPath string) (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("read /proc/self/mountinfo: %w", err)
 	}
-	return mountInfoForExactPath(raw, mountPath)
+	return mountedPathInfoFrom(raw, mountPath, "/sys")
 }
 
-func mountInfoForExactPath(raw []byte, mountPath string) (string, string, error) {
+func mountedPathInfoFrom(raw []byte, mountPath, sysfsRoot string) (string, string, error) {
 	for _, line := range strings.Split(string(raw), "\n") {
 		fields := strings.Fields(line)
 		separator := -1
@@ -110,9 +111,45 @@ func mountInfoForExactPath(raw []byte, mountPath string) (string, string, error)
 		if source == "" || fsType == "" {
 			return "", "", fmt.Errorf("mount %s has an empty source or filesystem type", mountPath)
 		}
-		return source, fsType, nil
+		resolvedSource, err := blockDevicePathForDeviceNumber(sysfsRoot, fields[2])
+		if err != nil {
+			return "", "", fmt.Errorf(
+				"resolve mount %s source %s through device %s: %w",
+				mountPath,
+				source,
+				fields[2],
+				err,
+			)
+		}
+		return resolvedSource, fsType, nil
 	}
 	return "", "", fmt.Errorf("%s is not an active mount point", mountPath)
+}
+
+func blockDevicePathForDeviceNumber(sysfsRoot, deviceNumber string) (string, error) {
+	major, minor, found := strings.Cut(deviceNumber, ":")
+	if !found || major == "" || minor == "" {
+		return "", fmt.Errorf("invalid block device number %q", deviceNumber)
+	}
+	if _, err := strconv.ParseUint(major, 10, 32); err != nil {
+		return "", fmt.Errorf("invalid block device major %q: %w", major, err)
+	}
+	if _, err := strconv.ParseUint(minor, 10, 32); err != nil {
+		return "", fmt.Errorf("invalid block device minor %q: %w", minor, err)
+	}
+
+	resolved, err := filepath.EvalSymlinks(filepath.Join(sysfsRoot, "dev", "block", deviceNumber))
+	if err != nil {
+		return "", fmt.Errorf("resolve sysfs block device: %w", err)
+	}
+	deviceName := filepath.Base(resolved)
+	if deviceName == "." || deviceName == string(filepath.Separator) ||
+		strings.IndexFunc(deviceName, func(value rune) bool {
+			return !unicode.IsLetter(value) && !unicode.IsDigit(value) && value != '.' && value != '_' && value != '-'
+		}) >= 0 {
+		return "", fmt.Errorf("invalid sysfs block device name %q", deviceName)
+	}
+	return filepath.Join("/dev", deviceName), nil
 }
 
 func unescapeProcMountField(value string) string {
