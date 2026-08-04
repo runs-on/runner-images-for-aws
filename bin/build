@@ -383,6 +383,19 @@ if packer_template_content.include?('variable "publish_publicly"')
 
   shared_template_vars += ["-var", "publish_publicly=#{publish_publicly}"]
 end
+if packer_template_content.include?('variable "builder_volume_size"') && image.key?('builder_volume_size')
+  shared_template_vars += ["-var", "builder_volume_size=#{image.fetch('builder_volume_size')}"]
+end
+
+compact_root_images = %w[
+  ubuntu26-full-x64
+  ubuntu26-gpu-x64
+  ubuntu26-stepsecurity-x64
+].freeze
+compact_root_image = compact_root_images.include?(image.fetch('id'))
+builder_selection = if packer_template_content.include?('source "amazon-ebssurrogate" "compact_root"')
+                      compact_root_image ? "amazon-ebssurrogate.compact_root" : "amazon-ebs.build_ebs"
+                    end
 
 source_ami_name_override = ENV.fetch("SOURCE_AMI_NAME", "").strip
 source_ami_owner_override = ENV.fetch("SOURCE_AMI_OWNER", "").strip
@@ -395,6 +408,7 @@ source_ami_owner = source_ami_owner_override.empty? ? image.fetch('source_ami_ow
 packer_build_cmd = [
   "packer", "build",
   options[:debug] ? "-debug" : nil,
+  ("-only=#{builder_selection}" unless builder_selection.nil?),
   *shared_template_vars,
   "-var", %{ami_regions=["us-east-1"]},
   "-var", "ami_name=#{ami_name}",

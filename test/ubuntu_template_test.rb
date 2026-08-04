@@ -91,6 +91,48 @@ class UbuntuTemplateTest < Minitest::Test
     end
   end
 
+  def test_only_ubuntu26_x64_full_and_descendants_select_compact_surrogate_builds
+    compact_images = CONFIG.fetch("images").filter_map do |image|
+      [image.fetch("id"), image.fetch("builder_volume_size")] if image.key?("builder_volume_size")
+    end.to_h
+
+    assert_equal(
+      {
+        "ubuntu26-full-x64" => 60,
+        "ubuntu26-gpu-x64" => 80,
+        "ubuntu26-stepsecurity-x64" => 60
+      },
+      compact_images
+    )
+
+    build_script = File.read(BUILD_SCRIPT)
+    compact_images.each_key { |image_id| assert_includes build_script, image_id }
+    assert_includes build_script, '"amazon-ebssurrogate.compact_root"'
+    assert_includes build_script, '"amazon-ebs.build_ebs"'
+    refute_includes build_script, "ubuntu26-full-arm64\n  ubuntu26"
+  end
+
+  def test_compact_surrogates_snapshot_only_the_fresh_final_target
+    [FULL_X64_TEMPLATE, GPU_X64_TEMPLATE, STEPSECURITY_X64_TEMPLATE].each do |path|
+      template = File.read(path)
+      surrogate = template[/source "amazon-ebssurrogate" "compact_root" \{.*?^\}/m]
+
+      refute_nil surrogate, path
+      assert_includes surrogate, "use_create_image", path
+      assert_includes surrogate, "imds_support", path
+      assert_match(%r{device_name\s*=\s*"/dev/sda1".*?omit_from_artifact\s*=\s*true}m, surrogate, path)
+      assert_match(%r{device_name\s*=\s*"/dev/sdf".*?volume_size\s*=\s*var\.volume_size}m, surrogate, path)
+      assert_match(%r{source_device_name\s*=\s*"/dev/sdf".*?device_name\s*=\s*"/dev/sda1"}m, surrogate, path)
+      refute_includes surrogate, "snapshot_id", path
+      refute_includes surrogate, "uefi_data", path
+      refute_includes surrogate, "boot_mode", path
+    end
+
+    [FULL_ARM64_TEMPLATE, STEPSECURITY_ARM64_TEMPLATE].each do |path|
+      refute_includes File.read(path), 'amazon-ebssurrogate" "compact_root', path
+    end
+  end
+
   def test_ubuntu26_descendants_are_defined_for_supported_architectures
     configured = CONFIG.fetch("images").filter_map do |image|
       id = image.fetch("id")
