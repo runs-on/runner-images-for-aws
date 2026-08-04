@@ -282,6 +282,42 @@ assert_variant() {
   done
 }
 
+quiesce_root_writers() {
+  local unit state
+  local -a discovered_units=()
+  local -a units=(
+    amazon-ssm-agent.service
+    chrony.service
+    irqbalance.service
+    syslog.socket
+    rsyslog.socket
+    rsyslog.service
+    cron.service
+    udisks2.service
+    docker.service
+    docker.socket
+    containerd.service
+    apt-daily.timer
+    apt-daily-upgrade.timer
+  )
+  mapfile -t discovered_units < <(
+    {
+      systemctl list-units --type=timer --state=active --no-legend --plain || true
+      systemctl list-units --type=service --state=active --no-legend --plain 'php*-fpm.service' || true
+    } | awk 'NF { print $1 }' | sort -u
+  )
+  units+=("${discovered_units[@]}")
+
+  for unit in "${units[@]}"; do
+    systemctl stop "${unit}" 2>/dev/null || true
+    state="$(systemctl is-active "${unit}" 2>/dev/null || true)"
+    case "${state}" in
+      ''|inactive|failed|unknown) ;;
+      *) fail "root-writing unit did not stop: ${unit} (${state})" ;;
+    esac
+  done
+}
+
 clean_socket_nodes() {
   local socket
   local -a sockets=()
@@ -470,8 +506,7 @@ main() {
   install -d -m 0700 "${work_dir}" "${validation_dir}"
   rm -f -- "$(readlink -f "$0")" 2>/dev/null || true
 
-  systemctl stop docker.service docker.socket containerd.service 2>/dev/null || true
-  systemctl stop apt-daily.timer apt-daily-upgrade.timer 2>/dev/null || true
+  quiesce_root_writers
   rm -f /etc/ssh/ssh_host_* /home/ubuntu/.ssh/authorized_keys /root/.ssh/authorized_keys /root/cuda-installed.txt
   rm -f /var/lib/rolaunch/instance-identity.json /var/lib/rolaunch/runs-on-user-data.done /var/lib/rolaunch/timings.json /var/lib/rolaunch/user-data.sh
   truncate -s 0 /etc/machine-id

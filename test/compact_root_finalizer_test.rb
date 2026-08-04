@@ -98,6 +98,34 @@ class CompactRootFinalizerTest < Minitest::Test
     refute_includes script, 'ln -sfn /dev/null "${target_mount}/runs-on-root/upper/etc/systemd/system/ssh.socket"'
   end
 
+  def test_root_writing_services_are_quiesced_before_source_capture
+    script = File.read(SCRIPT)
+    main_index = script.index("\nmain() {")
+    quiesce_index = script.index("\n  quiesce_root_writers\n", main_index)
+    socket_cleanup_index = script.index("\n  clean_socket_nodes\n", main_index)
+    manifest_index = script.index('"${work_dir}/source-acl.json"', main_index)
+
+    %w[
+      amazon-ssm-agent.service
+      chrony.service
+      irqbalance.service
+      rsyslog.service
+      syslog.socket
+      rsyslog.socket
+      cron.service
+      udisks2.service
+    ].each do |unit|
+      assert_includes script, unit
+    end
+    assert_includes script, "systemctl list-units --type=timer --state=active"
+    assert_includes script, "'php*-fpm.service'"
+    assert_includes script, 'systemctl stop "${unit}"'
+    assert_includes script, 'systemctl is-active "${unit}"'
+    refute_nil quiesce_index
+    assert_operator quiesce_index, :<, socket_cleanup_index
+    assert_operator socket_cleanup_index, :<, manifest_index
+  end
+
   def test_boot_profile_gate_measures_unique_eligible_file_coverage
     script = File.read(SCRIPT)
 
