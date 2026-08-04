@@ -202,15 +202,55 @@ class MeasureLaunchTimeTest < Minitest::Test
     validation = remote_commands.last
     assert_includes validation, "expected-recovery-cmdline"
     assert_includes validation, "expected-boot-order"
-    assert_includes validation, 'test "$boot_current" = "$expected_fallback"'
-    assert_includes validation, 'test -z "$boot_next"'
+    assert_includes validation, "check_equal 'recovery kernel command line'"
+    assert_includes validation, "check_equal 'recovery BootCurrent'"
+    assert_includes validation, "check_empty 'recovery BootNext'"
+    assert_includes validation, "check_equal 'recovery BootOrder'"
     assert_includes validation, "expected_disk_bytes=$((60 * 1024 * 1024 * 1024))"
-    assert_includes validation, 'test "$partition_bytes" -ge $((disk_bytes - 2 * 1024 * 1024 * 1024))'
+    assert_includes validation, "check_ge 'root partition uses the expanded disk'"
     assert_includes validation, "filesystem_bytes"
     remote_commands.each do |remote_command|
       _stdout, syntax_stderr, syntax_status = Open3.capture3("bash", "-n", stdin_data: remote_command)
       assert syntax_status.success?, syntax_stderr
     end
+  end
+
+  def test_compact_recovery_failure_reports_passes_and_expected_actual_failure
+    old_boot = "11111111-1111-1111-1111-111111111111"
+    new_boot = "22222222-2222-2222-2222-222222222222"
+    calls = 0
+    capture = lambda do |**_arguments|
+      calls += 1
+      if calls == 1
+        ["PASS initial boot path: direct-uefi\n#{old_boot}\n", "", Status.new(true, 0)]
+      else
+        [
+          "PASS recovery root filesystem type: overlay\n",
+          "FAIL recovery BootOrder\n  expected: 0001,0000\n  actual:   0000,0001\n",
+          Status.new(false, 1)
+        ]
+      end
+    end
+
+    error = @harness.stub(:ssh_capture, capture) do
+      @harness.stub(:wait_for_new_boot_id, new_boot) do
+        assert_raises(RuntimeError) do
+          @harness.verify_compact_recovery!(
+            ip: "203.0.113.10",
+            ssh_user: "ubuntu",
+            private_key_path: "/tmp/key",
+            timeout_seconds: 30,
+            nonce: "fixed-nonce"
+          )
+        end
+      end
+    end
+
+    assert_includes error.message, "Compact recovery validation failed"
+    assert_includes error.message, "PASS recovery root filesystem type: overlay"
+    assert_includes error.message, "FAIL recovery BootOrder"
+    assert_includes error.message, "expected: 0001,0000"
+    assert_includes error.message, "actual:   0000,0001"
   end
 
   def test_cli_rejects_negative_warm_run_count

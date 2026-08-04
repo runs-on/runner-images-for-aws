@@ -8,6 +8,7 @@ class DirectUefiTest < Minitest::Test
   SCRIPT = File.expand_path("../patches/ubuntu/files/prepare-direct-uefi.sh", __dir__)
   README = File.expand_path("../README.md", __dir__)
   TEST_WORKFLOW = File.expand_path("../.github/workflows/test.yml", __dir__)
+  COMPACT_RECOVERY_WORKFLOW = File.expand_path("../.github/workflows/compact-recovery.yml", __dir__)
   TEMPLATE_DIR = File.expand_path("../patches/ubuntu/templates", __dir__)
   FULL_X64_TEMPLATE = File.join(TEMPLATE_DIR, "ubuntu-full-x64.pkr.hcl")
   DESCENDANT_TEMPLATES = %w[
@@ -364,6 +365,25 @@ class DirectUefiTest < Minitest::Test
     assert_includes workflow, 'test "$kernel_format" = raw'
     assert_includes workflow, 'test "$(uname -r)" = "$kernel_release"'
     assert_includes workflow, "fallback.sha256"
+  end
+
+  def test_compact_recovery_workflow_accepts_an_explicit_ami
+    workflow = File.read(COMPACT_RECOVERY_WORKFLOW)
+    orchestration = YAML.safe_load(
+      File.read(File.expand_path("../.github/workflows/build-test-release.yml", __dir__)),
+      aliases: true
+    )
+    recovery_job = orchestration.fetch("jobs").fetch("compact-recovery")
+
+    assert_includes workflow, "workflow_dispatch:"
+    assert_includes workflow, "ami_id:"
+    assert_includes workflow, '${{ inputs.ami_id }}'
+    assert_includes workflow, "--verify-compact-recovery"
+    assert_includes workflow, "--ssh-timeout 300"
+    refute_includes workflow, "--root-initialization-rate"
+    assert_equal "./.github/workflows/compact-recovery.yml", recovery_job.fetch("uses")
+    assert_equal "${{ needs.build.outputs.ami_id }}", recovery_job.fetch("with").fetch("ami_id")
+    assert_equal "inherit", recovery_job.fetch("secrets")
   end
 
   def test_readme_documents_the_x64_only_recovery_contract

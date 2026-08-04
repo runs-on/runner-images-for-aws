@@ -271,6 +271,7 @@ def ssh_capture(ip:, ssh_user:, private_key_path:, remote_command:, timeout_seco
     'ssh',
     '-o', 'BatchMode=yes',
     '-o', 'IdentitiesOnly=yes',
+    '-o', 'LogLevel=ERROR',
     '-o', 'StrictHostKeyChecking=no',
     '-o', 'UserKnownHostsFile=/dev/null',
     '-o', 'ConnectTimeout=5',
@@ -281,6 +282,13 @@ def ssh_capture(ip:, ssh_user:, private_key_path:, remote_command:, timeout_seco
     "bash -lc #{remote_command.shellescape}"
   ]
   capture3_with_timeout(*command, timeout_seconds: timeout_seconds)
+end
+
+def compact_recovery_failure(summary, stdout:, stderr:)
+  details = []
+  details << "Remote checks:\n#{stdout.strip}" unless stdout.strip.empty?
+  details << "Remote errors:\n#{stderr.strip}" unless stderr.strip.empty?
+  [summary, *details].join("\n")
 end
 
 def wait_for_new_boot_id(ip:, ssh_user:, private_key_path:, previous_boot_id:, timeout_seconds:, poll_interval: 2)
@@ -319,10 +327,76 @@ end
 
 def verify_compact_recovery!(ip:, ssh_user:, private_key_path:, timeout_seconds:, expected_root_gib: nil, nonce: SecureRandom.hex(16))
   marker_path = '/etc/runs-on-compact-recovery-check'
+  diagnostic_helpers = <<~SH
+    failures=0
+    pass_check() {
+      printf 'PASS %s: %s\n' "$1" "$2"
+    }
+    fail_check() {
+      printf 'FAIL %s\n  expected: %s\n  actual:   %s\n' "$1" "$2" "$3" >&2
+      failures=$((failures + 1))
+    }
+    check_equal() {
+      if [[ "$2" == "$3" ]]; then
+        pass_check "$1" "$3"
+      else
+        fail_check "$1" "$2" "$3"
+      fi
+    }
+    check_empty() {
+      if [[ -z "$2" ]]; then
+        pass_check "$1" '<empty>'
+      else
+        fail_check "$1" '<empty>' "$2"
+      fi
+    }
+    check_nonempty() {
+      if [[ -n "$2" ]]; then
+        pass_check "$1" "$2"
+      else
+        fail_check "$1" '<nonempty>' '<empty>'
+      fi
+    }
+    check_block_device() {
+      if [[ -b "$2" ]]; then
+        pass_check "$1" "$2"
+      else
+        fail_check "$1" '<block device>' "${2:-<empty>}"
+      fi
+    }
+    check_integer() {
+      if [[ "$2" =~ ^[0-9]+$ ]]; then
+        pass_check "$1" "$2"
+      else
+        fail_check "$1" '<nonnegative integer>' "${2:-<empty>}"
+      fi
+    }
+    check_le() {
+      if (( $2 <= $3 )); then
+        pass_check "$1" "$2 <= $3"
+      else
+        fail_check "$1" "<= $3" "$2"
+      fi
+    }
+    check_ge() {
+      if (( $2 >= $3 )); then
+        pass_check "$1" "$2 >= $3"
+      else
+        fail_check "$1" ">= $3" "$2"
+      fi
+    }
+  SH
   prepare = <<~SH
-    set -euo pipefail
-    test "$(findmnt -nro FSTYPE /)" = overlay
-    test "$(cat /etc/runs-on-overlay/boot-path)" = direct-uefi
+    set -uo pipefail
+    #{diagnostic_helpers}
+    root_fstype="$(findmnt -nro FSTYPE / 2>&1)"
+    boot_path="$(cat /etc/runs-on-overlay/boot-path 2>&1)"
+    check_equal 'initial root filesystem type' 'overlay' "$root_fstype"
+    check_equal 'initial boot path' 'direct-uefi' "$boot_path"
+    if (( failures > 0 )); then
+      printf 'Initial compact recovery checks failed: %d check(s) failed\n' "$failures" >&2
+      exit 1
+    fi
     printf '%s\n' #{nonce.shellescape} | sudo tee #{marker_path.shellescape} >/dev/null
     cat /proc/sys/kernel/random/boot_id
     sudo systemd-run --quiet --collect \
@@ -336,7 +410,9 @@ def verify_compact_recovery!(ip:, ssh_user:, private_key_path:, timeout_seconds:
     remote_command: prepare,
     timeout_seconds: 30
   )
-  raise "Unable to schedule compact recovery reboot: #{stderr.strip}" unless status.success?
+  unless status.success?
+    raise compact_recovery_failure('Unable to schedule compact recovery reboot', stdout: stdout, stderr: stderr)
+  end
 
   previous_boot_id = stdout.lines.map(&:strip).find { |line| line.match?(/\A[0-9a-f-]{36}\z/) }
   raise 'Unable to read the pre-reboot boot ID' unless previous_boot_id
@@ -351,54 +427,77 @@ def verify_compact_recovery!(ip:, ssh_user:, private_key_path:, timeout_seconds:
   root_check = if expected_root_gib
                  <<~SH
                    expected_disk_bytes=$((#{Integer(expected_root_gib)} * 1024 * 1024 * 1024))
-                   backing_mount="$(cat /etc/runs-on-overlay/backing-root-mount)"
-                   backing_source="$(findmnt -nro SOURCE --target "$backing_mount")"
+                   backing_mount="$(cat /etc/runs-on-overlay/backing-root-mount 2>&1)"
+                   backing_source="$(findmnt -nro SOURCE --target "$backing_mount" 2>&1)"
                    resolved_source="$(readlink -f "$backing_source" 2>/dev/null || true)"
-                   if ! test -b "$resolved_source"; then
-                     device_number="$(findmnt -nro MAJ:MIN --target "$backing_mount")"
-                     sys_path="$(readlink -f "/sys/dev/block/$device_number")"
+                   if [[ ! -b "$resolved_source" ]]; then
+                     device_number="$(findmnt -nro MAJ:MIN --target "$backing_mount" 2>&1)"
+                     sys_path="$(readlink -f "/sys/dev/block/$device_number" 2>&1)"
                      resolved_source="/dev/${sys_path##*/}"
                    fi
-                   test -b "$resolved_source"
-                   parent_name="$(lsblk -nro PKNAME "$resolved_source" | awk 'NF && !found { print; found=1 }')"
-                   test -b "/dev/$parent_name"
-                   disk_bytes="$(sudo blockdev --getsize64 "/dev/$parent_name")"
-                   partition_bytes="$(sudo blockdev --getsize64 "$resolved_source")"
-                   block_count="$(sudo tune2fs -l "$resolved_source" | awk -F: '$1 == "Block count" && !found { gsub(/[[:space:]]/, "", $2); print $2; found=1 }')"
-                   block_size="$(sudo tune2fs -l "$resolved_source" | awk -F: '$1 == "Block size" && !found { gsub(/[[:space:]]/, "", $2); print $2; found=1 }')"
-                   filesystem_bytes=$((block_count * block_size))
-                   test "$disk_bytes" -eq "$expected_disk_bytes"
-                   test "$partition_bytes" -le "$disk_bytes"
-                   test "$partition_bytes" -ge $((disk_bytes - 2 * 1024 * 1024 * 1024))
-                   test "$filesystem_bytes" -ge $((partition_bytes - 64 * 1024 * 1024))
+                   parent_name="$(lsblk -nro PKNAME "$resolved_source" 2>&1 | awk 'NF && !found { print; found=1 }')"
+                   parent_device="/dev/$parent_name"
+                   disk_bytes="$(sudo blockdev --getsize64 "$parent_device" 2>&1)"
+                   partition_bytes="$(sudo blockdev --getsize64 "$resolved_source" 2>&1)"
+                   block_count="$(sudo tune2fs -l "$resolved_source" 2>&1 | awk -F: '$1 == "Block count" && !found { gsub(/[[:space:]]/, "", $2); print $2; found=1 }')"
+                   block_size="$(sudo tune2fs -l "$resolved_source" 2>&1 | awk -F: '$1 == "Block size" && !found { gsub(/[[:space:]]/, "", $2); print $2; found=1 }')"
+                   check_nonempty 'backing root mount' "$backing_mount"
+                   check_block_device 'backing root partition' "$resolved_source"
+                   check_block_device 'backing root disk' "$parent_device"
+                   check_integer 'root disk bytes' "$disk_bytes"
+                   check_integer 'root partition bytes' "$partition_bytes"
+                   check_integer 'root filesystem block count' "$block_count"
+                   check_integer 'root filesystem block size' "$block_size"
+                   if [[ "$disk_bytes" =~ ^[0-9]+$ ]]; then
+                     check_equal 'root disk size' "$expected_disk_bytes" "$disk_bytes"
+                   fi
+                   if [[ "$disk_bytes" =~ ^[0-9]+$ && "$partition_bytes" =~ ^[0-9]+$ ]]; then
+                     check_le 'root partition does not exceed disk' "$partition_bytes" "$disk_bytes"
+                     check_ge 'root partition uses the expanded disk' "$partition_bytes" $((disk_bytes - 2 * 1024 * 1024 * 1024))
+                   fi
+                   if [[ "$partition_bytes" =~ ^[0-9]+$ && "$block_count" =~ ^[0-9]+$ && "$block_size" =~ ^[0-9]+$ ]]; then
+                     filesystem_bytes=$((block_count * block_size))
+                     check_ge 'root filesystem uses the expanded partition' "$filesystem_bytes" $((partition_bytes - 64 * 1024 * 1024))
+                   fi
                  SH
                else
                  ''
                end
   validate = <<~SH
-    set -euo pipefail
-    test "$(cat #{marker_path.shellescape})" = #{nonce.shellescape}
-    test "$(findmnt -nro FSTYPE /)" = overlay
-    test "$(cat /etc/runs-on-overlay/boot-path)" = grub-initramfs-recovery
+    set -uo pipefail
+    #{diagnostic_helpers}
+    marker="$(cat #{marker_path.shellescape} 2>&1)"
+    root_fstype="$(findmnt -nro FSTYPE / 2>&1)"
+    boot_path="$(cat /etc/runs-on-overlay/boot-path 2>&1)"
+    check_equal 'persistent marker' #{nonce.shellescape} "$marker"
+    check_equal 'recovery root filesystem type' 'overlay' "$root_fstype"
+    check_equal 'recovery boot path' 'grub-initramfs-recovery' "$boot_path"
     direct_state=/var/lib/runs-on-direct-uefi
-    expected_cmdline="$(cat "$direct_state/expected-recovery-cmdline")"
-    actual_cmdline="$(cat /proc/cmdline)"
+    expected_cmdline="$(cat "$direct_state/expected-recovery-cmdline" 2>&1)"
+    actual_cmdline="$(cat /proc/cmdline 2>&1)"
     normalized_cmdline="$(printf '%s\n' "$actual_cmdline" | sed -E 's/(^| )BOOT_IMAGE=[^ ]+ ?/\\1/' | xargs)"
-    test "$normalized_cmdline" = "$expected_cmdline"
-    expected_fallback="$(tr '[:lower:]' '[:upper:]' < "$direct_state/fallback-bootnum")"
-    expected_order="$(tr '[:lower:]' '[:upper:]' < "$direct_state/expected-boot-order")"
-    firmware="$(sudo efibootmgr -v)"
+    check_equal 'recovery kernel command line' "$expected_cmdline" "$normalized_cmdline"
+    expected_fallback="$(tr '[:lower:]' '[:upper:]' < "$direct_state/fallback-bootnum" 2>&1)"
+    expected_order="$(tr '[:lower:]' '[:upper:]' < "$direct_state/expected-boot-order" 2>&1)"
+    firmware="$(sudo efibootmgr -v 2>&1)"
+    firmware_status=$?
     boot_current="$(awk -F': ' '/^BootCurrent:/ { print toupper($2); exit }' <<< "$firmware")"
     boot_next="$(awk -F': ' '/^BootNext:/ { print toupper($2); exit }' <<< "$firmware")"
     boot_order="$(awk -F': ' '/^BootOrder:/ { print toupper($2); exit }' <<< "$firmware")"
-    test "$boot_current" = "$expected_fallback"
-    test -z "$boot_next"
-    test "$boot_order" = "$expected_order"
-    test "${boot_order%%,*}" = "$expected_fallback"
+    printf 'EFI state:\n%s\n' "$firmware"
+    check_equal 'efibootmgr exit status' '0' "$firmware_status"
+    check_equal 'recovery BootCurrent' "$expected_fallback" "$boot_current"
+    check_empty 'recovery BootNext' "$boot_next"
+    check_equal 'recovery BootOrder' "$expected_order" "$boot_order"
+    check_equal 'fallback is first in BootOrder' "$expected_fallback" "${boot_order%%,*}"
     #{root_check}
     printf 'recovery_boot_id=%s\n' #{recovery_boot_id.shellescape}
-    printf 'boot_path=%s\n' "$(cat /etc/runs-on-overlay/boot-path)"
+    printf 'boot_path=%s\n' "$boot_path"
     printf 'boot_order=%s\n' "$boot_order"
+    if (( failures > 0 )); then
+      printf 'Compact recovery validation failed: %d check(s) failed\n' "$failures" >&2
+      exit 1
+    fi
   SH
   stdout, stderr, status = ssh_capture(
     ip: ip,
@@ -407,7 +506,9 @@ def verify_compact_recovery!(ip:, ssh_user:, private_key_path:, timeout_seconds:
     remote_command: validate,
     timeout_seconds: 60
   )
-  raise "Compact recovery validation failed: #{stderr.strip}" unless status.success?
+  unless status.success?
+    raise compact_recovery_failure('Compact recovery validation failed', stdout: stdout, stderr: stderr)
+  end
 
   stdout
 end
