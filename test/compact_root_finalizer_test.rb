@@ -265,6 +265,12 @@ class CompactRootFinalizerTest < Minitest::Test
   def test_capture_uses_an_isolated_non_recursive_view
     script = File.read(SCRIPT)
 
+    isolate_index = script.index("isolate_builder_mounts", script.index("main()"))
+    source_view_index = script.index('create_source_view "${source_root}"')
+    target_mount_index = script.index('mount -o rw "${target_p1}" "${target_mount}"')
+    refute_nil isolate_index
+    assert_operator isolate_index, :<, source_view_index
+    assert_operator isolate_index, :<, target_mount_index
     assert_includes script, 'mount --bind / "${source_root}"'
     assert_includes script, 'mount --make-private "${source_root}"'
     assert_includes script, 'findmnt -Rnr -o TARGET --target "${source_root}"'
@@ -274,6 +280,25 @@ class CompactRootFinalizerTest < Minitest::Test
     refute_includes script, '-one-file-system'
     assert_includes script, 'is on a different filesystem, ignored'
     assert_operator script.index('assert_isolated_source_view "${source_root}"', script.index('build_squash "${source_root}"')), :<, script.index('umount "${source_root}"')
+  end
+
+  def test_builder_mount_isolation_fails_closed
+    command = <<~BASH
+      source #{Shellwords.escape(SCRIPT)}
+      trap - EXIT INT TERM
+      mount() {
+        [[ "$*" == "--make-rprivate /" ]]
+      }
+      findmnt() {
+        printf '%s\n' shared
+      }
+      isolate_builder_mounts
+    BASH
+
+    _stdout, stderr, status = Open3.capture3("bash", "-c", command)
+
+    refute status.success?
+    assert_includes stderr, "builder root mount propagation is not private"
   end
 
   def test_capture_view_rejects_nested_mounts

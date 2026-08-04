@@ -91,6 +91,13 @@ require_command() {
   command -v "$1" >/dev/null 2>&1 || fail "required command is missing: $1"
 }
 
+isolate_builder_mounts() {
+  local propagation
+  mount --make-rprivate /
+  propagation="$(findmnt -nro PROPAGATION --mountpoint /)" || fail "cannot inspect builder root mount propagation"
+  [[ "${propagation}" == private ]] || fail "builder root mount propagation is not private: ${propagation:-missing}"
+}
+
 resolve_backing_root_mount() {
   local marker=/etc/runs-on-overlay/backing-root-mount value
   if [[ ! -e "${marker}" ]]; then
@@ -578,6 +585,7 @@ main() {
   for helper in compact-root-direct-init compact-root-recovery-init compact-root-tree-manifest.py compact-root.boot-profile filter-compact-root-boot-profile.py prepare-direct-uefi.sh; do
     [[ -s "${asset_dir}/${helper}" ]] || fail "compact-root asset is missing: ${helper}"
   done
+  isolate_builder_mounts
   [[ ! -e "${work_dir}" ]] || fail "compact build work directory already exists"
   install -d -m 0700 "${work_dir}" "${validation_dir}"
   rm -f -- "$(readlink -f "$0")" 2>/dev/null || true
