@@ -5,6 +5,8 @@ set -eu
 
 BB=/bin/busybox
 SQUASH_THREADS=percpu
+SYS_CLASS_BLOCK=${RUNS_ON_RECOVERY_SYS_CLASS_BLOCK:-/sys/class/block}
+DEV_ROOT=${RUNS_ON_RECOVERY_DEV_ROOT:-/dev}
 
 log() {
   echo "[runs-on-recovery-init] $*" > /dev/console 2>/dev/null || true
@@ -14,6 +16,33 @@ fatal() {
   log "$*; recovery boot failed, starting a serial emergency shell"
   ${BB} sync || true
   exec ${BB} sh </dev/console >/dev/console 2>&1
+}
+
+resolve_partuuid_device() {
+  desired_partuuid=$1
+  attempt=0
+  while [ "${attempt}" -lt 100 ]; do
+    for uevent in "${SYS_CLASS_BLOCK}"/*/uevent; do
+      [ -r "${uevent}" ] || continue
+      candidate_devname=''
+      while IFS='=' read -r key value; do
+        case "${key}" in
+          DEVNAME) candidate_devname=${value} ;;
+        esac
+      done < "${uevent}"
+      [ -n "${candidate_devname}" ] || continue
+      candidate="${DEV_ROOT}/${candidate_devname}"
+      [ -b "${candidate}" ] || continue
+      candidate_partuuid=$(${BB} blkid -s PARTUUID -o value "${candidate}" 2>/dev/null || true)
+      if [ "${candidate_partuuid}" = "${desired_partuuid}" ]; then
+        printf '%s\n' "${candidate}"
+        return 0
+      fi
+    done
+    ${BB} sleep 0.1
+    attempt=$((attempt + 1))
+  done
+  return 1
 }
 
 ${BB} mkdir -p /dev /proc /sys /bootstrap
@@ -33,27 +62,7 @@ for argument in ${CMDLINE}; do
 done
 [ -n "${ROOT_PARTUUID}" ] || fatal "root PARTUUID is missing"
 
-ROOT_DEVICE=''
-attempt=0
-while [ "${attempt}" -lt 100 ] && [ -z "${ROOT_DEVICE}" ]; do
-  for uevent in /sys/class/block/*/uevent; do
-    [ -r "${uevent}" ] || continue
-    candidate_devname=''
-    candidate_partuuid=''
-    while IFS='=' read -r key value; do
-      case "${key}" in
-        DEVNAME) candidate_devname=${value} ;;
-        PARTUUID) candidate_partuuid=${value} ;;
-      esac
-    done < "${uevent}"
-    if [ "${candidate_partuuid}" = "${ROOT_PARTUUID}" ] && [ -n "${candidate_devname}" ]; then
-      ROOT_DEVICE=/dev/${candidate_devname}
-      break
-    fi
-  done
-  [ -n "${ROOT_DEVICE}" ] || ${BB} sleep 0.1
-  attempt=$((attempt + 1))
-done
+ROOT_DEVICE=$(resolve_partuuid_device "${ROOT_PARTUUID}" || true)
 [ -n "${ROOT_DEVICE}" ] || fatal "cannot find root partition ${ROOT_PARTUUID}"
 
 ${BB} mount -t ext4 -o rw "${ROOT_DEVICE}" /bootstrap || fatal "cannot mount bootstrap ext4"

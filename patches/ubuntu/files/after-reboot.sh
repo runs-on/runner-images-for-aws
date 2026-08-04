@@ -1,8 +1,22 @@
- #!/bin/bash 
+#!/usr/bin/env bash
 set -ex
 
-# Check FS on next boot for the / mount
-tune2fs -c 0 $(cat /proc/self/mounts | grep " / " | cut -f 1 -d " ")
+# Check the real ext filesystem, not the OverlayFS facade used by compact roots.
+root_mount=/
+backing_marker=/etc/runs-on-overlay/backing-root-mount
+if [[ -e "${backing_marker}" ]]; then
+  [[ -f "${backing_marker}" && ! -L "${backing_marker}" ]]
+  mapfile -t backing_lines < "${backing_marker}"
+  [[ "${#backing_lines[@]}" -eq 1 ]]
+  root_mount="${backing_lines[0]}"
+  [[ "${root_mount}" =~ ^/[A-Za-z0-9._/-]+$ && "${root_mount}" != / ]]
+  [[ "$(readlink -m "${root_mount}")" == "${root_mount}" ]]
+fi
+[[ "$(findmnt -nro TARGET --target "${root_mount}")" == "${root_mount}" ]]
+root_source="$(readlink -f "$(findmnt -nro SOURCE --target "${root_mount}")")"
+root_fstype="$(findmnt -nro FSTYPE --target "${root_mount}")"
+[[ -b "${root_source}" && "${root_fstype}" =~ ^ext[234]$ ]]
+tune2fs -c 0 "${root_source}"
 
 # Stopped-pool preparation masks polkit. If PackageKit remains installed, its
 # APT hook waits for a DBus activation that cannot initialize after resume.

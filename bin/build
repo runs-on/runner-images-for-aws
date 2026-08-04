@@ -8,6 +8,7 @@ require 'yaml'
 require 'aws-sdk-ec2'
 require 'timeout'
 require 'tmpdir'
+require_relative '../lib/build_resources'
 
 IMAGES = YAML.load_file(File.expand_path("../config.yml", __dir__)).fetch("images")
 SUBNET_TAG_KEY = "runner-image-for-aws"
@@ -387,13 +388,16 @@ if packer_template_content.include?('variable "builder_volume_size"') && image.k
   shared_template_vars += ["-var", "builder_volume_size=#{image.fetch('builder_volume_size')}"]
 end
 
-compact_root_images = %w[
-  ubuntu26-full-x64
-  ubuntu26-gpu-x64
-  ubuntu26-stepsecurity-x64
-].freeze
-compact_root_image = compact_root_images.include?(image.fetch('id'))
-builder_selection = if packer_template_content.include?('source "amazon-ebssurrogate" "compact_root"')
+compact_root_image = image.fetch('compact_root', false)
+supports_compact_root = packer_template_content.include?('source "amazon-ebssurrogate" "compact_root"')
+if compact_root_image
+  fail("#{image.fetch('id')} enables compact_root but its template has no compact surrogate source") unless supports_compact_root
+  fail("#{image.fetch('id')} enables compact_root without builder_volume_size") unless image.key?('builder_volume_size')
+  fail("#{image.fetch('id')} enables compact_root without compact_snapshot_limit_gib") unless image.key?('compact_snapshot_limit_gib')
+  fail("compact_snapshot_limit_gib must be positive") unless image.fetch('compact_snapshot_limit_gib').positive?
+  fail("compact_root is limited to Ubuntu 26 x64 images") unless image.fetch('id').match?(/\Aubuntu26-(?:full|gpu|stepsecurity)-x64\z/)
+end
+builder_selection = if supports_compact_root
                       compact_root_image ? "amazon-ebssurrogate.compact_root" : "amazon-ebs.build_ebs"
                     end
 
@@ -485,7 +489,6 @@ begin
     env: packer_build_env,
     log_file: log_file_path
   )
-  raise("Packer build failed") unless build_succeeded
 ensure
   unless windows_disk_monitor_pid.nil?
     begin
@@ -510,40 +513,30 @@ ensure
 end
 
 unless build_succeeded
-  # Cleanup any dangling EC2 instances
-  ec2_client = Aws::EC2::Client.new(region: 'us-east-1')
-  instances = ec2_client.describe_instances(
-    filters: [
-      { name: 'instance-state-name', values: ['running', 'pending', 'stopping', 'stopped'] },
-      { name: 'tag:ami_name', values: [ami_name] }
-    ]
-  ).reservations.flat_map(&:instances)
-
-  instances.each do |instance|
-    puts "Terminating instance #{instance.instance_id}"
-    ec2_client.terminate_instances(instance_ids: [instance.instance_id])
-  end
-
+  cleanup_client = Aws::EC2::Client.new(region: options[:region])
+  cleanup_errors = BuildResources.cleanup_failed_build(
+    ec2_client: cleanup_client,
+    ami_name: ami_name,
+    require_ami_name_tag: compact_root_image
+  )
+  puts "Packer cleanup completed with #{cleanup_errors.length} error(s)" unless cleanup_errors.empty?
   fail("Packer build failed")
 end
 
 # Fetch AMI ID corresponding to AMI name
-ec2_client = Aws::EC2::Client.new(region: 'us-east-1')
+ec2_client = Aws::EC2::Client.new(region: options[:region])
 ami_id = nil
 
 begin
-  response = ec2_client.describe_images({
-    filters: [{ name: 'name', values: [ami_name] }]
-  })
-  
-  if response.images.any?
-    ami_id = response.images.first.image_id
-    puts "Found AMI ID: #{ami_id} for AMI name: #{ami_name}"
-  else
-    puts "No AMI found with name: #{ami_name}"
-  end
+  built_image = BuildResources.find_and_validate_build_image!(
+    ec2_client: ec2_client,
+    ami_name: ami_name,
+    compact_snapshot_limit_gib: (image.fetch('compact_snapshot_limit_gib') if compact_root_image)
+  )
+  ami_id = built_image.image_id
+  puts "Found AMI ID: #{ami_id} for AMI name: #{ami_name} in #{options[:region]}"
 rescue Aws::EC2::Errors::ServiceError => e
-  puts "Error fetching AMI ID: #{e.message}"
+  fail("Error fetching AMI ID: #{e.message}")
 end
 
 

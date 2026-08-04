@@ -237,13 +237,15 @@ EOF
   }
 
   tags = {
-    creator = "RunsOn"
-    contact = "ops@runs-on.com"
+    creator  = "RunsOn"
+    contact  = "ops@runs-on.com"
+    ami_name = var.ami_name
   }
 
   snapshot_tags = {
-    creator = "RunsOn"
-    contact = "ops@runs-on.com"
+    creator  = "RunsOn"
+    contact  = "ops@runs-on.com"
+    ami_name = var.ami_name
   }
 
   source_ami_filter {
@@ -263,6 +265,12 @@ build {
     "source.amazon-ebssurrogate.compact_root"
   ]
 
+  provisioner "shell" {
+    environment_vars = ["EXPECTED_BUILDER_VOLUME_SIZE_GB=${var.builder_volume_size}", "IMAGE_OS=${var.image_os}"]
+    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    script           = "${path.root}/../custom/files/wait-for-compact-root-resize.sh"
+  }
+
   provisioner "file" {
     source      = "${var.project_root}/integrations/stepsecurity/packer/files"
     destination = "/tmp/packer"
@@ -272,20 +280,58 @@ build {
     scripts         = ["${var.project_root}/integrations/stepsecurity/packer/install-linux.sh"]
   }
   provisioner "shell" {
+    environment_vars = ["IMAGE_OS=${var.image_os}"]
+    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    script           = "${path.root}/../custom/files/rearm-direct-uefi.sh"
+  }
+  provisioner "shell" {
     execute_command   = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     expect_disconnect = true
     inline            = ["echo 'Reboot VM'", "sudo reboot"]
   }
   provisioner "shell" {
-    environment_vars = ["IMAGE_OS=${var.image_os}"]
+    environment_vars = ["COMPACT_ROOT_VARIANT=stepsecurity", "IMAGE_OS=${var.image_os}"]
     execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     pause_before     = "1m0s"
     scripts = [
+      "${path.root}/../custom/files/assert-direct-uefi-build-boot.sh",
       "${path.root}/../scripts/build/cleanup.sh",
       "${path.root}/../custom/files/after-reboot.sh",
       "${path.root}/../custom/files/finalize-rolaunch-descendant.sh",
       "${path.root}/../custom/files/prepare-direct-uefi.sh"
     ]
     start_retry_timeout = "10m"
+  }
+
+  provisioner "shell" {
+    only            = ["amazon-ebssurrogate.compact_root"]
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    inline          = ["install -d -o ubuntu -g ubuntu -m 0755 /run/runs-on-compact-root"]
+  }
+
+  provisioner "file" {
+    only        = ["amazon-ebssurrogate.compact_root"]
+    destination = "/run/runs-on-compact-root/"
+    sources = [
+      "${path.root}/../custom/files/compact-root-acl.py",
+      "${path.root}/../custom/files/compact-root-direct-init",
+      "${path.root}/../custom/files/compact-root-recovery-init",
+      "${path.root}/../custom/files/compact-root-tree-manifest.py",
+      "${path.root}/../custom/files/compact-root.boot-profile",
+      "${path.root}/../custom/files/filter-compact-root-boot-profile.py",
+      "${path.root}/../custom/files/prepare-direct-uefi.sh"
+    ]
+  }
+
+  provisioner "shell" {
+    only = ["amazon-ebssurrogate.compact_root"]
+    environment_vars = [
+      "COMPACT_ROOT_ASSET_DIR=/run/runs-on-compact-root",
+      "COMPACT_ROOT_VARIANT=stepsecurity",
+      "IMAGE_OS=${var.image_os}",
+      "TARGET_VOLUME_SIZE_GB=${var.volume_size}"
+    ]
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    script          = "${path.root}/../custom/files/finalize-compact-root.sh"
   }
 }

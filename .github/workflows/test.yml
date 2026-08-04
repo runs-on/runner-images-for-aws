@@ -214,13 +214,32 @@ jobs:
 
                 kernel_release="$(sudo cat "$direct_uefi_state/kernel-release")"
                 kernel_format="$(sudo cat "$direct_uefi_state/kernel-source-format")"
-                direct_kernel="/boot/efi/EFI/runs-on/vmlinuz-${kernel_release}.efi"
+                direct_kernel="/boot/efi/EFI/runs-on/vmlinuz.efi"
                 test "$(uname -r)" = "$kernel_release"
-                test "$(sudo find /boot/efi/EFI/runs-on -maxdepth 1 -type f -name 'vmlinuz-*.efi' -printf . | wc -c)" = 1
+                test "$(sudo find /boot/efi/EFI/runs-on -maxdepth 1 -type f -name 'vmlinuz.efi' -printf . | wc -c)" = 1
+                test "$(sudo find /boot/efi/EFI/runs-on -maxdepth 1 -type f -name 'vmlinuz*.efi' -printf . | wc -c)" = 1
                 sudo sha256sum --check "$direct_uefi_state/direct-kernel.sha256"
                 test "$kernel_format" = raw
                 sudo cmp -s "/boot/vmlinuz-${kernel_release}" "$direct_kernel"
                 sudo sha256sum --check "$direct_uefi_state/fallback.sha256"
+
+                if [[ " $expected_cmdline " == *' runs_on.immutable=1 '* ]]; then
+                  test "$(findmnt -nro FSTYPE /)" = overlay
+                  backing_mount="$(< /etc/runs-on-overlay/backing-root-mount)"
+                  test "$(findmnt -nro FSTYPE --target "$backing_mount")" = ext4
+                  test "$(sudo findmnt -nro FSTYPE --target "$backing_mount/runs-on-root/runtime/lower")" = squashfs
+                  [[ "$(sudo findmnt -nro OPTIONS --target "$backing_mount/runs-on-root/runtime/lower")" == *ro* ]]
+                  sudo bash -c 'cd "$1" && sha256sum --check --strict rootfs.squashfs.sha256' \
+                    _ "$backing_mount/runs-on-root"
+                  runtime_acl="$(mktemp)"
+                  upper_acl="$(mktemp)"
+                  sudo getfacl --omit-header --numeric --physical --skip-base /var/lib/tpm2-tss/system/keystore > "$runtime_acl"
+                  sudo getfacl --omit-header --numeric --physical --skip-base "$backing_mount/runs-on-root/upper/var/lib/tpm2-tss/system/keystore" > "$upper_acl"
+                  test -s "$runtime_acl"
+                  test -s "$upper_acl"
+                  cmp "$runtime_acl" "$upper_acl"
+                  rm -f "$runtime_acl" "$upper_acl"
+                fi
               fi
             fi
           else

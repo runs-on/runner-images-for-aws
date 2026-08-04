@@ -64,7 +64,7 @@ patch_ubuntu() {
   if [ "$ARCH" = "arm64" ]; then
     for custom_file in "$custom_dir"/files/*.sh; do
       case "${custom_file##*/}" in
-        configure-full-rolaunch.sh|prepare-direct-uefi.sh)
+        assert-direct-uefi-build-boot.sh|configure-full-rolaunch.sh|finalize-compact-root.sh|prepare-direct-uefi.sh|rearm-direct-uefi.sh|wait-for-compact-root-resize.sh)
           ;;
         *)
           gnu_sed -i 's|amd64|arm64|g' "$custom_file"

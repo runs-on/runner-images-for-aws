@@ -313,7 +313,14 @@ main() {
   kernel_config="${kernel_boot_dir}/config-${kernel_release}"
   [[ -f "${kernel_config}" ]] || fail "kernel config is missing: ${kernel_config}"
   grep -qx 'CONFIG_EFI_STUB=y' "${kernel_config}" || fail "linux-aws kernel lacks CONFIG_EFI_STUB=y"
-  for config_option in CONFIG_BLK_DEV_NVME CONFIG_NVME_CORE CONFIG_EXT4_FS; do
+  for config_option in \
+    CONFIG_BLK_DEV_NVME \
+    CONFIG_NVME_CORE \
+    CONFIG_EXT4_FS \
+    CONFIG_BLK_DEV_LOOP \
+    CONFIG_SQUASHFS \
+    CONFIG_SQUASHFS_ZSTD \
+    CONFIG_SQUASHFS_CHOICE_DECOMP_BY_MOUNT; do
     grep -qx "${config_option}=y" "${kernel_config}" || fail "linux-aws kernel does not build ${config_option} into the image"
   done
 

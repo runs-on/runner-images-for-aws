@@ -213,6 +213,8 @@ images:
   # Ubuntu26
   - id: ubuntu26-full-x64
     template: ubuntu-full-x64
+    compact_root: true
+    compact_snapshot_limit_gib: 8
     install_scripts:
       - install-actions-cache.sh
       - install-runner-package.sh
@@ -293,6 +295,8 @@ images:
 
   - id: ubuntu26-gpu-x64
     template: ubuntu-gpu-x64
+    compact_root: true
+    compact_snapshot_limit_gib: 12
     instance_type: g4dn.xlarge
     builder_volume_size: 80
     volume_size: 40
@@ -303,6 +307,8 @@ images:
 
   - id: ubuntu26-stepsecurity-x64
     template: ubuntu-stepsecurity-x64
+    compact_root: true
+    compact_snapshot_limit_gib: 8
     instance_type: m8a.large
     builder_volume_size: 60
     volume_size: 30

@@ -252,13 +252,15 @@ source "amazon-ebssurrogate" "compact_root" {
   }
 
   tags = {
-    creator = "RunsOn"
-    contact = "ops@runs-on.com"
+    creator  = "RunsOn"
+    contact  = "ops@runs-on.com"
+    ami_name = var.ami_name
   }
 
   snapshot_tags = {
-    creator = "RunsOn"
-    contact = "ops@runs-on.com"
+    creator  = "RunsOn"
+    contact  = "ops@runs-on.com"
+    ami_name = var.ami_name
   }
 
   source_ami_filter {
@@ -472,6 +474,38 @@ build {
       "${path.root}/../custom/files/configure-full-rolaunch.sh",
       "${path.root}/../custom/files/prepare-direct-uefi.sh"
     ]
+  }
+
+  provisioner "shell" {
+    only            = ["amazon-ebssurrogate.compact_root"]
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    inline          = ["install -d -o ubuntu -g ubuntu -m 0755 /run/runs-on-compact-root"]
+  }
+
+  provisioner "file" {
+    only        = ["amazon-ebssurrogate.compact_root"]
+    destination = "/run/runs-on-compact-root/"
+    sources = [
+      "${path.root}/../custom/files/compact-root-acl.py",
+      "${path.root}/../custom/files/compact-root-direct-init",
+      "${path.root}/../custom/files/compact-root-recovery-init",
+      "${path.root}/../custom/files/compact-root-tree-manifest.py",
+      "${path.root}/../custom/files/compact-root.boot-profile",
+      "${path.root}/../custom/files/filter-compact-root-boot-profile.py",
+      "${path.root}/../custom/files/prepare-direct-uefi.sh"
+    ]
+  }
+
+  provisioner "shell" {
+    only = ["amazon-ebssurrogate.compact_root"]
+    environment_vars = [
+      "COMPACT_ROOT_ASSET_DIR=/run/runs-on-compact-root",
+      "COMPACT_ROOT_VARIANT=full",
+      "IMAGE_OS=${var.image_os}",
+      "TARGET_VOLUME_SIZE_GB=${var.volume_size}"
+    ]
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    script          = "${path.root}/../custom/files/finalize-compact-root.sh"
   }
 
   // provisioner "shell" {

@@ -44,8 +44,21 @@ class DirectUefiTest < Minitest::Test
     template = File.read(FULL_X64_TEMPLATE)
 
     assert_includes template, "IMAGE_OS=${var.image_os}"
-    assert_equal 1, template.scan("prepare-direct-uefi.sh").length
+    assert_equal 2, template.scan("prepare-direct-uefi.sh").length
     assert_operator template.index("prepare-direct-uefi.sh"), :>, template.index("configure-full-rolaunch.sh")
+  end
+
+  def test_direct_kernel_builds_compact_root_dependencies_in
+    script = File.read(SCRIPT)
+
+    %w[
+      CONFIG_BLK_DEV_LOOP
+      CONFIG_SQUASHFS
+      CONFIG_SQUASHFS_ZSTD
+      CONFIG_SQUASHFS_CHOICE_DECOMP_BY_MOUNT
+    ].each do |option|
+      assert_includes script, option
+    end
   end
 
   def test_descendants_rearm_after_package_reboot_and_launch_state_cleanup
@@ -53,7 +66,7 @@ class DirectUefiTest < Minitest::Test
       template = File.read(path)
 
       assert_includes template, "IMAGE_OS=${var.image_os}", path
-      assert_equal 1, template.scan("prepare-direct-uefi.sh").length, path
+      assert_equal 2, template.scan("prepare-direct-uefi.sh").length, path
       assert_operator template.index("prepare-direct-uefi.sh"), :>, template.index("finalize-rolaunch-descendant.sh"), path
       assert_operator template.index("prepare-direct-uefi.sh"), :>, template.index("sudo reboot"), path
     end
@@ -87,7 +100,7 @@ class DirectUefiTest < Minitest::Test
   def test_arm_patch_preserves_the_x64_guard
     patch_lib = File.read(File.expand_path("../bin/patch/lib.sh", __dir__))
 
-    assert_match(/configure-full-rolaunch\.sh\|prepare-direct-uefi\.sh\)/, patch_lib)
+    assert_match(/finalize-compact-root\.sh\|prepare-direct-uefi\.sh/, patch_lib)
     assert_includes File.read(SCRIPT), '"${debian_arch}" == "amd64"'
   end
 

@@ -93,7 +93,7 @@ class UbuntuTemplateTest < Minitest::Test
 
   def test_only_ubuntu26_x64_full_and_descendants_select_compact_surrogate_builds
     compact_images = CONFIG.fetch("images").filter_map do |image|
-      [image.fetch("id"), image.fetch("builder_volume_size")] if image.key?("builder_volume_size")
+      [image.fetch("id"), image.fetch("builder_volume_size")] if image.fetch("compact_root", false)
     end.to_h
 
     assert_equal(
@@ -105,11 +105,26 @@ class UbuntuTemplateTest < Minitest::Test
       compact_images
     )
 
+    snapshot_limits = CONFIG.fetch("images").filter_map do |image|
+      [image.fetch("id"), image.fetch("compact_snapshot_limit_gib")] if image.fetch("compact_root", false)
+    end.to_h
+    assert_equal(
+      {
+        "ubuntu26-full-x64" => 8,
+        "ubuntu26-gpu-x64" => 12,
+        "ubuntu26-stepsecurity-x64" => 8
+      },
+      snapshot_limits
+    )
+
     build_script = File.read(BUILD_SCRIPT)
-    compact_images.each_key { |image_id| assert_includes build_script, image_id }
+    assert_includes build_script, "image.fetch('compact_root', false)"
+    assert_includes build_script, "compact_root is limited to Ubuntu 26 x64 images"
     assert_includes build_script, '"amazon-ebssurrogate.compact_root"'
     assert_includes build_script, '"amazon-ebs.build_ebs"'
-    refute_includes build_script, "ubuntu26-full-arm64\n  ubuntu26"
+    compact_images.each_key do |image_id|
+      assert CONFIG.fetch("images").find { |image| image.fetch("id") == image_id }.fetch("compact_root")
+    end
   end
 
   def test_compact_surrogates_snapshot_only_the_fresh_final_target
@@ -123,6 +138,7 @@ class UbuntuTemplateTest < Minitest::Test
       assert_match(%r{device_name\s*=\s*"/dev/sda1".*?omit_from_artifact\s*=\s*true}m, surrogate, path)
       assert_match(%r{device_name\s*=\s*"/dev/sdf".*?volume_size\s*=\s*var\.volume_size}m, surrogate, path)
       assert_match(%r{source_device_name\s*=\s*"/dev/sdf".*?device_name\s*=\s*"/dev/sda1"}m, surrogate, path)
+      assert_equal 4, surrogate.scan("ami_name = var.ami_name").length, path
       refute_includes surrogate, "snapshot_id", path
       refute_includes surrogate, "uefi_data", path
       refute_includes surrogate, "boot_mode", path
