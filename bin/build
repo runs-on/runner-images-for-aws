@@ -414,7 +414,7 @@ packer_build_cmd = [
   options[:debug] ? "-debug" : nil,
   ("-only=#{builder_selection}" unless builder_selection.nil?),
   *shared_template_vars,
-  "-var", %{ami_regions=["us-east-1"]},
+  "-var", %{ami_regions=["#{options[:region]}"]},
   "-var", "ami_name=#{ami_name}",
   "-var", "image_os=#{dist}",
   "-var", "image_version=#{options[:image_version]}",

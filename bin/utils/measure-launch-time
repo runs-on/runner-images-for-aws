@@ -14,6 +14,7 @@ require 'tempfile'
 require 'tmpdir'
 require 'timeout'
 require 'shellwords'
+require 'securerandom'
 require 'time'
 
 options = {}
@@ -34,6 +35,7 @@ usage = Slop::Options.new do |opts|
   opts.integer '--measure-runs', 'Measured launches after warm-up', default: 3
   opts.string '--require-average-rolaunch-ready-at-most', 'Fail unless measured rolaunch mean is at most this many seconds'
   opts.string '--require-max-rolaunch-ready-below', 'Fail unless every measured rolaunch time is below this many seconds'
+  opts.bool '--verify-compact-recovery', 'Reboot one measured instance and verify the compact GRUB recovery path'
   opts.bool '-h', '--help', 'Show help'
 end
 
@@ -262,6 +264,152 @@ def wait_for_ssh(ip:, ssh_user:, private_key_path:, timeout_seconds:)
 
     sleep [2, remaining].min
   end
+end
+
+def ssh_capture(ip:, ssh_user:, private_key_path:, remote_command:, timeout_seconds:)
+  command = [
+    'ssh',
+    '-o', 'BatchMode=yes',
+    '-o', 'IdentitiesOnly=yes',
+    '-o', 'StrictHostKeyChecking=no',
+    '-o', 'UserKnownHostsFile=/dev/null',
+    '-o', 'ConnectTimeout=5',
+    '-o', 'ServerAliveInterval=2',
+    '-o', 'ServerAliveCountMax=2',
+    '-i', private_key_path,
+    "#{ssh_user}@#{ip}",
+    "bash -lc #{remote_command.shellescape}"
+  ]
+  capture3_with_timeout(*command, timeout_seconds: timeout_seconds)
+end
+
+def wait_for_new_boot_id(ip:, ssh_user:, private_key_path:, previous_boot_id:, timeout_seconds:, poll_interval: 2)
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout_seconds
+  last_error = nil
+  loop do
+    remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    raise "Timed out waiting for recovery reboot on #{ip}: #{last_error}" if remaining <= 0
+
+    begin
+      stdout, stderr, status = ssh_capture(
+        ip: ip,
+        ssh_user: ssh_user,
+        private_key_path: private_key_path,
+        remote_command: 'cat /proc/sys/kernel/random/boot_id',
+        timeout_seconds: [remaining, 10].min
+      )
+      if status.success?
+        boot_id = stdout.strip
+        return boot_id if !boot_id.empty? && boot_id != previous_boot_id
+
+        last_error = 'instance still reports the original boot ID'
+      else
+        last_error = stderr.strip
+      end
+    rescue StandardError => e
+      last_error = e.message
+    end
+
+    remaining = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    raise "Timed out waiting for recovery reboot on #{ip}: #{last_error}" if remaining <= 0
+
+    sleep [poll_interval, remaining].min
+  end
+end
+
+def verify_compact_recovery!(ip:, ssh_user:, private_key_path:, timeout_seconds:, expected_root_gib: nil, nonce: SecureRandom.hex(16))
+  marker_path = '/etc/runs-on-compact-recovery-check'
+  prepare = <<~SH
+    set -euo pipefail
+    test "$(findmnt -nro FSTYPE /)" = overlay
+    test "$(cat /etc/runs-on-overlay/boot-path)" = direct-uefi
+    printf '%s\n' #{nonce.shellescape} | sudo tee #{marker_path.shellescape} >/dev/null
+    cat /proc/sys/kernel/random/boot_id
+    sudo systemd-run --quiet --collect \
+      --unit=runs-on-compact-recovery-reboot \
+      --on-active=2s /usr/bin/systemctl reboot
+  SH
+  stdout, stderr, status = ssh_capture(
+    ip: ip,
+    ssh_user: ssh_user,
+    private_key_path: private_key_path,
+    remote_command: prepare,
+    timeout_seconds: 30
+  )
+  raise "Unable to schedule compact recovery reboot: #{stderr.strip}" unless status.success?
+
+  previous_boot_id = stdout.lines.map(&:strip).find { |line| line.match?(/\A[0-9a-f-]{36}\z/) }
+  raise 'Unable to read the pre-reboot boot ID' unless previous_boot_id
+
+  recovery_boot_id = wait_for_new_boot_id(
+    ip: ip,
+    ssh_user: ssh_user,
+    private_key_path: private_key_path,
+    previous_boot_id: previous_boot_id,
+    timeout_seconds: timeout_seconds
+  )
+  root_check = if expected_root_gib
+                 <<~SH
+                   expected_disk_bytes=$((#{Integer(expected_root_gib)} * 1024 * 1024 * 1024))
+                   backing_mount="$(cat /etc/runs-on-overlay/backing-root-mount)"
+                   backing_source="$(findmnt -nro SOURCE --target "$backing_mount")"
+                   resolved_source="$(readlink -f "$backing_source" 2>/dev/null || true)"
+                   if ! test -b "$resolved_source"; then
+                     device_number="$(findmnt -nro MAJ:MIN --target "$backing_mount")"
+                     sys_path="$(readlink -f "/sys/dev/block/$device_number")"
+                     resolved_source="/dev/${sys_path##*/}"
+                   fi
+                   test -b "$resolved_source"
+                   parent_name="$(lsblk -nro PKNAME "$resolved_source" | awk 'NF && !found { print; found=1 }')"
+                   test -b "/dev/$parent_name"
+                   disk_bytes="$(sudo blockdev --getsize64 "/dev/$parent_name")"
+                   partition_bytes="$(sudo blockdev --getsize64 "$resolved_source")"
+                   block_count="$(sudo tune2fs -l "$resolved_source" | awk -F: '$1 == "Block count" && !found { gsub(/[[:space:]]/, "", $2); print $2; found=1 }')"
+                   block_size="$(sudo tune2fs -l "$resolved_source" | awk -F: '$1 == "Block size" && !found { gsub(/[[:space:]]/, "", $2); print $2; found=1 }')"
+                   filesystem_bytes=$((block_count * block_size))
+                   test "$disk_bytes" -eq "$expected_disk_bytes"
+                   test "$partition_bytes" -le "$disk_bytes"
+                   test "$partition_bytes" -ge $((disk_bytes - 2 * 1024 * 1024 * 1024))
+                   test "$filesystem_bytes" -ge $((partition_bytes - 64 * 1024 * 1024))
+                 SH
+               else
+                 ''
+               end
+  validate = <<~SH
+    set -euo pipefail
+    test "$(cat #{marker_path.shellescape})" = #{nonce.shellescape}
+    test "$(findmnt -nro FSTYPE /)" = overlay
+    test "$(cat /etc/runs-on-overlay/boot-path)" = grub-initramfs-recovery
+    direct_state=/var/lib/runs-on-direct-uefi
+    expected_cmdline="$(cat "$direct_state/expected-recovery-cmdline")"
+    actual_cmdline="$(cat /proc/cmdline)"
+    normalized_cmdline="$(printf '%s\n' "$actual_cmdline" | sed -E 's/(^| )BOOT_IMAGE=[^ ]+ ?/\\1/' | xargs)"
+    test "$normalized_cmdline" = "$expected_cmdline"
+    expected_fallback="$(tr '[:lower:]' '[:upper:]' < "$direct_state/fallback-bootnum")"
+    expected_order="$(tr '[:lower:]' '[:upper:]' < "$direct_state/expected-boot-order")"
+    firmware="$(sudo efibootmgr -v)"
+    boot_current="$(awk -F': ' '/^BootCurrent:/ { print toupper($2); exit }' <<< "$firmware")"
+    boot_next="$(awk -F': ' '/^BootNext:/ { print toupper($2); exit }' <<< "$firmware")"
+    boot_order="$(awk -F': ' '/^BootOrder:/ { print toupper($2); exit }' <<< "$firmware")"
+    test "$boot_current" = "$expected_fallback"
+    test -z "$boot_next"
+    test "$boot_order" = "$expected_order"
+    test "${boot_order%%,*}" = "$expected_fallback"
+    #{root_check}
+    printf 'recovery_boot_id=%s\n' #{recovery_boot_id.shellescape}
+    printf 'boot_path=%s\n' "$(cat /etc/runs-on-overlay/boot-path)"
+    printf 'boot_order=%s\n' "$boot_order"
+  SH
+  stdout, stderr, status = ssh_capture(
+    ip: ip,
+    ssh_user: ssh_user,
+    private_key_path: private_key_path,
+    remote_command: validate,
+    timeout_seconds: 60
+  )
+  raise "Compact recovery validation failed: #{stderr.strip}" unless status.success?
+
+  stdout
 end
 
 class RolaunchUnavailable < StandardError; end
@@ -662,6 +810,8 @@ Dir.mktmpdir('measure-launch-time') do |dir|
 
     total_runs = options[:warm_runs] + options[:measure_runs]
     results = []
+    compact_recovery_verified = false
+    compact_recovery_evidence = nil
 
     puts "AMI: #{image.name} (#{image.image_id})"
     puts "Architecture: #{image.architecture}"
@@ -698,6 +848,7 @@ Dir.mktmpdir('measure-launch-time') do |dir|
     if options[:require_max_rolaunch_ready_below]
       puts "Required rolaunch maximum: < #{options[:require_max_rolaunch_ready_below].to_s('F')}s"
     end
+    puts 'Compact GRUB recovery check: enabled' if options[:verify_compact_recovery]
 
     total_runs.times do |idx|
       phase = idx < options[:warm_runs] ? 'warm' : 'measure'
@@ -774,6 +925,18 @@ Dir.mktmpdir('measure-launch-time') do |dir|
           rolaunch_status: rolaunch_status,
           volume_initialization: initialization_status
         }
+        if options[:verify_compact_recovery] && phase == 'measure' && !compact_recovery_verified
+          puts '  rebooting into compact GRUB recovery...'
+          compact_recovery_evidence = verify_compact_recovery!(
+            ip: ip,
+            ssh_user: options[:ssh_user],
+            private_key_path: private_key_path,
+            timeout_seconds: options[:ssh_timeout],
+            expected_root_gib: options[:root_volume_size]
+          )
+          compact_recovery_verified = true
+          puts compact_recovery_evidence.lines.map { |line| "  #{line}" }.join
+        end
       ensure
         terminate_instance_and_wait(ec2, instance_id) if instance_id
       end
@@ -803,6 +966,8 @@ Dir.mktmpdir('measure-launch-time') do |dir|
       rolaunch_measured_runs: rolaunch_summary[:values].length,
       average_rolaunch_ready_s: rolaunch_summary[:average],
       max_rolaunch_ready_s: rolaunch_summary[:maximum],
+      compact_recovery_verified: compact_recovery_verified,
+      compact_recovery_evidence: compact_recovery_evidence,
       results: results
     }
 

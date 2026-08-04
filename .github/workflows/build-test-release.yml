@@ -27,12 +27,49 @@ jobs:
       image_id: ${{ inputs.image_id }}
     secrets: inherit
 
+  compact-recovery:
+    if: ${{ inputs.image_id == 'ubuntu26-full-x64' || inputs.image_id == 'ubuntu26-gpu-x64' || inputs.image_id == 'ubuntu26-stepsecurity-x64' }}
+    needs:
+      - build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af # v1
+        with:
+          ruby-version: 3.2.2
+          bundler-cache: true
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Verify compact GRUB recovery
+        run: |
+          bundle exec bin/utils/measure-launch-time "${{ needs.build.outputs.ami_id }}" \
+            --subnet-id "${{ secrets.SUBNET_ID }}" \
+            --instance-type m7a.large \
+            --root-volume-size 60 \
+            --root-iops 3000 \
+            --root-throughput 400 \
+            --root-initialization-rate 300 \
+            --warm-runs 0 \
+            --measure-runs 1 \
+            --verify-compact-recovery \
+            --output-json compact-recovery.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: compact-recovery-${{ inputs.image_id }}
+          path: compact-recovery.json
+          retention-days: 7
+
   test1:
     needs:
       - build
     uses: ./.github/workflows/test.yml
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
+      image_id: ${{ inputs.image_id }}
       index: 1
       platform: ${{ inputs.platform }}
       gpu: false
@@ -44,6 +81,7 @@ jobs:
     uses: ./.github/workflows/test.yml
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
+      image_id: ${{ inputs.image_id }}
       index: 2
       platform: ${{ inputs.platform }}
       gpu: false
@@ -55,6 +93,7 @@ jobs:
     uses: ./.github/workflows/test.yml
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
+      image_id: ${{ inputs.image_id }}
       index: 3
       extras: "s3-cache"
       platform: ${{ inputs.platform }}
@@ -67,6 +106,7 @@ jobs:
     uses: ./.github/workflows/test.yml
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
+      image_id: ${{ inputs.image_id }}
       index: 4
       extras: "s3-cache"
       platform: ${{ inputs.platform }}
@@ -80,6 +120,7 @@ jobs:
     uses: ./.github/workflows/test.yml
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
+      image_id: ${{ inputs.image_id }}
       index: 5
       instance_family: ${{ endsWith(inputs.image_id, '-arm64') && 'g5g' || 'g4dn' }}
       platform: ${{ inputs.platform }}
@@ -89,6 +130,7 @@ jobs:
     if: ${{ !failure() && !cancelled() }}
     needs:
       - build
+      - compact-recovery
       - test-gpu
     uses: ./.github/workflows/release.yml
     secrets: inherit

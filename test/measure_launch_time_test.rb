@@ -139,6 +139,80 @@ class MeasureLaunchTimeTest < Minitest::Test
     assert_operator elapsed, :<, 0.5
   end
 
+  def test_wait_for_new_boot_id_ignores_original_boot_and_disconnects
+    old_boot = "11111111-1111-1111-1111-111111111111"
+    new_boot = "22222222-2222-2222-2222-222222222222"
+    responses = [
+      ["#{old_boot}\n", "", Status.new(true, 0)],
+      ["", "connection refused", Status.new(false, 255)],
+      ["#{new_boot}\n", "", Status.new(true, 0)]
+    ]
+    capture = lambda do |**_arguments|
+      responses.shift
+    end
+
+    actual = @harness.stub(:ssh_capture, capture) do
+      @harness.wait_for_new_boot_id(
+        ip: "203.0.113.10",
+        ssh_user: "ubuntu",
+        private_key_path: "/tmp/key",
+        previous_boot_id: old_boot,
+        timeout_seconds: 1,
+        poll_interval: 0
+      )
+    end
+
+    assert_equal new_boot, actual
+    assert_empty responses
+  end
+
+  def test_compact_recovery_verification_checks_reboot_firmware_and_root_growth
+    old_boot = "11111111-1111-1111-1111-111111111111"
+    new_boot = "22222222-2222-2222-2222-222222222222"
+    remote_commands = []
+    capture = lambda do |**arguments|
+      remote_commands << arguments.fetch(:remote_command)
+      if remote_commands.length == 1
+        ["#{old_boot}\n", "", Status.new(true, 0)]
+      else
+        ["recovery_boot_id=#{new_boot}\nboot_path=grub-initramfs-recovery\n", "", Status.new(true, 0)]
+      end
+    end
+    wait = lambda do |**arguments|
+      assert_equal old_boot, arguments.fetch(:previous_boot_id)
+      new_boot
+    end
+
+    evidence = @harness.stub(:ssh_capture, capture) do
+      @harness.stub(:wait_for_new_boot_id, wait) do
+        @harness.verify_compact_recovery!(
+          ip: "203.0.113.10",
+          ssh_user: "ubuntu",
+          private_key_path: "/tmp/key",
+          timeout_seconds: 30,
+          expected_root_gib: 60,
+          nonce: "fixed-nonce"
+        )
+      end
+    end
+
+    assert_includes evidence, "grub-initramfs-recovery"
+    assert_includes remote_commands.first, "systemd-run"
+    assert_includes remote_commands.first, "fixed-nonce"
+    validation = remote_commands.last
+    assert_includes validation, "expected-recovery-cmdline"
+    assert_includes validation, "expected-boot-order"
+    assert_includes validation, 'test "$boot_current" = "$expected_fallback"'
+    assert_includes validation, 'test -z "$boot_next"'
+    assert_includes validation, "expected_disk_bytes=$((60 * 1024 * 1024 * 1024))"
+    assert_includes validation, 'test "$partition_bytes" -ge $((disk_bytes - 2 * 1024 * 1024 * 1024))'
+    assert_includes validation, "filesystem_bytes"
+    remote_commands.each do |remote_command|
+      _stdout, syntax_stderr, syntax_status = Open3.capture3("bash", "-n", stdin_data: remote_command)
+      assert syntax_status.success?, syntax_stderr
+    end
+  end
+
   def test_cli_rejects_negative_warm_run_count
     _stdout, stderr, status = Open3.capture3(
       RbConfig.ruby,
@@ -399,6 +473,7 @@ class MeasureLaunchTimeTest < Minitest::Test
     assert status.success?, stderr
     assert_includes stdout, "--require-average-rolaunch-ready-at-most"
     assert_includes stdout, "--require-max-rolaunch-ready-below"
+    assert_includes stdout, "--verify-compact-recovery"
 
     %w[invalid 0 -1 NaN Infinity].each do |value|
       _stdout, invalid_stderr, invalid_status = Open3.capture3(

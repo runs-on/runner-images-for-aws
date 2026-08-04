@@ -253,6 +253,53 @@ class CompactRootFinalizerTest < Minitest::Test
     end
   end
 
+  def test_boot_packages_are_held_and_recorded
+    Dir.mktmpdir("compact-root-boot-holds") do |dir|
+      held = File.join(dir, "held")
+      command = <<~BASH
+        source #{Shellwords.escape(SCRIPT)}
+        trap - EXIT INT TERM
+        dpkg-query() {
+          printf '%s\n' \
+            $'linux-image-7.0.0-1010-aws\tii ' \
+            $'linux-image-aws:amd64\tii ' \
+            $'grub2-common\tii ' \
+            $'shim-signed\trc '
+        }
+        apt-mark() {
+          case "$1" in
+            hold)
+              shift
+              printf '%s\n' "$@" > #{Shellwords.escape(held)}
+              ;;
+            showhold)
+              cat #{Shellwords.escape(held)}
+              ;;
+            *) return 1 ;;
+          esac
+        }
+        hold_boot_packages #{Shellwords.escape(dir)}
+      BASH
+
+      _stdout, stderr, status = Open3.capture3("bash", "-c", command)
+
+      assert status.success?, stderr
+      expected = %w[grub2-common linux-image-7.0.0-1010-aws linux-image-aws]
+      assert_equal expected, File.readlines(held, chomp: true)
+      assert_equal(
+        expected,
+        File.readlines(File.join(dir, "etc/runs-on-compact-root/held-boot-packages"), chomp: true)
+      )
+      preferences = File.read(File.join(dir, "etc/apt/preferences.d/runs-on-compact-boot"))
+      assert_includes preferences, "linux-image-*-aws"
+      assert_includes preferences, "linux-modules-nvidia-*-aws"
+      assert_includes preferences, "grub-efi-amd64-signed"
+      assert_includes preferences, "shim-signed"
+      assert_includes preferences, "Pin-Priority: -1"
+      refute_includes File.read(held), "shim-signed"
+    end
+  end
+
   def test_recovery_resolves_partuuid_from_kernel_uevent
     recovery = File.read(RECOVERY_INIT)
     resolver = recovery[/^resolve_partuuid_device\(\) \{\n.*?^\}\n/m]
@@ -475,7 +522,7 @@ class CompactRootFinalizerTest < Minitest::Test
     assert_includes script, "target filesystem identity was reused"
     assert_operator script.index('"${asset_dir}/prepare-direct-uefi.sh"'), :<, script.index('write_grub_config "${target_mount}/boot"')
     assert_includes script, 'expected-recovery-cmdline'
-    assert_includes script, 'recovery_arguments+=("console=ttyS0" "runs_on.recovery=1")'
+    assert_includes script, 'recovery_arguments+=("console=ttyS0" "panic=0" "runs_on.recovery=1")'
     assert_includes script, "CONFIG_BLK_DEV_LOOP CONFIG_SQUASHFS CONFIG_SQUASHFS_ZSTD CONFIG_SQUASHFS_CHOICE_DECOMP_BY_MOUNT"
     refute_includes script, "console=ttyS0,115200n8"
     refute_includes script, "systemd.show_status=true"
@@ -488,7 +535,7 @@ class CompactRootFinalizerTest < Minitest::Test
       recovery = File.join(dir, "expected-recovery-cmdline")
       File.write(
         direct,
-        "root=PARTUUID=fresh rw console=null quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false init=/runs-on-root/init runs_on.immutable=1 runs_on.squash_threads=percpu\n"
+        "root=PARTUUID=fresh rw panic=-1 console=null quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false init=/runs-on-root/init runs_on.immutable=1 runs_on.squash_threads=percpu\n"
       )
       command = <<~BASH
         source #{Shellwords.escape(SCRIPT)}
@@ -500,7 +547,7 @@ class CompactRootFinalizerTest < Minitest::Test
 
       assert status.success?, stderr
       assert_equal(
-        "root=PARTUUID=fresh rw runs_on.immutable=1 runs_on.squash_threads=percpu console=ttyS0 runs_on.recovery=1\n",
+        "root=PARTUUID=fresh rw runs_on.immutable=1 runs_on.squash_threads=percpu console=ttyS0 panic=0 runs_on.recovery=1\n",
         File.read(recovery)
       )
       assert_equal 0o644, File.stat(recovery).mode & 0o777

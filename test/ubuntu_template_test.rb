@@ -193,7 +193,9 @@ class UbuntuTemplateTest < Minitest::Test
 
     assert_includes content, "if is_ubuntu26; then"
     assert_includes content, 'DIST_SLUG="ubuntu2604"'
-    assert_includes content, 'linux-modules-nvidia-595-aws nvidia-driver-595'
+    assert_includes content, 'linux-modules-nvidia-595-$(uname -r) nvidia-driver-595'
+    assert_includes content, 'rm -f /etc/apt/preferences.d/runs-on-compact-boot'
+    refute_includes content, 'linux-modules-nvidia-595-aws nvidia-driver-595'
     assert_includes content, 'CUDA_PACKAGES="cuda-toolkit-13-3"'
     assert_includes content, 'CUDA_MAJOR_VERSION="13"'
     assert_includes content, 'grep "release $CUDA_MAJOR_VERSION"'

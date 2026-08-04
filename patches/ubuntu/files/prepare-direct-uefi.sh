@@ -132,12 +132,12 @@ validate_direct_cmdline() {
   local console_count=0
   local quiet_count=0
   local loglevel_count=0
+  local root_count=0
   local root_mode_count=0
   local systemd_status_count=0
   local rd_systemd_status_count=0
   local -a kernel_arguments=()
 
-  [[ " ${kernel_cmdline} " == *' root=PARTUUID='* ]] || fail "direct kernel command line has no root=PARTUUID= argument"
   [[ " ${kernel_cmdline} " == *' panic=-1 '* ]] || fail "direct kernel command line must reboot immediately after a panic"
   [[ " ${kernel_cmdline} " != *' initrd='* ]] || fail "direct kernel command line still refers to an initrd"
 
@@ -166,6 +166,11 @@ validate_direct_cmdline() {
         rd_systemd_status_count="$((rd_systemd_status_count + 1))"
         [[ "${argument}" == 'rd.systemd.show_status=false' ]] || fail "direct kernel command line still shows initrd systemd status"
         ;;
+      root=*)
+        root_count="$((root_count + 1))"
+        [[ "${argument}" == root=PARTUUID=?* ]] \
+          || fail "direct kernel command line has a non-PARTUUID root argument; expected root=PARTUUID="
+        ;;
       ro | rw)
         root_mode_count="$((root_mode_count + 1))"
         ;;
@@ -176,6 +181,7 @@ validate_direct_cmdline() {
   [[ "${loglevel_count}" -eq 1 ]] || fail "direct kernel command line must contain exactly one loglevel=3 argument"
   [[ "${systemd_status_count}" -eq 1 ]] || fail "direct kernel command line must contain exactly one systemd.show_status=false argument"
   [[ "${rd_systemd_status_count}" -eq 1 ]] || fail "direct kernel command line must contain exactly one rd.systemd.show_status=false argument"
+  [[ "${root_count}" -eq 1 ]] || fail "direct kernel command line must contain exactly one root=PARTUUID= argument"
   [[ "${root_mode_count}" -eq 1 ]] || fail "direct kernel command line must contain exactly one ro or rw argument"
 }
 
@@ -189,7 +195,7 @@ compose_direct_cmdline() {
     case "${argument}" in
       BOOT_IMAGE=*|initrd=*|initrdfail|initrdless_boot_fallback_triggered|console=*|earlycon|earlycon=*|quiet|loglevel=*|systemd.show_status=*|rd.systemd.show_status=*)
         ;;
-      root=PARTUUID=*)
+      root=*)
         [[ -z "${root_partuuid}" ]] && kernel_cmdline+="${kernel_cmdline:+ }${argument}"
         ;;
       ro|rw)

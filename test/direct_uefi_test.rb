@@ -2,6 +2,7 @@ require "minitest/autorun"
 require "open3"
 require "shellwords"
 require "tmpdir"
+require "yaml"
 
 class DirectUefiTest < Minitest::Test
   SCRIPT = File.expand_path("../patches/ubuntu/files/prepare-direct-uefi.sh", __dir__)
@@ -217,7 +218,7 @@ class DirectUefiTest < Minitest::Test
   end
 
   def test_compact_cmdline_replaces_root_and_deduplicates_immutable_arguments
-    command = "compose_direct_cmdline root=PARTUUID=old rw panic=-1 init=/runs-on-root/init runs_on.immutable=1 runs_on.squash_threads=single console=ttyS0"
+    command = "compose_direct_cmdline root=LABEL=old root=/dev/root root=PARTUUID=old rw panic=-1 init=/runs-on-root/init runs_on.immutable=1 runs_on.squash_threads=single console=ttyS0"
     env = {
       "DIRECT_UEFI_ROOT_PARTUUID" => "fresh-root",
       "DIRECT_UEFI_EXTRA_ARGUMENTS" => "rw init=/runs-on-root/init runs_on.immutable=1 runs_on.squash_threads=percpu"
@@ -233,6 +234,22 @@ class DirectUefiTest < Minitest::Test
     refute_includes stdout.split, "ro"
     assert_includes stdout, "runs_on.squash_threads=percpu"
     refute_includes stdout, "runs_on.squash_threads=single"
+  end
+
+  def test_direct_cmdline_rejects_multiple_or_non_partuuid_roots
+    base = "ro panic=-1 console=null quiet loglevel=3 systemd.show_status=false rd.systemd.show_status=false"
+
+    _stdout, stderr, status = run_function(
+      "validate_direct_cmdline #{Shellwords.escape("root=PARTUUID=abc root=PARTUUID=def #{base}")}"
+    )
+    refute status.success?
+    assert_includes stderr, "exactly one root=PARTUUID="
+
+    _stdout, stderr, status = run_function(
+      "validate_direct_cmdline #{Shellwords.escape("root=LABEL=cloudimg-rootfs #{base}")}"
+    )
+    refute status.success?
+    assert_includes stderr, "non-PARTUUID root"
   end
 
   def test_direct_cmdline_rejects_missing_or_conflicting_root_modes
@@ -311,8 +328,22 @@ class DirectUefiTest < Minitest::Test
 
   def test_published_image_workflow_validates_direct_boot_state
     workflow = File.read(TEST_WORKFLOW)
+    orchestration = YAML.safe_load(
+      File.read(File.expand_path("../.github/workflows/build-test-release.yml", __dir__)),
+      aliases: true
+    )
 
     assert_includes workflow, "/var/lib/runs-on-direct-uefi"
+    assert_includes workflow, 'IMAGE_ID: ${{ inputs.image_id }}'
+    assert_includes workflow, 'ubuntu26-full-x64|ubuntu26-gpu-x64|ubuntu26-stepsecurity-x64)'
+    assert_includes workflow, 'test -d "$direct_uefi_state"'
+    image_test_jobs = orchestration.fetch("jobs").values.select do |job|
+      job["uses"] == "./.github/workflows/test.yml"
+    end
+    assert_equal 5, image_test_jobs.length
+    image_test_jobs.each do |job|
+      assert_equal "${{ inputs.image_id }}", job.fetch("with").fetch("image_id")
+    end
     assert_includes workflow, "BootCurrent:"
     assert_includes workflow, "BootNext:"
     refute_includes workflow, 'test "$boot_order" = "$expected_order"'

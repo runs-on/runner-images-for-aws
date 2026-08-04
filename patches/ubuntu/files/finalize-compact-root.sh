@@ -426,6 +426,47 @@ remove_irrelevant_tpm_acl() {
   log "removed unsupported TPM keystore POSIX ACL"
 }
 
+hold_boot_packages() {
+  local root="$1" package status held_packages
+  local -a boot_packages=() discovered_packages=()
+  [[ "${root}" == /* && -d "${root}" && ! -L "${root}" ]] \
+    || fail "invalid boot-package hold root: ${root:-missing}"
+
+  install -d -m 0755 "${root%/}/etc/apt/preferences.d"
+  cat > "${root%/}/etc/apt/preferences.d/runs-on-compact-boot" <<'EOF'
+Package: linux-aws linux-aws-headers-* linux-headers-aws linux-image-aws linux-headers-*-aws linux-image-*-aws linux-modules-*-aws linux-modules-extra-*-aws linux-tools-*-aws linux-modules-nvidia-*-aws linux-signatures-nvidia-*-aws grub-common grub2-common grub-pc grub-pc-bin grub-efi-amd64 grub-efi-amd64-bin grub-efi-amd64-signed grub-efi-amd64-unsigned shim-signed
+Pin: version *
+Pin-Priority: -1
+EOF
+  chmod 0644 "${root%/}/etc/apt/preferences.d/runs-on-compact-boot"
+
+  while IFS=$'\t' read -r package status; do
+    [[ "${status}" == ii* ]] || continue
+    discovered_packages+=("${package%%:*}")
+  done < <(
+    dpkg-query -W -f='${binary:Package}\t${db:Status-Abbrev}\n' \
+      'linux-aws*' 'linux-headers*' 'linux-image*' 'linux-modules*' \
+      'linux-tools*-aws' 'linux-signatures-nvidia*-aws' 'grub*' 'shim*' \
+      2>/dev/null || true
+  )
+  while IFS= read -r package; do
+    [[ -n "${package}" ]] && boot_packages+=("${package}")
+  done < <(printf '%s\n' "${discovered_packages[@]}" | awk 'NF' | sort -u)
+  [[ "${#boot_packages[@]}" -gt 0 ]] || fail "no installed kernel or bootloader package found to hold"
+
+  apt-mark hold "${boot_packages[@]}"
+  held_packages="$(apt-mark showhold | sort -u)"
+  for package in "${boot_packages[@]}"; do
+    printf '%s\n' "${held_packages}" | grep -Fqx -- "${package}" \
+      || fail "boot package was not held: ${package}"
+  done
+
+  install -d -m 0755 "${root%/}/etc/runs-on-compact-root"
+  printf '%s\n' "${boot_packages[@]}" > "${root%/}/etc/runs-on-compact-root/held-boot-packages"
+  chmod 0644 "${root%/}/etc/runs-on-compact-root/held-boot-packages"
+  log "held ${#boot_packages[@]} kernel and bootloader packages"
+}
+
 build_squash() {
   local source_root="$1"
   local kernel_release="$2"
@@ -546,18 +587,19 @@ write_recovery_cmdline() {
 
   for argument in "${direct_arguments[@]}"; do
     case "${argument}" in
-      BOOT_IMAGE=*|initrd=*|initrdfail|initrdless_boot_fallback_triggered|init=/runs-on-root/init|console=*|earlycon|earlycon=*|quiet|loglevel=*|systemd.show_status=*|rd.systemd.show_status=*|runs_on.recovery=*)
+      BOOT_IMAGE=*|initrd=*|initrdfail|initrdless_boot_fallback_triggered|init=/runs-on-root/init|console=*|earlycon|earlycon=*|quiet|loglevel=*|panic=*|systemd.show_status=*|rd.systemd.show_status=*|runs_on.recovery=*)
         ;;
       *)
         recovery_arguments+=("${argument}")
         ;;
     esac
   done
-  recovery_arguments+=("console=ttyS0" "runs_on.recovery=1")
+  recovery_arguments+=("console=ttyS0" "panic=0" "runs_on.recovery=1")
 
   local recovery_cmdline="${recovery_arguments[*]}"
   [[ " ${recovery_cmdline} " == *' root=PARTUUID='* ]] || fail "recovery cmdline lacks the target root PARTUUID"
   [[ " ${recovery_cmdline} " == *' runs_on.immutable=1 '* ]] || fail "recovery cmdline lacks the immutable-root marker"
+  [[ " ${recovery_cmdline} " == *' panic=0 '* ]] || fail "recovery cmdline must stop after a panic"
   [[ "${recovery_cmdline}" != *' quiet'* && "${recovery_cmdline}" != *'systemd.show_status='* ]] || fail "recovery cmdline suppresses boot status"
   [[ "$(tr ' ' '\n' <<< "${recovery_cmdline}" | grep -c '^console=')" -eq 1 ]] || fail "recovery cmdline must contain exactly one console"
   [[ "$(tr ' ' '\n' <<< "${recovery_cmdline}" | grep -c '^runs_on.recovery=1$')" -eq 1 ]] || fail "recovery cmdline must contain exactly one recovery marker"
@@ -601,6 +643,7 @@ main() {
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
     acl amazon-ec2-utils attr busybox-static cpio dosfstools e2fsprogs gdisk \
     grub-pc-bin grub2-common kmod python3 rsync squashfs-tools zstd
+  hold_boot_packages /
   apt-get clean
   rm -rf /var/lib/apt/lists/*
   for command in blkid blockdev cmp cpio dd e2fsck ebsnvme-id fallocate filefrag findmnt fsck.vfat getfacl grub-install lsblk mkfs.ext4 mkfs.vfat mksquashfs mount partprobe rsync setfacl sgdisk unsquashfs; do

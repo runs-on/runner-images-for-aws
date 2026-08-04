@@ -365,6 +365,8 @@ class BuildResourcesTest < Minitest::Test
     script = File.read(File.expand_path("../bin/build", __dir__))
 
     refute_includes script, "Aws::EC2::Client.new(region: 'us-east-1')"
+    assert_includes script, '%{ami_regions=["#{options[:region]}"]}'
+    refute_includes script, '%{ami_regions=["us-east-1"]}'
     refute_includes script, 'raise("Packer build failed") unless build_succeeded'
     assert_includes script, "BuildResources.cleanup_failed_build"
     assert_includes script, "BuildResources.find_and_validate_build_image!"
