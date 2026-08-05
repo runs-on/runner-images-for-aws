@@ -19,6 +19,9 @@ on:
       ami_id:
         description: "The ID of the built AMI"
         value: ${{ jobs.build.outputs.ami_id }}
+      provenance_digest:
+        description: "The SHA-256 digest of the build provenance manifest"
+        value: ${{ jobs.build.outputs.provenance_digest }}
 
 jobs:
   build:
@@ -29,6 +32,7 @@ jobs:
     outputs:
       ami_name: ${{ steps.build.outputs.ami_name }}
       ami_id: ${{ steps.build.outputs.ami_id }}
+      provenance_digest: ${{ steps.build.outputs.provenance_digest }}
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -70,3 +74,10 @@ jobs:
         timeout-minutes: 300
         env:
           PACKER_AMAZON_PLUGIN_BINARY: ${{ steps.patched_amazon_plugin.outputs.plugin_binary }}
+          PROVENANCE_URI: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      - name: Upload build provenance
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: build-provenance-${{ inputs.image_id }}
+          path: ${{ steps.build.outputs.provenance_file }}
+          retention-days: 90

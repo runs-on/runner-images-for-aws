@@ -45,12 +45,9 @@ jobs:
   sync:
     uses: ./.github/workflows/sync.yml
     secrets: inherit
-    permissions:
-      contents: write
     with:
       release_prefix: windows
       ami_cleanup_prefix: runs-on-dev-windows
-      dist_prefix: windows
 
   build-test-release:
     name: Build/Test/Release ${{ matrix.image_id }}

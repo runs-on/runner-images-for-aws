@@ -45,9 +45,22 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
       - name: Copy dev AMI to prod
-        run: bundle exec bin/copy-ami --force --summary-json release-summary/${{ inputs.image_id }}.json ${{ inputs.ami_name }}
+        env:
+          PROVENANCE_URI: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: >-
+          bundle exec bin/copy-ami --force
+          --summary-json release-summary/${{ inputs.image_id }}.json
+          --provenance-json release-provenance/${{ inputs.image_id }}.json
+          ${{ inputs.ami_name }}
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ !cancelled() }}
         with:
           name: released-ami-${{ inputs.image_id }}
           path: release-summary/${{ inputs.image_id }}.json
           retention-days: 7
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ !cancelled() }}
+        with:
+          name: release-provenance-${{ inputs.image_id }}
+          path: release-provenance/${{ inputs.image_id }}.json
+          retention-days: 90

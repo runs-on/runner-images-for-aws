@@ -63,12 +63,9 @@ jobs:
   sync:
     uses: ./.github/workflows/sync.yml
     secrets: inherit
-    permissions:
-      contents: write
     with:
       release_prefix: linux
       ami_cleanup_prefix: runs-on-dev-ubuntu
-      dist_prefix: ubuntu
 
   build-test-release:
     name: Build/Test/Release ${{ matrix.image_id }}

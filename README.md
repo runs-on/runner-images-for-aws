@@ -69,6 +69,21 @@ For instance, for the `ubuntu22-full-x64` image, search for:
 * Ubuntu 26 does not support multi-ENI policy routing, secondary IP discovery, IPv6-only subnets, old Xen network drivers, or persistent netplan configuration. Use Ubuntu 22 or 24 when those network layouts are required.
 * For local validation, set `AMI_PUBLIC=false` to keep a full Ubuntu AMI private.
 
+## Build provenance
+
+`releases/` is generated build input and is not committed. `upstream.lock.yml`
+pins the exact `actions/runner-images` revision used by every build. Run
+`bin/update-upstream-lock` and commit the lock when intentionally updating
+upstream.
+
+Each build uploads a JSON provenance manifest. It records the repository and
+upstream revisions, source AMI, patch and configuration digests, Packer and
+plugin versions, output AMI and snapshots, and an optional benchmark JSON
+digest. Releases emit a second manifest that links each copied AMI and snapshot
+to the source build digest. Every output carries its matching manifest digest
+and workflow URL in `runs-on:provenance-digest` and
+`runs-on:provenance-uri` tags.
+
 ## Inspector AMI scanning
 
 Deploy the AWS-native Inspector scanner stack from this repo:

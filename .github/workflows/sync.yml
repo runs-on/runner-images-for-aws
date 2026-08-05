@@ -1,7 +1,7 @@
-name: Sync
+name: Prepare release
 
-# Reusable sync job shared by the matrix-* workflows: generates the release
-# name, cleans up old dev AMIs, re-syncs releases/ from upstream and commits.
+# Reusable preparation job shared by the matrix workflows. Generated upstream
+# files are materialized inside each build and never committed.
 on:
   workflow_call:
     inputs:
@@ -13,10 +13,6 @@ on:
         description: 'AMI_PREFIX passed to bin/utils/cleanup-amis'
         type: string
         required: true
-      dist_prefix:
-        description: 'Only sync releases/ trees for this dist prefix (ubuntu, windows)'
-        type: string
-        required: true
     outputs:
       release_name:
         description: 'Generated release name'
@@ -24,16 +20,14 @@ on:
 
 jobs:
   sync:
-    name: Synchronize
+    name: Prepare
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     outputs:
       release_name: ${{ steps.generate-release-name.outputs.release_name }}
     steps:
       - name: Generate release name
         id: generate-release-name
-        run: echo "release_name=${{ inputs.release_prefix }}-$(date +%Y%m%d%H%M%S)" >> $GITHUB_OUTPUT
+        run: echo "release_name=${{ inputs.release_prefix }}-$(date +%Y%m%d%H%M%S)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
       - uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af # v1
         with:
@@ -51,9 +45,3 @@ jobs:
         env:
           AMI_PREFIX: ${{ inputs.ami_cleanup_prefix }}
         run: bundle exec bin/utils/cleanup-amis --force
-      - name: Synchronize with upstream repository
-        run: bundle exec bin/sync --dist-prefix ${{ inputs.dist_prefix }}
-      - uses: stefanzweifel/git-auto-commit-action@04702edda442b2e678b25b537cec683a1493fcb9 # v7
-        with:
-          commit_message: "Sync from upstream"
-          tagging_message: ""
