@@ -1,0 +1,39 @@
+name: Update upstream lock
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 * * *'
+
+concurrency:
+  group: update-upstream-lock
+  cancel-in-progress: false
+
+jobs:
+  update:
+    name: Update and validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          ref: main
+      - uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          install_args: go upx
+      - uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af # v1
+        with:
+          ruby-version: 3.2.2
+          bundler-cache: true
+      - name: Resolve current upstream revision
+        run: bin/update-upstream-lock
+      - name: Validate Ubuntu sync and patches
+        run: bundle exec bin/sync --dist-prefix ubuntu
+      - name: Validate Windows sync and patches
+        run: bundle exec bin/sync --dist-prefix windows
+      - name: Commit updated lock
+        uses: stefanzweifel/git-auto-commit-action@04702edda442b2e678b25b537cec683a1493fcb9 # v7
+        with:
+          commit_message: Update upstream lock
+          file_pattern: upstream.lock.yml
