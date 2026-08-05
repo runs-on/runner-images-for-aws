@@ -543,15 +543,6 @@ integration_revisions = Dir.glob("integrations/*/.git").sort.to_h do |git_dir|
   path = File.dirname(git_dir)
   [path, command_output({}, "git", "-C", path, "rev-parse", "HEAD")]
 end
-benchmark_path = ENV.fetch("BENCHMARK_JSON", "").strip
-benchmark_digest = if benchmark_path.empty?
-  nil
-else
-  fail("Benchmark JSON not found: #{benchmark_path}") unless File.file?(benchmark_path)
-  JSON.parse(File.read(benchmark_path))
-  Digest::SHA256.file(benchmark_path).hexdigest
-end
-
 manifest = {
   "schema_version" => 1,
   "built_at" => Time.now.utc.iso8601,
@@ -583,8 +574,7 @@ manifest = {
   "output" => {
     "ami_id" => ami_id,
     "snapshot_ids" => snapshot_ids
-  },
-  "benchmark_json_sha256" => benchmark_digest
+  }
 }
 provenance_file = ENV.fetch("PROVENANCE_FILE", File.expand_path("../provenance/#{ami_name}.json", __dir__))
 provenance_digest = BuildProvenance.write(provenance_file, manifest)
