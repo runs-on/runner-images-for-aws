@@ -14,6 +14,15 @@ Those images are very close to 1-1 compatible with official GitHub Actions runne
 * `ubuntu22-full-arm64`
 * `ubuntu24-full-x64`
 * `ubuntu24-full-arm64`
+* `ubuntu26-full-x64`
+* `ubuntu26-full-arm64`
+
+Ubuntu 26 images are not yet part of the scheduled builds and are built on demand. See the notes below for Ubuntu 26 specifics.
+
+Minimal images only ship the GitHub Actions runner and Docker, for the fastest boot times:
+
+* `ubuntu24-minimal-x64`
+* `ubuntu24-minimal-arm64`
 
 ### Windows
 
@@ -31,8 +40,19 @@ Windows GPU images include the AWS GRID driver plus the CUDA toolkit.
 
 * `ubuntu22-gpu-x64`
 * `ubuntu24-gpu-x64`
-* `ubuntu24-gpu-arm64`
+* `ubuntu26-gpu-x64`
 * `windows25-gpu-x64`
+
+### StepSecurity
+
+Those are the full Ubuntu images with the [StepSecurity](https://www.stepsecurity.io/) integration preinstalled:
+
+* `ubuntu22-stepsecurity-x64`
+* `ubuntu22-stepsecurity-arm64`
+* `ubuntu24-stepsecurity-x64`
+* `ubuntu24-stepsecurity-arm64`
+* `ubuntu26-stepsecurity-x64`
+* `ubuntu26-stepsecurity-arm64`
 
 ## Supported regions
 
@@ -50,7 +70,7 @@ Windows GPU images include the AWS GRID driver plus the CUDA toolkit.
 
 ## Find the AMI
 
-For the `x86_64` image, search for:
+For any image, search for:
 
 *  name: `runs-on-v2.2-<IMAGE_ID>-*`
 *  owner: `135269210855`
@@ -108,4 +128,4 @@ Amazon Inspector EC2 scanning must be enabled in `us-east-1` for the account. Re
 
 AMI scanning is opt-in from `config.yml`. Add `inspect: true` to an image entry to scan the latest dev and prod AMIs matching `runs-on-dev-<image_id>-*` and `runs-on-v2.2-<image_id>-*`. Missing `inspect` defaults to `false`. The `inspector_scan` AMI tag is scanner-owned state; do not manage it from Packer templates or `bin/copy-ami`.
 
-See [docs/inspector-ami-scanner.md](docs/inspector-ami-scanner.md) for operational details.
+The stack template lives in [cloudformation/inspector-ami-scanner.yml](cloudformation/inspector-ami-scanner.yml).
