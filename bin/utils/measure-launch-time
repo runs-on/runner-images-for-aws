@@ -124,7 +124,7 @@ def resolve_instance_type(options, image)
   when 'arm64'
     'm8g.large'
   when 'x86_64'
-    'm7a.large'
+    'm8a.large'
   else
     raise "Unsupported architecture #{image.architecture.inspect}"
   end
