@@ -78,11 +78,10 @@ upstream.
 
 Each build uploads a JSON provenance manifest. It records the repository and
 upstream revisions, source AMI, patch and configuration digests, Packer and
-plugin versions, output AMI and snapshots, and an optional benchmark JSON
-digest. Releases emit a second manifest that links each copied AMI and snapshot
-to the source build digest. Every output carries its matching manifest digest
-and workflow URL in `runs-on:provenance-digest` and
-`runs-on:provenance-uri` tags.
+plugin versions, and output AMI and snapshots. Releases emit a second manifest
+that links each copied AMI and snapshot to the source build digest. Every output
+carries its matching manifest digest and workflow URL in
+`runs-on:provenance-digest` and `runs-on:provenance-uri` tags.
 
 ## Inspector AMI scanning
 
