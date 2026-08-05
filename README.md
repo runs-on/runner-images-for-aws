@@ -40,7 +40,6 @@ Windows GPU images include the AWS GRID driver plus the CUDA toolkit.
 
 * `ubuntu22-gpu-x64`
 * `ubuntu24-gpu-x64`
-* `ubuntu26-gpu-x64`
 * `windows25-gpu-x64`
 
 ### StepSecurity
@@ -51,8 +50,6 @@ Those are the full Ubuntu images with the [StepSecurity](https://www.stepsecurit
 * `ubuntu22-stepsecurity-arm64`
 * `ubuntu24-stepsecurity-x64`
 * `ubuntu24-stepsecurity-arm64`
-* `ubuntu26-stepsecurity-x64`
-* `ubuntu26-stepsecurity-arm64`
 
 ## Supported regions
 
