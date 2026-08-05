@@ -106,7 +106,7 @@ def launch_ami(options)
                   elsif architecture == "arm64"
                     "m7g.large"
                   elsif architecture == "x86_64"
-                    "m7a.large"
+                    "m8a.large"
                   end
 
   puts "Launching #{is_windows ? 'Windows' : 'Linux'} instance with AMI ID: #{ami_id.inspect} and instance type: #{instance_type.inspect}"

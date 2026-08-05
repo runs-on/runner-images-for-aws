@@ -13,6 +13,31 @@ cat > /root/.gemrc <<EOF
 gem: --no-document
 EOF
 
+arch=$(dpkg --print-architecture)
+apt_primary_mirror="https://archive.ubuntu.com/ubuntu/"
+apt_security_mirror="https://security.ubuntu.com/ubuntu/"
+if [ "$arch" = "arm64" ]; then
+  apt_primary_mirror="https://ports.ubuntu.com/ubuntu-ports/"
+  apt_security_mirror="$apt_primary_mirror"
+fi
+
+# Replace ec2 regional mirrors with official Ubuntu mirrors before any apt call.
+# Handles both deb822 (.sources) and legacy (sources.list) formats.
+rewrite_apt_source() {
+  local f="$1"
+  if [ -f "$f" ]; then
+    sed -i \
+      -e "s|https\?://[^/]*\.ec2\.archive\.ubuntu\.com/ubuntu/|${apt_primary_mirror}|g" \
+      -e "s|https\?://[^/]*\.ec2\.archive\.ubuntu\.com/ubuntu-ports/|${apt_primary_mirror}|g" \
+      -e "s|https\?://security\.ubuntu\.com/ubuntu/|${apt_security_mirror}|g" \
+      -e "s|https\?://[^/]*\.ec2\.archive\.ubuntu\.com/|${apt_primary_mirror}|g" \
+      "$f"
+  fi
+}
+for src in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources; do
+  rewrite_apt_source "$src"
+done
+
 # will be installed as classic debian package, to save space
 snap remove amazon-ssm-agent
 snap remove core18
@@ -50,13 +75,6 @@ codename=$(lsb_release --codename -s)
 sed -i 's|release = util.lsb_release()\["codename"\].*|release = "'$codename'"|w /dev/stdout' /usr/lib/python3/dist-packages/cloudinit/config/cc_apt_configure.py | grep $codename
 sed -i 's|util.get_dpkg_architecture()|"'$arch'"|w /dev/stdout' /usr/lib/python3/dist-packages/cloudinit/config/cc_apt_configure.py | grep $arch
 sed -i 's|util.get_dpkg_architecture()|"'$arch'"|w /dev/stdout' /usr/lib/python3/dist-packages/cloudinit/distros/debian.py | grep $arch
-
-apt_primary_mirror="https://archive.ubuntu.com/ubuntu/"
-apt_security_mirror="https://security.ubuntu.com/ubuntu/"
-if [ "$arch" = "arm64" ]; then
-  apt_primary_mirror="https://ports.ubuntu.com/ubuntu-ports/"
-  apt_security_mirror="$apt_primary_mirror"
-fi
 
 cat > /etc/cloud/cloud.cfg.d/01_runs_on.cfg <<EOF
 ssh_quiet_keygen: true
