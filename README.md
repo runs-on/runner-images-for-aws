@@ -74,7 +74,9 @@ For instance, for the `ubuntu22-full-x64` image, search for:
 `releases/` is generated build input and is not committed. `upstream.lock.yml`
 pins the exact `actions/runner-images` revision used by every build. Run
 `bin/update-upstream-lock` and commit the lock when intentionally updating
-upstream.
+upstream. A nightly workflow runs the same update, validates every Ubuntu and
+Windows sync/patch path, and commits the lock to `main` only when validation
+succeeds.
 
 Each build uploads a JSON provenance manifest. It records the repository and
 upstream revisions, source AMI, patch and configuration digests, Packer and
