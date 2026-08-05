@@ -11,7 +11,7 @@ CUDA_PACKAGES="cuda-12-9 cuda-toolkit-12-9"
 CUDA_MAJOR_VERSION="12"
 if is_ubuntu26; then
     DIST_SLUG="ubuntu2604"
-    NVIDIA_DRIVER_PACKAGES="linux-modules-nvidia-595-$(uname -r) nvidia-driver-595"
+    NVIDIA_DRIVER_PACKAGES="linux-modules-nvidia-595-aws nvidia-driver-595"
     CUDA_PACKAGES="cuda-toolkit-13-3"
     CUDA_MAJOR_VERSION="13"
 elif is_ubuntu24; then
@@ -26,13 +26,6 @@ else
 fi
 
 set -eox pipefail
-
-# The Full parent pins its image-specific boot stack. Install only the NVIDIA
-# module built for that exact kernel, then let compact finalization restore the
-# boot-package pin for the GPU image.
-if is_ubuntu26; then
-    rm -f /etc/apt/preferences.d/runs-on-compact-boot
-fi
 
 if [ -f /root/cuda-installed.txt ]; then
     # Verify CUDA and driver installation
