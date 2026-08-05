@@ -6,6 +6,7 @@ require 'yaml'
 require 'slop'
 
 IMAGES = YAML.load_file(File.expand_path("../config.yml", __dir__)).fetch("images")
+UPSTREAM = YAML.safe_load_file(File.expand_path("../upstream.lock.yml", __dir__))
 
 options = {}
 
@@ -28,7 +29,16 @@ workspace = Dir.mktmpdir
 repo_dir = File.join(workspace, 'repo')
 
 begin
-  system("git clone -q --depth 1 --branch main https://github.com/actions/runner-images.git \"#{repo_dir}\"") || fail("Failed to clone runner-images")
+  repository = UPSTREAM.fetch("repository")
+  revision = UPSTREAM.fetch("revision")
+  fail("Invalid locked upstream revision: #{revision}") unless revision.match?(/\A[0-9a-f]{40}\z/)
+
+  system("git", "init", "-q", repo_dir) || fail("Failed to initialize upstream checkout")
+  system("git", "-C", repo_dir, "remote", "add", "origin", repository) || fail("Failed to configure upstream checkout")
+  system("git", "-C", repo_dir, "fetch", "-q", "--depth", "1", "origin", revision) || fail("Failed to fetch locked upstream revision #{revision}")
+  system("git", "-C", repo_dir, "checkout", "-q", "--detach", "FETCH_HEAD") || fail("Failed to check out locked upstream revision #{revision}")
+
+  puts "Using #{repository}@#{revision}"
   IMAGES.each do |image|
     if options[:image_id] && image['id'] != options[:image_id]
       next
@@ -46,8 +56,8 @@ begin
     variant = image_id_parts[1..-2].join('-')
     release_dir = "releases/#{dist}/#{arch}"
     FileUtils.rm_rf(release_dir)
-    FileUtils.mkdir_p(File.dirname(release_dir))
-    system("git clone -q --branch main \"#{repo_dir}\" \"#{release_dir}\"")
+    FileUtils.mkdir_p(release_dir)
+    FileUtils.cp_r("#{repo_dir}/.", release_dir)
     ['.git', '.github', 'docs', '.vscode', 'images.CI', '.gitignore', '.gitattributes', 'CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'SECURITY.md'].each do |useless_dir|
       FileUtils.rm_rf("#{release_dir}/#{useless_dir}")
     end
@@ -56,7 +66,6 @@ begin
     end
 
     system("./bin/patch/#{dist}-#{arch} #{release_dir}") || fail("Failed to patch #{release_dir}")
-    system("git add #{release_dir} && git --no-pager diff --staged --stat #{release_dir}")
     puts "OK"
   end
 ensure
