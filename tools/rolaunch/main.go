@@ -113,12 +113,19 @@ type asyncResult[T any] struct {
 	ch <-chan taskResult[T]
 }
 
+type localPreparation struct {
+	rootResizeDone <-chan rootResizeResult
+	tasks          []asyncResult[struct{}]
+	warmupTask     *asyncResult[bool]
+}
+
 type launcherOps struct {
 	ensureHostKey               func() error
 	warmupRunner                func(context.Context) (bool, error)
 	makeWorkDir                 func(string) error
 	ensureResolverConfig        func(string) error
 	waitForInstanceIdentity     func(context.Context, config) (instanceIdentity, error)
+	waitForBasicTarget          func(context.Context) error
 	configureInstanceHostname   func(instanceIdentity) error
 	enrichInstanceIdentity      func(context.Context, config, instanceIdentity) (instanceIdentity, error)
 	fetchUserData               func(context.Context, config) ([]byte, error)
@@ -144,6 +151,7 @@ func defaultLauncherOps() launcherOps {
 		waitForInstanceIdentity: func(ctx context.Context, cfg config) (instanceIdentity, error) {
 			return awsState.waitForReadinessAndFetchIdentity(ctx, cfg)
 		},
+		waitForBasicTarget:        waitForBasicTarget,
 		configureInstanceHostname: configureInstanceHostname,
 		enrichInstanceIdentity: func(ctx context.Context, cfg config, identity instanceIdentity) (instanceIdentity, error) {
 			return awsState.enrichOptionalInstanceIdentity(ctx, cfg, identity)
@@ -223,40 +231,27 @@ func run(ctx context.Context, cfg config) error {
 func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 	recorder := newTimingRecorder()
 	recorder.add("rolaunch.started")
-	persistTimingMilestones(recorder, cfg.timingsPath)
-	defer func() {
+	persistTimings := !cfg.isFullMode()
+	if persistTimings {
 		persistTimingMilestones(recorder, cfg.timingsPath)
+	}
+	defer func() {
+		if persistTimings {
+			persistTimingMilestones(recorder, cfg.timingsPath)
+		}
 	}()
 
-	rootResizeDone := ops.startRootFilesystemResize(ctx)
-
-	hostKeyTask := startAsyncTask(func() error {
-		if err := ops.ensureHostKey(); err != nil {
-			return err
+	var prep localPreparation
+	if !cfg.isFullMode() {
+		prep = beginLocalPreparation(ctx, cfg, ops, recorder)
+		if prep.warmupTask != nil {
+			warmupTask := *prep.warmupTask
+			defer func() {
+				finishWarmupTask(warmupTask, recorder)
+			}()
 		}
-		recorder.add("rolaunch.host-key-ready")
-		return nil
-	})
-	if enableRunnerWarmup {
-		warmupTask := startAsync(func() (bool, error) {
-			return ops.warmupRunner(ctx)
-		})
-		defer func() {
-			finishWarmupTask(warmupTask, recorder)
-		}()
 	}
-	workDirTask := startAsyncTask(func() error {
-		if err := ops.makeWorkDir(cfg.workDir); err != nil {
-			return fmt.Errorf("create workdir: %w", err)
-		}
-		return nil
-	})
-	resolverTask := startAsyncTask(func() error {
-		if cfg.isFullMode() {
-			return nil
-		}
-		return ops.ensureResolverConfig(defaultResolverConfigPath)
-	})
+
 	identityTask := startAsync(func() (instanceIdentity, error) {
 		identity, err := ops.waitForInstanceIdentity(ctx, cfg)
 		if err == nil {
@@ -265,23 +260,62 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 		}
 		return identity, err
 	})
+	var fullPreparationTask asyncResult[localPreparation]
+	if cfg.isFullMode() {
+		fullPreparationTask = startAsync(func() (localPreparation, error) {
+			if err := ops.waitForBasicTarget(ctx); err != nil {
+				return localPreparation{}, err
+			}
+			recorder.add("rolaunch.basic-ready")
+			prep := beginLocalPreparation(ctx, cfg, ops, recorder)
+			persistTimingMilestones(recorder, cfg.timingsPath)
+			return prep, nil
+		})
+	}
+	var userDataTask asyncResult[[]byte]
+	var publicKeyTask asyncResult[[]byte]
+	startMetadataTasks := func() {
+		userDataTask = startAsync(func() ([]byte, error) {
+			return ops.fetchUserData(ctx, cfg)
+		})
+		publicKeyTask = startAsync(func() ([]byte, error) {
+			key, err := ops.fetchTemporaryPublicKey(ctx, cfg)
+			if err != nil {
+				return nil, fmt.Errorf("read metadata temporary public key: %w", err)
+			}
+			return key, nil
+		})
+	}
 
 	identity, err := identityTask.wait()
 	if err != nil {
 		return fmt.Errorf("discover instance identity: %w", err)
 	}
-	localPrepTasks := []asyncResult[struct{}]{hostKeyTask, workDirTask, resolverTask}
+	optionalIdentityTask := startAsync(func() (instanceIdentity, error) {
+		return ops.enrichInstanceIdentity(ctx, cfg, identity)
+	})
 	if cfg.isFullMode() {
-		localPrepTasks = append(localPrepTasks, startAsyncTask(func() error {
+		startMetadataTasks()
+		prep, err = fullPreparationTask.wait()
+		if err != nil {
+			return fmt.Errorf("wait for basic.target: %w", err)
+		}
+		persistTimings = true
+		if prep.warmupTask != nil {
+			warmupTask := *prep.warmupTask
+			defer func() {
+				finishWarmupTask(warmupTask, recorder)
+			}()
+		}
+		prep.tasks = append(prep.tasks, startAsyncTask(func() error {
 			if err := ops.configureInstanceHostname(identity); err != nil {
 				return fmt.Errorf("configure instance hostname: %w", err)
 			}
 			return nil
 		}))
 	}
-	optionalIdentityTask := startAsync(func() (instanceIdentity, error) {
-		return ops.enrichInstanceIdentity(ctx, cfg, identity)
-	})
+	rootResizeDone := prep.rootResizeDone
+	localPrepTasks := prep.tasks
 
 	persistIdentity := func() {
 		persistedIdentity := identity
@@ -313,16 +347,9 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 		return nil
 	}
 
-	userDataTask := startAsync(func() ([]byte, error) {
-		return ops.fetchUserData(ctx, cfg)
-	})
-	publicKeyTask := startAsync(func() ([]byte, error) {
-		key, err := ops.fetchTemporaryPublicKey(ctx, cfg)
-		if err != nil {
-			return nil, fmt.Errorf("read metadata temporary public key: %w", err)
-		}
-		return key, nil
-	})
+	if !cfg.isFullMode() {
+		startMetadataTasks()
+	}
 
 	rawUserData, err := userDataTask.wait()
 	if err != nil {
@@ -420,6 +447,41 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 	log.Printf("userdata processed successfully")
 	recorder.add("rolaunch.done")
 	return nil
+}
+
+func beginLocalPreparation(ctx context.Context, cfg config, ops launcherOps, recorder *timingRecorder) localPreparation {
+	prep := localPreparation{
+		rootResizeDone: ops.startRootFilesystemResize(ctx),
+	}
+
+	prep.tasks = append(prep.tasks, startAsyncTask(func() error {
+		if err := ops.ensureHostKey(); err != nil {
+			return err
+		}
+		recorder.add("rolaunch.host-key-ready")
+		return nil
+	}))
+	prep.tasks = append(prep.tasks, startAsyncTask(func() error {
+		if err := ops.makeWorkDir(cfg.workDir); err != nil {
+			return fmt.Errorf("create workdir: %w", err)
+		}
+		return nil
+	}))
+	prep.tasks = append(prep.tasks, startAsyncTask(func() error {
+		if cfg.isFullMode() {
+			return nil
+		}
+		return ops.ensureResolverConfig(defaultResolverConfigPath)
+	}))
+
+	if enableRunnerWarmup {
+		warmupTask := startAsync(func() (bool, error) {
+			return ops.warmupRunner(ctx)
+		})
+		prep.warmupTask = &warmupTask
+	}
+
+	return prep
 }
 
 func startAsync[T any](fn func() (T, error)) asyncResult[T] {
@@ -615,17 +677,17 @@ func waitForRootFilesystemResize(done <-chan rootResizeResult) bool {
 }
 
 func maybeResizeRootFilesystem(ctx context.Context) (bool, error) {
-	rootPartition, fsType, err := rootMountInfo()
+	mount, err := resolveRootResizeMount(defaultBackingRootMarker, rootMountInfo, mountedPathInfo)
 	if err != nil {
 		return false, err
 	}
 
-	device, partNum, err := parseBlockDevicePartition(rootPartition)
+	device, partNum, err := parseBlockDevicePartition(mount.source)
 	if err != nil {
 		return false, err
 	}
 
-	partName := filepath.Base(rootPartition)
+	partName := filepath.Base(mount.source)
 	diskName := filepath.Base(device)
 
 	partSize, err := readSysfsSize(partName)
@@ -645,11 +707,10 @@ func maybeResizeRootFilesystem(ctx context.Context) (bool, error) {
 		return false, fmt.Errorf("read partition start for %s: %w", partName, err)
 	}
 
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs("/", &stat); err != nil {
-		return false, fmt.Errorf("statfs /: %w", err)
+	fsSize, err := filesystemSizeAt(mount.path, syscall.Statfs)
+	if err != nil {
+		return false, err
 	}
-	fsSize := int64(stat.Blocks) * int64(stat.Bsize)
 
 	growableSectors := growableSectorsAtEnd(diskSectors, partStartSectors, partSectors)
 	needGrowpart := diskSectors > 0 && partSectors > 0 && growableSectors > diskSectors/100
@@ -661,9 +722,10 @@ func maybeResizeRootFilesystem(ctx context.Context) (bool, error) {
 	}
 
 	log.Printf(
-		"root resize needed: root=%s fs=%s part_start=%d part_size=%d fs_size=%d growable=%d needGrowpart=%v needResizeFs=%v",
-		rootPartition,
-		fsType,
+		"root resize needed: mount=%s source=%s fs=%s part_start=%d part_size=%d fs_size=%d growable=%d needGrowpart=%v needResizeFs=%v",
+		mount.path,
+		mount.source,
+		mount.fsType,
 		partStartSectors,
 		partSize,
 		fsSize,
@@ -705,15 +767,23 @@ func maybeResizeRootFilesystem(ctx context.Context) (bool, error) {
 		cmdArgs []string
 	)
 
-	switch fsType {
+	switch mount.fsType {
 	case "ext2", "ext3", "ext4":
 		cmdName = "resize2fs"
-		cmdArgs = []string{rootPartition}
+		resizeSource := mount.source
+		if mount.path != "/" {
+			const rootDeviceAlias = "/dev/root"
+			if err := ensureDeviceAlias(rootDeviceAlias, mount.source); err != nil {
+				return false, err
+			}
+			resizeSource = rootDeviceAlias
+		}
+		cmdArgs = []string{resizeSource}
 	case "xfs":
 		cmdName = "xfs_growfs"
-		cmdArgs = []string{"/"}
+		cmdArgs = []string{mount.path}
 	default:
-		log.Printf("warning: unsupported root filesystem %q, skipping resize", fsType)
+		log.Printf("warning: unsupported root filesystem %q, skipping resize", mount.fsType)
 		return false, nil
 	}
 

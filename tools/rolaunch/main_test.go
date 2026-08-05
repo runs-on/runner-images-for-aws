@@ -60,6 +60,195 @@ func TestRunFullModeSkipsResolverManagement(t *testing.T) {
 	}
 }
 
+func TestRunFullModeOverlapsDelayedIdentityWithBasicTargetWait(t *testing.T) {
+	cfg := testConfig(t.TempDir())
+	cfg.mode = launchModeFull
+	ops := testLauncherOps()
+
+	identityStarted := make(chan struct{})
+	releaseIdentity := make(chan struct{})
+	gateStarted := make(chan struct{})
+	releaseGate := make(chan struct{})
+	preparationStarted := make(chan struct{})
+	enrichmentStarted := make(chan struct{})
+	userDataStarted := make(chan struct{})
+	publicKeyStarted := make(chan struct{})
+
+	ops.waitForInstanceIdentity = func(context.Context, config) (instanceIdentity, error) {
+		close(identityStarted)
+		<-releaseIdentity
+		return instanceIdentity{InstanceID: "i-123", Region: "eu-west-3"}, nil
+	}
+	ops.waitForBasicTarget = func(context.Context) error {
+		close(gateStarted)
+		<-releaseGate
+		return nil
+	}
+	ops.startRootFilesystemResize = func(context.Context) <-chan rootResizeResult {
+		close(preparationStarted)
+		return rootResizeDoneResult(rootResizeResult{})
+	}
+	ops.enrichInstanceIdentity = func(_ context.Context, _ config, identity instanceIdentity) (instanceIdentity, error) {
+		close(enrichmentStarted)
+		return identity, nil
+	}
+	ops.fetchUserData = func(context.Context, config) ([]byte, error) {
+		close(userDataStarted)
+		return nil, nil
+	}
+	ops.fetchTemporaryPublicKey = func(context.Context, config) ([]byte, error) {
+		close(publicKeyStarted)
+		return nil, nil
+	}
+
+	runDone := runAsync(func() error {
+		return runWithOps(context.Background(), cfg, ops)
+	})
+
+	waitForSignal(t, identityStarted, "delayed instance identity discovery")
+	waitForSignal(t, gateStarted, "basic.target wait")
+	assertNotSignaled(t, enrichmentStarted, "identity enrichment before identity discovery")
+	assertNotSignaled(t, userDataStarted, "userdata fetch before identity discovery")
+	assertNotSignaled(t, publicKeyStarted, "public key fetch before identity discovery")
+	assertNotSignaled(t, preparationStarted, "local preparation before basic.target")
+
+	close(releaseIdentity)
+	waitForSignal(t, enrichmentStarted, "identity enrichment before basic.target")
+	waitForSignal(t, userDataStarted, "userdata fetch before basic.target")
+	waitForSignal(t, publicKeyStarted, "public key fetch before basic.target")
+	assertNotSignaled(t, preparationStarted, "local preparation before basic.target")
+
+	close(releaseGate)
+	waitForSignal(t, preparationStarted, "local preparation after basic.target")
+	if err := <-runDone; err != nil {
+		t.Fatalf("runWithOps returned error: %v", err)
+	}
+}
+
+func TestRunFullModeDoesNotMutateOrPersistBeforeBasicTarget(t *testing.T) {
+	cfg := testConfig(filepath.Join(t.TempDir(), "state"))
+	cfg.mode = launchModeFull
+	ops := testLauncherOps()
+
+	gateReached := make(chan struct{})
+	releaseGate := make(chan struct{})
+	oneShotCalls := make(chan string, 3)
+	unsafeCalls := make(chan string, 16)
+
+	ops.waitForBasicTarget = func(context.Context) error {
+		close(gateReached)
+		<-releaseGate
+		return nil
+	}
+	ops.enrichInstanceIdentity = func(_ context.Context, _ config, identity instanceIdentity) (instanceIdentity, error) {
+		oneShotCalls <- "enrichInstanceIdentity"
+		return identity, nil
+	}
+	ops.fetchUserData = func(context.Context, config) ([]byte, error) {
+		oneShotCalls <- "fetchUserData"
+		return []byte("#!/bin/sh\necho ready\n"), nil
+	}
+	ops.fetchTemporaryPublicKey = func(context.Context, config) ([]byte, error) {
+		oneShotCalls <- "fetchTemporaryPublicKey"
+		return nil, nil
+	}
+	ops.ensureHostKey = func() error { unsafeCalls <- "ensureHostKey"; return nil }
+	ops.makeWorkDir = func(string) error { unsafeCalls <- "makeWorkDir"; return nil }
+	ops.configureInstanceHostname = func(instanceIdentity) error {
+		unsafeCalls <- "configureInstanceHostname"
+		return nil
+	}
+	ops.markerMatchesInstance = func(string, string) (bool, error) {
+		unsafeCalls <- "markerMatchesInstance"
+		return false, nil
+	}
+	ops.prefetchMatchingBootstrap = func(context.Context, config, string, []byte) (bool, error) {
+		unsafeCalls <- "prefetchMatchingBootstrap"
+		return false, nil
+	}
+	ops.prefetchAgentConfigFiles = func(context.Context, config, instanceIdentity, []byte) error {
+		unsafeCalls <- "prefetchAgentConfigFiles"
+		return nil
+	}
+	ops.installAuthorizedKey = func([]byte) error { unsafeCalls <- "installAuthorizedKey"; return nil }
+	ops.prepareUserData = func(string, []byte) error { unsafeCalls <- "prepareUserData"; return nil }
+	ops.executeUserData = func(context.Context, config) error {
+		unsafeCalls <- "executeUserData"
+		return nil
+	}
+	ops.markDone = func(string, string) error { unsafeCalls <- "markDone"; return nil }
+	ops.startRootFilesystemResize = func(context.Context) <-chan rootResizeResult {
+		unsafeCalls <- "startRootFilesystemResize"
+		return rootResizeDoneResult(rootResizeResult{})
+	}
+
+	runDone := runAsync(func() error {
+		return runWithOps(context.Background(), cfg, ops)
+	})
+
+	waitForSignal(t, gateReached, "basic.target gate")
+	waitForCalls(t, oneShotCalls, "enrichInstanceIdentity", "fetchUserData", "fetchTemporaryPublicKey")
+	assertNoUnexpectedCall(t, unsafeCalls)
+	for _, path := range []string{cfg.workDir, cfg.timingsPath, cfg.identityPath, cfg.userDataPath, cfg.doneMarker} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Fatalf("persistent path exists before basic.target: %s (err=%v)", path, err)
+		}
+	}
+
+	close(releaseGate)
+	if err := <-runDone; err != nil {
+		t.Fatalf("runWithOps returned error: %v", err)
+	}
+}
+
+func TestRunFullModeFailsClosedWhenBasicTargetCannotBeVerified(t *testing.T) {
+	cfg := testConfig(filepath.Join(t.TempDir(), "state"))
+	cfg.mode = launchModeFull
+	ops := testLauncherOps()
+	unsafeCalls := make(chan string, 8)
+
+	ops.waitForBasicTarget = func(context.Context) error {
+		return fmt.Errorf("manager unavailable")
+	}
+	ops.startRootFilesystemResize = func(context.Context) <-chan rootResizeResult {
+		unsafeCalls <- "startRootFilesystemResize"
+		return rootResizeDoneResult(rootResizeResult{})
+	}
+	ops.ensureHostKey = func() error { unsafeCalls <- "ensureHostKey"; return nil }
+	ops.makeWorkDir = func(string) error { unsafeCalls <- "makeWorkDir"; return nil }
+	ops.configureInstanceHostname = func(instanceIdentity) error {
+		unsafeCalls <- "configureInstanceHostname"
+		return nil
+	}
+	ops.markerMatchesInstance = func(string, string) (bool, error) {
+		unsafeCalls <- "markerMatchesInstance"
+		return false, nil
+	}
+
+	err := runWithOps(context.Background(), cfg, ops)
+	if err == nil || !strings.Contains(err.Error(), "wait for basic.target: manager unavailable") {
+		t.Fatalf("unexpected runWithOps error: %v", err)
+	}
+	assertNoUnexpectedCall(t, unsafeCalls)
+	for _, path := range []string{cfg.workDir, cfg.timingsPath, cfg.identityPath, cfg.userDataPath, cfg.doneMarker} {
+		if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+			t.Fatalf("persistent path exists after failed basic.target gate: %s (err=%v)", path, statErr)
+		}
+	}
+}
+
+func TestRunMinimalModeDoesNotUseBasicTargetGate(t *testing.T) {
+	cfg := testConfig(t.TempDir())
+	ops := testLauncherOps()
+	ops.waitForBasicTarget = func(context.Context) error {
+		return fmt.Errorf("minimal mode must not use the basic.target gate")
+	}
+
+	if err := runWithOps(context.Background(), cfg, ops); err != nil {
+		t.Fatalf("runWithOps returned error: %v", err)
+	}
+}
+
 func TestRunMinimalModeManagesResolver(t *testing.T) {
 	cfg := testConfig(t.TempDir())
 	ops := testLauncherOps()
@@ -817,6 +1006,7 @@ func TestRunFullModeWaitsForRootResizeBeforeExecutingUserDataAndPersistsMileston
 	assertStepsPresent(t, steps, []string{
 		"rolaunch.started",
 		"rolaunch.imds-ready",
+		"rolaunch.basic-ready",
 		"rolaunch.host-key-ready",
 		"rolaunch.identity-ready",
 		"rolaunch.bootstrap-ready",
@@ -825,6 +1015,16 @@ func TestRunFullModeWaitsForRootResizeBeforeExecutingUserDataAndPersistsMileston
 		"rolaunch.userdata-finished",
 		"rolaunch.done",
 	})
+	for _, mutation := range []string{
+		"rolaunch.host-key-ready",
+		"rolaunch.root-resize-finished",
+		"rolaunch.bootstrap-ready",
+		"rolaunch.userdata-started",
+		"rolaunch.userdata-finished",
+		"rolaunch.done",
+	} {
+		assertStepBefore(t, steps, "rolaunch.basic-ready", mutation)
+	}
 	assertStepBefore(t, steps, "rolaunch.root-resize-finished", "rolaunch.userdata-started")
 }
 
@@ -1058,6 +1258,7 @@ func testLauncherOps() launcherOps {
 		waitForInstanceIdentity: func(context.Context, config) (instanceIdentity, error) {
 			return instanceIdentity{InstanceID: "i-123", Region: "eu-west-3"}, nil
 		},
+		waitForBasicTarget:        func(context.Context) error { return nil },
 		configureInstanceHostname: func(instanceIdentity) error { return nil },
 		enrichInstanceIdentity: func(_ context.Context, _ config, identity instanceIdentity) (instanceIdentity, error) {
 			return identity, nil
@@ -1131,6 +1332,26 @@ func assertNoUnexpectedCall(t *testing.T, ch <-chan string) {
 	case call := <-ch:
 		t.Fatalf("unexpected call to %s", call)
 	default:
+	}
+}
+
+func waitForCalls(t *testing.T, ch <-chan string, expected ...string) {
+	t.Helper()
+
+	want := make(map[string]bool, len(expected))
+	for _, call := range expected {
+		want[call] = true
+	}
+	for range expected {
+		select {
+		case call := <-ch:
+			if !want[call] {
+				t.Fatalf("unexpected call to %s", call)
+			}
+			delete(want, call)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("timed out waiting for calls: %v", want)
+		}
 	}
 }
 

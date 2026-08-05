@@ -1,0 +1,166 @@
+import importlib.util
+import os
+import tempfile
+import unittest
+from pathlib import Path
+from unittest import mock
+
+
+SCRIPT = (
+    Path(__file__).parent.parent
+    / "patches"
+    / "ubuntu"
+    / "files"
+    / "filter-compact-root-boot-profile.py"
+)
+SPEC = importlib.util.spec_from_file_location("filter_compact_profile", SCRIPT)
+assert SPEC and SPEC.loader
+MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MODULE)
+
+
+class FilterCompactRootBootProfileTest(unittest.TestCase):
+    def test_cross_filesystems_includes_overlay_lower_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            payload = root / "payload"
+            payload.write_text("content", encoding="utf-8")
+            real_stat = Path.stat
+
+            def mixed_device_stat(path, *args, **kwargs):
+                result = real_stat(path, *args, **kwargs)
+                if path == payload:
+                    values = list(result)
+                    values[2] = result.st_dev + 1
+                    return os.stat_result(values)
+                return result
+
+            with mock.patch.object(Path, "stat", mixed_device_stat):
+                same_device, same_report = MODULE.filter_profile(
+                    root, [("payload", 100)], "new-aws"
+                )
+                mixed_devices, mixed_report = MODULE.filter_profile(
+                    root,
+                    [("payload", 100)],
+                    "new-aws",
+                    cross_filesystems=True,
+                )
+
+            self.assertEqual([], same_device)
+            self.assertEqual(1, same_report["excluded_count"])
+            self.assertEqual([("payload", 100)], mixed_devices)
+            self.assertEqual(0, mixed_report["excluded_count"])
+
+    def test_resolves_symlinks_kernel_paths_and_hardlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            library = root / "usr/lib/current"
+            library.mkdir(parents=True)
+            payload = library / "payload"
+            payload.write_text("payload", encoding="utf-8")
+            os.link(payload, library / "payload-hardlink")
+            binary = root / "usr/bin"
+            binary.mkdir(parents=True)
+            (binary / "tool").symlink_to("../lib/current/payload")
+            module = root / "usr/lib/modules/new-aws/kernel/module.ko.zst"
+            module.parent.mkdir(parents=True)
+            module.write_text("module", encoding="utf-8")
+            modprobe = root / "usr/lib/modprobe.d/blacklist_linux-aws_new-aws.conf"
+            modprobe.parent.mkdir(parents=True)
+            modprobe.write_text("blacklist", encoding="utf-8")
+
+            entries = [
+                ("usr/bin/tool", 100),
+                ("usr/lib/current/payload-hardlink", 99),
+                ("usr/lib/modules/old-aws/kernel/module.ko.zst", 98),
+                ("usr/lib/modprobe.d/blacklist_linux-aws_7.0.0-1009-aws.conf", 97),
+                ("missing", 96),
+                ("usr/lib/current", 95),
+            ]
+            filtered, report = MODULE.filter_profile(root, entries, "new-aws")
+
+            self.assertEqual(
+                [
+                    ("usr/lib/current/payload", 100),
+                    ("usr/lib/modules/new-aws/kernel/module.ko.zst", 98),
+                    ("usr/lib/modprobe.d/blacklist_linux-aws_new-aws.conf", 97),
+                ],
+                filtered,
+            )
+            self.assertEqual(1, report["duplicate_inode_count"])
+            self.assertEqual(1, report["missing_count"])
+            self.assertEqual(1, report["non_regular_count"])
+            self.assertEqual(4, report["eligible_count"])
+
+    def test_acceptance_uses_unique_eligible_file_coverage(self):
+        report = {
+            "input_count": 1390,
+            "output_count": 924,
+            "missing_count": 3,
+            "non_regular_count": 27,
+            "duplicate_inode_count": 434,
+            "unsafe_count": 0,
+            "excluded_count": 2,
+            "eligible_count": 927,
+        }
+
+        MODULE.validate_report(report, min_output_count=900, min_coverage_percent=99)
+
+        too_few = report | {"output_count": 899, "eligible_count": 902}
+        with self.assertRaisesRegex(ValueError, "unique files"):
+            MODULE.validate_report(too_few, min_output_count=900, min_coverage_percent=99)
+
+        incomplete = report | {"missing_count": 20, "eligible_count": 944}
+        with self.assertRaisesRegex(ValueError, "coverage"):
+            MODULE.validate_report(incomplete, min_output_count=900, min_coverage_percent=99)
+
+        unsafe = report | {"unsafe_count": 1, "eligible_count": 928}
+        with self.assertRaisesRegex(ValueError, "unsafe"):
+            MODULE.validate_report(unsafe, min_output_count=900, min_coverage_percent=99)
+
+    def test_arm64_maps_shared_loader_and_library_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            loader = root / "usr/lib/ld-linux-aarch64.so.1"
+            library = root / "usr/lib/aarch64-linux-gnu/libsystemd.so.0"
+            loader.parent.mkdir(parents=True)
+            library.parent.mkdir(parents=True)
+            loader.write_text("loader", encoding="utf-8")
+            library.write_text("library", encoding="utf-8")
+
+            filtered, report = MODULE.filter_profile(
+                root,
+                [
+                    ("usr/lib64/ld-linux-x86-64.so.2", 100),
+                    ("usr/lib/x86_64-linux-gnu/libsystemd.so.0", 99),
+                ],
+                "new-aws",
+                architecture="arm64",
+            )
+
+            self.assertEqual(
+                [
+                    ("usr/lib/ld-linux-aarch64.so.1", 100),
+                    ("usr/lib/aarch64-linux-gnu/libsystemd.so.0", 99),
+                ],
+                filtered,
+            )
+            self.assertEqual(0, report["missing_count"])
+
+    def test_absolute_symlink_stays_inside_supplied_root(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "usr/lib/target"
+            target.parent.mkdir(parents=True)
+            target.write_text("target", encoding="utf-8")
+            link = root / "lib"
+            link.symlink_to("/usr/lib")
+
+            resolved, relative = MODULE.resolve_in_root(root, "lib/target")
+
+            self.assertEqual(target, resolved)
+            self.assertEqual("usr/lib/target", relative)
+
+
+if __name__ == "__main__":
+    unittest.main()

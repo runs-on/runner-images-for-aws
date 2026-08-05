@@ -1,5 +1,6 @@
 require "minitest/autorun"
 require "aws-sdk-ec2"
+require "bigdecimal"
 require "json"
 require "open3"
 require "rbconfig"
@@ -136,6 +137,120 @@ class MeasureLaunchTimeTest < Minitest::Test
 
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
     assert_operator elapsed, :<, 0.5
+  end
+
+  def test_wait_for_new_boot_id_ignores_original_boot_and_disconnects
+    old_boot = "11111111-1111-1111-1111-111111111111"
+    new_boot = "22222222-2222-2222-2222-222222222222"
+    responses = [
+      ["#{old_boot}\n", "", Status.new(true, 0)],
+      ["", "connection refused", Status.new(false, 255)],
+      ["#{new_boot}\n", "", Status.new(true, 0)]
+    ]
+    capture = lambda do |**_arguments|
+      responses.shift
+    end
+
+    actual = @harness.stub(:ssh_capture, capture) do
+      @harness.wait_for_new_boot_id(
+        ip: "203.0.113.10",
+        ssh_user: "ubuntu",
+        private_key_path: "/tmp/key",
+        previous_boot_id: old_boot,
+        timeout_seconds: 1,
+        poll_interval: 0
+      )
+    end
+
+    assert_equal new_boot, actual
+    assert_empty responses
+  end
+
+  def test_compact_recovery_verification_checks_reboot_firmware_and_root_growth
+    old_boot = "11111111-1111-1111-1111-111111111111"
+    new_boot = "22222222-2222-2222-2222-222222222222"
+    remote_commands = []
+    capture = lambda do |**arguments|
+      remote_commands << arguments.fetch(:remote_command)
+      if remote_commands.length == 1
+        ["#{old_boot}\n", "", Status.new(true, 0)]
+      else
+        ["recovery_boot_id=#{new_boot}\nboot_path=grub-initramfs-recovery\n", "", Status.new(true, 0)]
+      end
+    end
+    wait = lambda do |**arguments|
+      assert_equal old_boot, arguments.fetch(:previous_boot_id)
+      new_boot
+    end
+
+    evidence = @harness.stub(:ssh_capture, capture) do
+      @harness.stub(:wait_for_new_boot_id, wait) do
+        @harness.verify_compact_recovery!(
+          ip: "203.0.113.10",
+          ssh_user: "ubuntu",
+          private_key_path: "/tmp/key",
+          timeout_seconds: 30,
+          expected_root_gib: 60,
+          nonce: "fixed-nonce"
+        )
+      end
+    end
+
+    assert_includes evidence, "grub-initramfs-recovery"
+    assert_includes remote_commands.first, "systemd-run"
+    assert_includes remote_commands.first, "fixed-nonce"
+    validation = remote_commands.last
+    assert_includes validation, "expected-recovery-cmdline"
+    assert_includes validation, "expected-boot-order"
+    assert_includes validation, "check_equal 'recovery kernel command line'"
+    assert_includes validation, "check_equal 'recovery BootCurrent'"
+    assert_includes validation, "check_empty 'recovery BootNext'"
+    assert_includes validation, "observe_equal 'recovery BootOrder'"
+    assert_includes validation, "expected_disk_bytes=$((60 * 1024 * 1024 * 1024))"
+    assert_includes validation, "check_ge 'root partition uses the expanded disk'"
+    assert_includes validation, "filesystem_bytes"
+    remote_commands.each do |remote_command|
+      _stdout, syntax_stderr, syntax_status = Open3.capture3("bash", "-n", stdin_data: remote_command)
+      assert syntax_status.success?, syntax_stderr
+    end
+  end
+
+  def test_compact_recovery_failure_reports_passes_and_expected_actual_failure
+    old_boot = "11111111-1111-1111-1111-111111111111"
+    new_boot = "22222222-2222-2222-2222-222222222222"
+    calls = 0
+    capture = lambda do |**_arguments|
+      calls += 1
+      if calls == 1
+        ["PASS initial boot path: direct-uefi\n#{old_boot}\n", "", Status.new(true, 0)]
+      else
+        [
+          "PASS recovery root filesystem type: overlay\n",
+          "FAIL root disk size\n  expected: 64424509440\n  actual:   32212254720\n",
+          Status.new(false, 1)
+        ]
+      end
+    end
+
+    error = @harness.stub(:ssh_capture, capture) do
+      @harness.stub(:wait_for_new_boot_id, new_boot) do
+        assert_raises(RuntimeError) do
+          @harness.verify_compact_recovery!(
+            ip: "203.0.113.10",
+            ssh_user: "ubuntu",
+            private_key_path: "/tmp/key",
+            timeout_seconds: 30,
+            nonce: "fixed-nonce"
+          )
+        end
+      end
+    end
+
+    assert_includes error.message, "Compact recovery validation failed"
+    assert_includes error.message, "PASS recovery root filesystem type: overlay"
+    assert_includes error.message, "FAIL root disk size"
+    assert_includes error.message, "expected: 64424509440"
+    assert_includes error.message, "actual:   32212254720"
   end
 
   def test_cli_rejects_negative_warm_run_count
@@ -292,6 +407,125 @@ class MeasureLaunchTimeTest < Minitest::Test
     refute summary[:expected]
     assert summary[:complete]
     assert_empty summary[:values]
+  end
+
+  def test_rolaunch_benchmark_remains_report_only_without_limits
+    @harness.verify_rolaunch_benchmark!(
+      results: [{ phase: "measure", instance_id: "", rolaunch_status: "absent", rolaunch_ready_s: nil }],
+      warm_runs: 0,
+      measure_runs: 1
+    )
+  end
+
+  def test_rolaunch_benchmark_accepts_inclusive_average_and_strict_maximum
+    @harness.verify_rolaunch_benchmark!(
+      results: rolaunch_benchmark_results(warm_values: [7.9], measured_values: [7.33125, 7.33125]),
+      warm_runs: 1,
+      measure_runs: 2,
+      average_at_most: BigDecimal("7.33125"),
+      max_below: BigDecimal("10")
+    )
+  end
+
+  def test_rolaunch_benchmark_compares_unrounded_average
+    [7.331251, 7.334].each do |value|
+      error = assert_raises(RuntimeError) do
+        @harness.verify_rolaunch_benchmark!(
+          results: rolaunch_benchmark_results(warm_values: [7.0], measured_values: [value]),
+          warm_runs: 1,
+          measure_runs: 1,
+          average_at_most: BigDecimal("7.33125")
+        )
+      end
+
+      assert_includes error.message, "exceeds 7.33125s"
+    end
+  end
+
+  def test_rolaunch_benchmark_maximum_is_strict
+    passing = rolaunch_benchmark_results(warm_values: [9.0], measured_values: [9.999999])
+    @harness.verify_rolaunch_benchmark!(
+      results: passing,
+      warm_runs: 1,
+      measure_runs: 1,
+      max_below: BigDecimal("10")
+    )
+
+    error = assert_raises(RuntimeError) do
+      @harness.verify_rolaunch_benchmark!(
+        results: rolaunch_benchmark_results(warm_values: [9.0], measured_values: [10.0]),
+        warm_runs: 1,
+        measure_runs: 1,
+        max_below: BigDecimal("10")
+      )
+    end
+    assert_includes error.message, "is not below 10.0s"
+  end
+
+  def test_rolaunch_benchmark_requires_exact_phases
+    error = assert_raises(RuntimeError) do
+      @harness.verify_rolaunch_benchmark!(
+        results: rolaunch_benchmark_results(warm_values: [], measured_values: [7.0, 7.0]),
+        warm_runs: 1,
+        measure_runs: 1,
+        average_at_most: BigDecimal("8")
+      )
+    end
+
+    assert_includes error.message, "run set differs"
+  end
+
+  def test_rolaunch_benchmark_requires_unique_instance_ids
+    results = rolaunch_benchmark_results(warm_values: [7.0], measured_values: [7.0])
+    results.last[:instance_id] = results.first[:instance_id]
+
+    error = assert_raises(RuntimeError) do
+      @harness.verify_rolaunch_benchmark!(
+        results: results,
+        warm_runs: 1,
+        measure_runs: 1,
+        average_at_most: BigDecimal("8")
+      )
+    end
+
+    assert_includes error.message, "unique nonempty instance ID"
+  end
+
+  def test_rolaunch_benchmark_requires_ready_warm_and_measured_results
+    results = rolaunch_benchmark_results(warm_values: [7.0], measured_values: [7.0])
+    results.first[:rolaunch_status] = "failed"
+    results.first[:rolaunch_ready_s] = nil
+
+    error = assert_raises(RuntimeError) do
+      @harness.verify_rolaunch_benchmark!(
+        results: results,
+        warm_runs: 1,
+        measure_runs: 1,
+        max_below: BigDecimal("10")
+      )
+    end
+
+    assert_includes error.message, results.first[:instance_id]
+  end
+
+  def test_rolaunch_benchmark_cli_exposes_and_validates_optional_limits
+    stdout, stderr, status = Open3.capture3(RbConfig.ruby, HELPER_PATH, "--help")
+    assert status.success?, stderr
+    assert_includes stdout, "--require-average-rolaunch-ready-at-most"
+    assert_includes stdout, "--require-max-rolaunch-ready-below"
+    assert_includes stdout, "--verify-compact-recovery"
+
+    %w[invalid 0 -1 NaN Infinity].each do |value|
+      _stdout, invalid_stderr, invalid_status = Open3.capture3(
+        RbConfig.ruby,
+        HELPER_PATH,
+        "ami-test",
+        "--require-average-rolaunch-ready-at-most",
+        value
+      )
+      refute invalid_status.success?, value
+      assert_includes invalid_stderr, "must be a finite positive number", value
+    end
   end
 
   def test_root_block_device_override_uses_explicit_gp3_throughput
@@ -566,6 +800,17 @@ class MeasureLaunchTimeTest < Minitest::Test
   end
 
   private
+
+  def rolaunch_benchmark_results(warm_values:, measured_values:)
+    (warm_values.map { |value| ["warm", value] } + measured_values.map { |value| ["measure", value] }).each_with_index.map do |(phase, value), index|
+      {
+        phase: phase,
+        instance_id: "i-benchmark-#{index}",
+        rolaunch_status: "ready",
+        rolaunch_ready_s: value
+      }
+    end
+  end
 
   def stub_volume_inspection_client
     ec2 = Aws::EC2::Client.new(stub_responses: true)

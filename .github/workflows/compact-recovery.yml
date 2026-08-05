@@ -1,0 +1,59 @@
+name: Verify compact GRUB recovery
+run-name: Verify compact GRUB recovery for ${{ inputs.ami_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      ami_id:
+        description: AMI ID to validate in us-east-1
+        required: true
+        type: string
+  workflow_call:
+    inputs:
+      ami_id:
+        description: AMI ID to validate in us-east-1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify ${{ inputs.ami_id }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af # v1
+        with:
+          ruby-version: 3.2.2
+          bundler-cache: true
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v6
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+      - name: Verify compact GRUB recovery
+        timeout-minutes: 30
+        env:
+          AMI_ID: ${{ inputs.ami_id }}
+          SUBNET_ID: ${{ secrets.SUBNET_ID }}
+        run: |
+          bundle exec bin/utils/measure-launch-time "$AMI_ID" \
+            --subnet-id "$SUBNET_ID" \
+            --instance-type m7a.large \
+            --root-volume-size 60 \
+            --root-iops 3000 \
+            --root-throughput 400 \
+            --ssh-timeout 300 \
+            --warm-runs 0 \
+            --measure-runs 1 \
+            --verify-compact-recovery \
+            --output-json compact-recovery.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: ${{ always() && hashFiles('compact-recovery.json') != '' }}
+        with:
+          name: compact-recovery-${{ inputs.ami_id }}
+          path: compact-recovery.json
+          retention-days: 7

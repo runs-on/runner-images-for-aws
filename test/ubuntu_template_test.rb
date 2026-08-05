@@ -91,6 +91,72 @@ class UbuntuTemplateTest < Minitest::Test
     end
   end
 
+  def test_only_ubuntu26_full_and_stepsecurity_images_select_compact_surrogate_builds
+    compact_images = CONFIG.fetch("images").filter_map do |image|
+      [image.fetch("id"), image.fetch("builder_volume_size")] if image.fetch("compact_root", false)
+    end.to_h
+
+    assert_equal(
+      {
+        "ubuntu26-full-x64" => 60,
+        "ubuntu26-full-arm64" => 60,
+        "ubuntu26-gpu-x64" => 80,
+        "ubuntu26-stepsecurity-x64" => 60,
+        "ubuntu26-stepsecurity-arm64" => 60
+      },
+      compact_images
+    )
+
+    snapshot_limits = CONFIG.fetch("images").filter_map do |image|
+      [image.fetch("id"), image.fetch("compact_snapshot_limit_gib")] if image.fetch("compact_root", false)
+    end.to_h
+    assert_equal(
+      {
+        "ubuntu26-full-x64" => 8,
+        "ubuntu26-full-arm64" => 8,
+        "ubuntu26-gpu-x64" => 12,
+        "ubuntu26-stepsecurity-x64" => 8,
+        "ubuntu26-stepsecurity-arm64" => 8
+      },
+      snapshot_limits
+    )
+
+    build_script = File.read(BUILD_SCRIPT)
+    assert_includes build_script, "image.fetch('compact_root', false)"
+    assert_includes build_script, "compact_root is limited to Ubuntu 26 Full and StepSecurity arm64 or x64 images"
+    assert_includes build_script, '"amazon-ebssurrogate.compact_root"'
+    assert_includes build_script, '"amazon-ebs.build_ebs"'
+    compact_images.each_key do |image_id|
+      assert CONFIG.fetch("images").find { |image| image.fetch("id") == image_id }.fetch("compact_root")
+    end
+  end
+
+  def test_compact_surrogates_snapshot_only_the_fresh_final_target
+    [FULL_X64_TEMPLATE, FULL_ARM64_TEMPLATE, GPU_X64_TEMPLATE, STEPSECURITY_X64_TEMPLATE, STEPSECURITY_ARM64_TEMPLATE].each do |path|
+      template = File.read(path)
+      surrogate = template[/source "amazon-ebssurrogate" "compact_root" \{.*?^\}/m]
+
+      refute_nil surrogate, path
+      assert_includes surrogate, "use_create_image", path
+      assert_includes surrogate, "imds_support", path
+      assert_match(%r{device_name\s*=\s*"/dev/sda1".*?omit_from_artifact\s*=\s*true}m, surrogate, path)
+      assert_match(%r{device_name\s*=\s*"/dev/sdf".*?volume_size\s*=\s*var\.volume_size}m, surrogate, path)
+      assert_match(%r{source_device_name\s*=\s*"/dev/sdf".*?device_name\s*=\s*"/dev/sda1"}m, surrogate, path)
+      target_mapping = surrogate.scan(/launch_block_device_mappings \{.*?^\s*\}/m).find do |mapping|
+        mapping.include?('device_name           = "/dev/sdf"')
+      end
+      ami_root_device = surrogate[/ami_root_device \{.*?^\s*\}/m]
+      refute_nil target_mapping, path
+      refute_nil ami_root_device, path
+      assert_includes target_mapping, "throughput            = var.volume_throughput", path
+      refute_includes ami_root_device, "throughput", path
+      assert_equal 4, surrogate.scan("ami_name = var.ami_name").length, path
+      refute_includes surrogate, "snapshot_id", path
+      refute_includes surrogate, "uefi_data", path
+      refute_includes surrogate, "boot_mode", path
+    end
+  end
+
   def test_ubuntu26_descendants_are_defined_for_supported_architectures
     configured = CONFIG.fetch("images").filter_map do |image|
       id = image.fetch("id")
@@ -127,7 +193,9 @@ class UbuntuTemplateTest < Minitest::Test
 
     assert_includes content, "if is_ubuntu26; then"
     assert_includes content, 'DIST_SLUG="ubuntu2604"'
-    assert_includes content, 'linux-modules-nvidia-595-aws nvidia-driver-595'
+    assert_includes content, 'linux-modules-nvidia-595-$(uname -r) nvidia-driver-595'
+    assert_includes content, 'rm -f /etc/apt/preferences.d/runs-on-compact-boot'
+    refute_includes content, 'linux-modules-nvidia-595-aws nvidia-driver-595'
     assert_includes content, 'CUDA_PACKAGES="cuda-toolkit-13-3"'
     assert_includes content, 'CUDA_MAJOR_VERSION="13"'
     assert_includes content, 'grep "release $CUDA_MAJOR_VERSION"'
@@ -216,6 +284,13 @@ class UbuntuTemplateTest < Minitest::Test
     assert_match(/systemctl mask .*cloud-init-main\.service/m, content)
     refute_match(/Wants=.*cloud-init/, content)
     assert_includes content, "ExecStart=/usr/bin/rolaunch --mode=full"
+    assert_includes content, "DefaultDependencies=no"
+    assert_includes content, "Wants=systemd-networkd.service systemd-resolved.service"
+    assert_includes content, "After=systemd-networkd.service systemd-resolved.service"
+    assert_includes content, "Conflicts=shutdown.target"
+    assert_includes content, "Before=multi-user.target shutdown.target"
+    refute_includes content, "After=basic.target"
+    refute_includes content, "Before=basic.target"
     refute_includes content, "Before=network-online.target"
     assert_includes content, "systemd-networkd-wait-online.service"
     assert_match(/systemctl mask .*systemd-networkd-wait-online\.service/m, content)

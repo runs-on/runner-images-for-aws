@@ -63,9 +63,13 @@ patch_ubuntu() {
   cp -r patches/ubuntu/files $custom_dir/
   if [ "$ARCH" = "arm64" ]; then
     for custom_file in "$custom_dir"/files/*.sh; do
-      if [ "${custom_file##*/}" != "configure-full-rolaunch.sh" ]; then
-        gnu_sed -i 's|amd64|arm64|g' "$custom_file"
-      fi
+      case "${custom_file##*/}" in
+        assert-direct-uefi-build-boot.sh|configure-full-rolaunch.sh|finalize-compact-root.sh|prepare-direct-uefi.sh|rearm-direct-uefi.sh|wait-for-compact-root-resize.sh)
+          ;;
+        *)
+          gnu_sed -i 's|amd64|arm64|g' "$custom_file"
+          ;;
+      esac
     done
   fi
 
