@@ -6,6 +6,8 @@ require 'yaml'
 require 'slop'
 require 'io/console'
 require 'fileutils'
+require 'time'
+require_relative '../lib/build_provenance'
 
 module CopyAmi
   module_function
@@ -30,6 +32,7 @@ module CopyAmi
       opts.bool '-f', '--force', 'Do not ask for confirmation'
       opts.string '-r', '--region', 'Copy to a specific region'
       opts.string '--summary-json', 'Write machine-readable release summary JSON'
+      opts.string '--provenance-json', 'Write and attach release provenance JSON', required: true
       opts.bool '-h', '--help', 'Show help'
     end
   end
@@ -58,7 +61,14 @@ module CopyAmi
     force = options.force?
     regions_to_copy = options.region? ? [options[:region]] : REGIONS
 
-    results = copy_ami_to_regions(ami_id_or_name, regions_to_copy, force, summary_json: options[:summary_json], out: out)
+    results = copy_ami_to_regions(
+      ami_id_or_name,
+      regions_to_copy,
+      force,
+      summary_json: options[:summary_json],
+      provenance_json: options[:provenance_json],
+      out: out
+    )
     results.all? { |result| result[:success] }
   rescue Slop::Error
     false
@@ -68,7 +78,7 @@ module CopyAmi
     Aws::EC2::Client.new(region: region)
   end
 
-  def copy_ami_to_regions(ami_id_or_name, regions, force = false, source_client: nil, client_factory: nil, summary_json: nil, out: $stdout)
+  def copy_ami_to_regions(ami_id_or_name, regions, force = false, source_client: nil, client_factory: nil, summary_json: nil, provenance_json: nil, out: $stdout)
     source_client ||= ec2_client(SOURCE_REGION)
     client_factory ||= method(:ec2_client)
 
@@ -78,6 +88,10 @@ module CopyAmi
     ami_id = ami_description.image_id
     name = ami_description.name.sub(AMI_DEV_PREFIX, AMI_PROD_PREFIX)
     waiter_options = wait_options(name)
+    source_build_digest = source_tag(ami_description, BuildProvenance::TAG_DIGEST) if provenance_json
+    if provenance_json && source_build_digest.nil?
+      raise "source AMI #{ami_id} has no #{BuildProvenance::TAG_DIGEST} tag"
+    end
 
     out.puts "Going to copy AMI #{ami_id} (#{ami_description.name}) to #{regions.join(', ')} with name: #{name}"
     out.puts "Using wait settings image(delay=#{waiter_options[:image][:delay]}s, max_attempts=#{waiter_options[:image][:max_attempts]}) snapshot(delay=#{waiter_options[:snapshot][:delay]}s, max_attempts=#{waiter_options[:snapshot][:max_attempts]})"
@@ -91,16 +105,28 @@ module CopyAmi
       target_name: name,
       regions: regions,
       wait_options: waiter_options,
+      copy_tags: portable_tags(ami_description, strip_provenance: !provenance_json.nil?),
       client_factory: client_factory,
       out: out
     )
 
     print_summary(results, waiter_options, out)
     write_release_summary(summary_json, ami_name: name, results: results) if summary_json
+    if provenance_json
+      write_release_provenance(
+        provenance_json,
+        source_image: ami_description,
+        source_build_digest: source_build_digest,
+        ami_name: name,
+        results: results,
+        client_factory: client_factory,
+        uri: ENV.fetch("PROVENANCE_URI", "").strip
+      )
+    end
     results
   end
 
-  def process_regions(source_ami_id:, target_name:, regions:, wait_options:, client_factory:, out: $stdout)
+  def process_regions(source_ami_id:, target_name:, regions:, wait_options:, copy_tags: [], client_factory:, out: $stdout)
     results = Array.new(regions.length)
     thread_out = synchronized_output(out)
 
@@ -111,6 +137,7 @@ module CopyAmi
           target_name: target_name,
           region: region,
           wait_options: wait_options,
+          copy_tags: copy_tags,
           ec2: client_factory.call(region),
           out: thread_out
         )
@@ -166,6 +193,57 @@ module CopyAmi
     }
   end
 
+  def source_tag(image, key)
+    return unless image.respond_to?(:tags)
+
+    image.tags&.find { |tag| tag.key == key }&.value
+  end
+
+  def portable_tags(image, strip_provenance: false)
+    return [] unless image.respond_to?(:tags)
+
+    image.tags.to_a.filter_map do |tag|
+      next if strip_provenance && [BuildProvenance::TAG_DIGEST, BuildProvenance::TAG_URI].include?(tag.key)
+
+      { key: tag.key, value: tag.value }
+    end
+  end
+
+  def write_release_provenance(path, source_image:, source_build_digest:, ami_name:, results:, client_factory:, uri: nil)
+    outputs = results.filter_map do |result|
+      next unless result[:success] && result[:image_id] && result[:snapshot_id]
+
+      {
+        "region" => result.fetch(:region),
+        "ami_id" => result.fetch(:image_id),
+        "snapshot_id" => result.fetch(:snapshot_id)
+      }
+    end
+    manifest = {
+      "schema_version" => 1,
+      "released_at" => Time.now.utc.iso8601,
+      "source" => {
+        "region" => SOURCE_REGION,
+        "ami_id" => source_image.image_id,
+        "build_provenance_digest" => source_build_digest,
+        "build_provenance_uri" => source_tag(source_image, BuildProvenance::TAG_URI)
+      },
+      "image" => { "name" => ami_name },
+      "outputs" => outputs
+    }
+    digest = BuildProvenance.write(path, manifest)
+
+    outputs.each do |output|
+      BuildProvenance.tag_resources(
+        ec2_client: client_factory.call(output.fetch("region")),
+        resource_ids: [output.fetch("ami_id"), output.fetch("snapshot_id")],
+        digest: digest,
+        uri: uri
+      )
+    end
+    digest
+  end
+
   def infer_image_id(ami_name)
     ami_name
       .sub(/\A#{Regexp.escape(AMI_PROD_PREFIX)}-/, "")
@@ -199,7 +277,7 @@ module CopyAmi
     exit 1
   end
 
-  def process_region(source_ami_id:, target_name:, region:, wait_options:, ec2:, out: $stdout)
+  def process_region(source_ami_id:, target_name:, region:, wait_options:, copy_tags: [], ec2:, out: $stdout)
     out.puts "Processing region #{region}..."
 
     existing_image = find_target_image(ec2, target_name)
@@ -213,7 +291,7 @@ module CopyAmi
     if existing_image
       out.puts "Reusing existing AMI #{image_id} in #{region} (state=#{existing_image.state}, public=#{existing_image.public})"
     else
-      image_id = copy_image(ec2, source_ami_id, target_name, region, out)
+      image_id = copy_image(ec2, source_ami_id, target_name, region, copy_tags, out)
     end
 
     wait_for_image(ec2, image_id, region, wait_options[:image], out)
@@ -249,15 +327,21 @@ module CopyAmi
     build_result(region: region, status: "error", success: false, error: e.message, **diagnostic)
   end
 
-  def copy_image(ec2, source_ami_id, target_name, region, out)
+  def copy_image(ec2, source_ami_id, target_name, region, copy_tags, out)
     out.puts "Copying AMI #{source_ami_id} to #{region}..."
-    response = ec2.copy_image(
+    params = {
       source_region: SOURCE_REGION,
       source_image_id: source_ami_id,
-      copy_image_tags: true,
+      copy_image_tags: false,
       name: target_name,
       description: "RunsOn copy of #{source_ami_id} to #{region}"
-    )
+    }
+    unless copy_tags.empty?
+      params[:tag_specifications] = %w[image snapshot].map do |resource_type|
+        { resource_type: resource_type, tags: copy_tags }
+      end
+    end
+    response = ec2.copy_image(**params)
 
     # to avoid throttling
     sleep 2

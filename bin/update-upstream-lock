@@ -1,0 +1,25 @@
+#!/usr/bin/env ruby
+
+require "open3"
+require "yaml"
+
+lock_path = File.expand_path("../upstream.lock.yml", __dir__)
+lock = YAML.safe_load_file(lock_path)
+repository = lock.fetch("repository")
+ref = lock.fetch("ref")
+
+output, error, status = Open3.capture3("git", "ls-remote", repository, ref)
+fail("Failed to resolve #{repository}: #{error}") unless status.success?
+
+revision = output.split.first
+fail("No revision found for #{repository} #{ref}") unless revision&.match?(/\A[0-9a-f]{40}\z/)
+
+if lock.fetch("revision") == revision
+  puts "Already locked #{repository} at #{revision}"
+  File.open(ENV.fetch("GITHUB_OUTPUT"), "a") { |file| file.puts "changed=false" } if ENV["GITHUB_OUTPUT"]
+  exit 0
+end
+
+File.write(lock_path, { "repository" => repository, "ref" => ref, "revision" => revision }.to_yaml)
+puts "Locked #{repository} at #{revision}"
+File.open(ENV.fetch("GITHUB_OUTPUT"), "a") { |file| file.puts "changed=true" } if ENV["GITHUB_OUTPUT"]

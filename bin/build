@@ -2,12 +2,15 @@
 
 require 'json'
 require 'open-uri'
+require 'open3'
 require 'slop'
 require 'fileutils'
 require 'yaml'
 require 'aws-sdk-ec2'
 require 'timeout'
 require 'tmpdir'
+require 'time'
+require_relative '../lib/build_provenance'
 
 IMAGES = YAML.load_file(File.expand_path("../config.yml", __dir__)).fetch("images")
 SUBNET_TAG_KEY = "runner-image-for-aws"
@@ -25,7 +28,6 @@ usage = Slop::Options.new do |opts|
   opts.string '--log-file', 'Path to write Packer output (defaults to a temporary file)', default: nil
   opts.string '--region', 'Region', default: ENV.fetch('AWS_DEFAULT_REGION', "us-east-1")
   opts.boolean '--debug', 'Debug mode', default: false
-  opts.boolean '--sync', 'Run bin/sync for the selected image before patching/building', default: false
   opts.bool '-h', '--help', 'Show help'
 end
 
@@ -233,6 +235,13 @@ def default_log_file
   File.join(Dir.tmpdir, "packer-build-#{Time.now.strftime('%Y%m%d-%H%M%S')}-#{Process.pid}.log")
 end
 
+def command_output(env, *command)
+  output, error, status = Open3.capture3(env, *command)
+  fail("Command failed: #{command.join(' ')}\n#{error}") unless status.success?
+
+  output.strip
+end
+
 image = IMAGES.find do |i|
   i['id'] == options[:image_id]
 end
@@ -245,9 +254,12 @@ dist = image_id_parts.first
 arch = image_id_parts.last
 variant = image_id_parts[1..-2].join('-')
 release_dir = "releases/#{dist}/#{arch}"
-fail "Skipping #{release_dir}, not found" unless Dir.exist?(release_dir)
 patch_script = File.expand_path("../bin/patch/#{dist}-#{arch}", __dir__)
 fail "Patch script not found: #{patch_script}" unless File.exist?(patch_script)
+
+sync_script = File.expand_path("../bin/sync", __dir__)
+system(sync_script, "--image-id", options[:image_id]) || fail("Failed to materialize #{release_dir}")
+fail "Skipping #{release_dir}, not found" unless Dir.exist?(release_dir)
 
 ami_name = [options[:image_prefix], image['id'], options[:image_version]].join('-')
 legacy_subnet_id = options[:subnet_id] || ENV.fetch('SUBNET_ID', nil)
@@ -268,22 +280,14 @@ packer_template_content = File.read("patches/#{packer_template_relative_path}")
 log_file_path = options[:log_file] || default_log_file
 puts "Using Packer command log file: #{log_file_path}"
 custom_amazon_plugin_binary = ENV.fetch('PACKER_AMAZON_PLUGIN_BINARY', '').strip
-custom_plugin_path = ""
+packer_plugin_path = File.expand_path(
+  ".tmp/packer/plugins/#{options[:image_id]}",
+  File.expand_path("..", __dir__)
+)
+FileUtils.mkdir_p(packer_plugin_path)
 
 # Ensure template directory exists
 FileUtils.mkdir_p(File.dirname(packer_template_path))
-
-if options[:sync]
-  sync_script = File.expand_path("../bin/sync", __dir__)
-  unless run_command_with_log(
-    label: "Sync generated files for #{options[:image_id]} before build",
-    command: [sync_script, "--image-id", options[:image_id]],
-    env: {},
-    log_file: log_file_path
-  )
-    fail("Failed to sync #{options[:image_id]}")
-  end
-end
 
 # Refresh the generated release tree from the repo patches before every build.
 unless run_command_with_log(
@@ -328,6 +332,7 @@ end
 at_exit do
   FileUtils.rm_rf(packer_template_path)
   FileUtils.rm_rf("integrations")
+  FileUtils.rm_rf(packer_plugin_path)
 end
 
 if custom_amazon_plugin_binary.empty?
@@ -338,18 +343,12 @@ if custom_amazon_plugin_binary.empty?
 else
   fail("Custom amazon plugin binary not found: #{custom_amazon_plugin_binary}") unless File.file?(custom_amazon_plugin_binary)
 
-  custom_plugin_path = File.expand_path(
-    ".tmp/packer/plugins/#{options[:image_id]}",
-    File.expand_path("..", __dir__)
-  )
-  FileUtils.mkdir_p(custom_plugin_path)
-
   plugin_install_cmd = [
     "packer", "plugins", "install", "--force",
     "--path", custom_amazon_plugin_binary,
     "github.com/hashicorp/amazon"
   ]
-  plugin_env = { "PACKER_PLUGIN_PATH" => custom_plugin_path }
+  plugin_env = { "PACKER_PLUGIN_PATH" => packer_plugin_path }
 
   puts "Installing custom amazon plugin from #{custom_amazon_plugin_binary}"
   unless run_command_with_log(
@@ -390,7 +389,13 @@ if source_ami_name_override.empty? != source_ami_owner_override.empty?
   fail("SOURCE_AMI_NAME and SOURCE_AMI_OWNER must be set together")
 end
 source_ami_name = source_ami_name_override.empty? ? image.fetch('source_ami_name') : source_ami_name_override
-source_ami_owner = source_ami_owner_override.empty? ? image.fetch('source_ami_owner') : source_ami_owner_override
+source_ami_owner = (source_ami_owner_override.empty? ? image.fetch('source_ami_owner') : source_ami_owner_override).to_s
+source_ami = BuildProvenance.resolve_source_ami(
+  ec2_client: network_ec2_client,
+  name: source_ami_name,
+  owner: source_ami_owner
+)
+puts "Resolved source AMI #{source_ami.image_id} (#{source_ami.name})"
 
 packer_build_cmd = [
   "packer", "build",
@@ -402,7 +407,7 @@ packer_build_cmd = [
   "-var", "image_version=#{options[:image_version]}",
   "-var", "subnet_id=#{resolved_subnet_id}",
   "-var", "region=#{options[:region]}",
-  "-var", "source_ami_name=#{source_ami_name}",
+  "-var", "source_ami_name=#{source_ami.name}",
   "-var", "source_ami_owner=#{source_ami_owner}",
   ("-var" if image.key?('instance_type')),
   ("instance_type=#{image.fetch('instance_type')}" if image.key?('instance_type')),
@@ -417,10 +422,10 @@ packer_build_cmd = [
   packer_template_path
 ].compact
 
-packer_init_env = { "PACKER_LOG" => "0" }
-unless custom_plugin_path.empty?
-  packer_init_env["PACKER_PLUGIN_PATH"] = custom_plugin_path
-end
+packer_init_env = {
+  "PACKER_LOG" => "0",
+  "PACKER_PLUGIN_PATH" => packer_plugin_path
+}
 
 puts "Running Packer init command..."
 unless run_command_with_log(
@@ -432,10 +437,15 @@ unless run_command_with_log(
   fail("Packer init failed")
 end
 
-packer_build_env = { "PROJECT_ROOT" => File.expand_path("..", __dir__) }
-unless custom_plugin_path.empty?
-  packer_build_env["PACKER_PLUGIN_PATH"] = custom_plugin_path
+packer_version = command_output(packer_init_env, "packer", "version").lines.first.strip
+packer_plugins = command_output(packer_init_env, "packer", "plugins", "installed").lines.reject(&:empty?).map do |path|
+  File.basename(path.strip)
 end
+
+packer_build_env = {
+  "PROJECT_ROOT" => File.expand_path("..", __dir__),
+  "PACKER_PLUGIN_PATH" => packer_plugin_path
+}
 
 puts "Running Packer build command..."
 
@@ -515,28 +525,75 @@ end
 
 # Fetch AMI ID corresponding to AMI name
 ec2_client = Aws::EC2::Client.new(region: 'us-east-1')
-ami_id = nil
+response = ec2_client.describe_images(
+  owners: ["self"],
+  filters: [{ name: 'name', values: [ami_name] }]
+)
+output_ami = response.images.first
+fail("No AMI found with name: #{ami_name}") if output_ami.nil?
 
-begin
-  response = ec2_client.describe_images({
-    filters: [{ name: 'name', values: [ami_name] }]
-  })
-  
-  if response.images.any?
-    ami_id = response.images.first.image_id
-    puts "Found AMI ID: #{ami_id} for AMI name: #{ami_name}"
-  else
-    puts "No AMI found with name: #{ami_name}"
-  end
-rescue Aws::EC2::Errors::ServiceError => e
-  puts "Error fetching AMI ID: #{e.message}"
+ami_id = output_ami.image_id
+snapshot_ids = output_ami.block_device_mappings.filter_map { |mapping| mapping.ebs&.snapshot_id }
+puts "Found AMI ID: #{ami_id} for AMI name: #{ami_name}"
+
+repository_revision = command_output({}, "git", "rev-parse", "HEAD")
+repository_dirty = !command_output({}, "git", "status", "--porcelain", "--untracked-files=no").empty?
+upstream = YAML.safe_load_file(File.expand_path("../upstream.lock.yml", __dir__))
+integration_revisions = Dir.glob("integrations/*/.git").sort.to_h do |git_dir|
+  path = File.dirname(git_dir)
+  [path, command_output({}, "git", "-C", path, "rev-parse", "HEAD")]
 end
+manifest = {
+  "schema_version" => 1,
+  "built_at" => Time.now.utc.iso8601,
+  "image" => {
+    "id" => image.fetch("id"),
+    "name" => ami_name,
+    "version" => options[:image_version],
+    "region" => "us-east-1",
+    "config" => image,
+    "config_sha256" => Digest::SHA256.hexdigest(JSON.generate(image))
+  },
+  "source" => {
+    "repository_revision" => repository_revision,
+    "repository_dirty" => repository_dirty,
+    "upstream" => upstream,
+    "patch_tree_sha256" => BuildProvenance.digest_tree(File.expand_path("../patches", __dir__)),
+    "integration_revisions" => integration_revisions
+  },
+  "source_ami" => {
+    "id" => source_ami.image_id,
+    "name" => source_ami.name,
+    "owner" => source_ami_owner,
+    "creation_date" => source_ami.creation_date
+  },
+  "toolchain" => {
+    "packer_version" => packer_version,
+    "packer_plugins" => packer_plugins
+  },
+  "output" => {
+    "ami_id" => ami_id,
+    "snapshot_ids" => snapshot_ids
+  }
+}
+provenance_file = ENV.fetch("PROVENANCE_FILE", File.expand_path("../provenance/#{ami_name}.json", __dir__))
+provenance_digest = BuildProvenance.write(provenance_file, manifest)
+provenance_uri = ENV.fetch("PROVENANCE_URI", "").strip
+BuildProvenance.tag_resources(
+  ec2_client: ec2_client,
+  resource_ids: [ami_id, *snapshot_ids],
+  digest: provenance_digest,
+  uri: provenance_uri
+)
+puts "Wrote provenance manifest #{provenance_file} (sha256:#{provenance_digest})"
 
 
 if github_output_file = ENV.fetch('GITHUB_OUTPUT', nil)
   File.open(github_output_file, 'a') do |f|
     f.puts "ami_name=#{ami_name}"
     f.puts "ami_id=#{ami_id}"
+    f.puts "provenance_file=#{provenance_file}"
+    f.puts "provenance_digest=#{provenance_digest}"
   end
   puts "AMI name #{ami_name} and ID #{ami_id} added to GitHub Actions outputs"
 end
@@ -546,5 +603,6 @@ if github_step_summary_file = ENV.fetch('GITHUB_STEP_SUMMARY', nil)
     f.puts "## #{image['id']}"
     f.puts "- **AMI Name:** `#{ami_name}`"
     f.puts "- **AMI ID:** `#{ami_id}`"
+    f.puts "- **Provenance:** `sha256:#{provenance_digest}`"
   end
 end

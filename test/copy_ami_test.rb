@@ -7,12 +7,13 @@ load File.expand_path("../bin/copy-ami", __dir__)
 
 FakeEbs = Struct.new(:snapshot_id)
 FakeBlockDeviceMapping = Struct.new(:ebs)
-FakeImage = Struct.new(:image_id, :name, :state, :public, :creation_date, :block_device_mappings)
+FakeTag = Struct.new(:key, :value)
+FakeImage = Struct.new(:image_id, :name, :state, :public, :creation_date, :block_device_mappings, :tags)
 FakeDescribeImagesResponse = Struct.new(:images)
 FakeCopyImageResponse = Struct.new(:image_id)
 
 class FakeEc2Client
-  attr_reader :copied_names, :published_images, :published_snapshots
+  attr_reader :copied_names, :published_images, :published_snapshots, :tagged_resources, :last_copy_params
 
   def initialize(images_by_name: {}, images_by_id: {}, wait_errors: {}, copy_image_id: nil, on_wait: nil)
     @images_by_name = images_by_name
@@ -23,6 +24,7 @@ class FakeEc2Client
     @copied_names = []
     @published_images = []
     @published_snapshots = []
+    @tagged_resources = []
   end
 
   def describe_images(owners: nil, filters: nil, image_ids: nil)
@@ -37,9 +39,14 @@ class FakeEc2Client
     FakeDescribeImagesResponse.new(image ? [image] : [])
   end
 
-  def copy_image(source_region:, source_image_id:, copy_image_tags:, name:, description:)
-    @copied_names << name
+  def copy_image(**params)
+    @last_copy_params = params
+    @copied_names << params.fetch(:name)
     FakeCopyImageResponse.new(@copy_image_id)
+  end
+
+  def create_tags(resources:, tags:)
+    @tagged_resources << { resources: resources, tags: tags }
   end
 
   def wait_until(waiter_name, params)
@@ -120,12 +127,75 @@ class CopyAmiTest < Minitest::Test
     )
 
     assert_equal [copied.name], client.copied_names
+    assert_equal false, client.last_copy_params.fetch(:copy_image_tags)
     assert_equal "published", result[:status]
     assert_equal true, result[:success]
   end
 
+  def test_release_provenance_links_build_and_tags_each_output
+    source_image = build_image(
+      image_id: "ami-source",
+      name: "runs-on-dev-ubuntu24-full-x64-123",
+      state: "available",
+      public: false,
+      tags: [
+        FakeTag.new(BuildProvenance::TAG_DIGEST, "build-digest"),
+        FakeTag.new(BuildProvenance::TAG_URI, "https://example.test/build"),
+        FakeTag.new("creator", "RunsOn")
+      ]
+    )
+    output_image = build_image(
+      image_id: "ami-output",
+      name: "runs-on-v2.2-ubuntu24-full-x64-123",
+      state: "available",
+      public: false
+    )
+    source_client = FakeEc2Client.new(images_by_name: { source_image.name => source_image })
+    output_client = FakeEc2Client.new(
+      images_by_name: { output_image.name => output_image },
+      images_by_id: { output_image.image_id => output_image }
+    )
+
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "provenance.json")
+      ENV["PROVENANCE_URI"] = "https://example.test/release"
+      CopyAmi.copy_ami_to_regions(
+        source_image.name,
+        ["eu-west-1"],
+        true,
+        source_client: source_client,
+        client_factory: ->(_region) { output_client },
+        provenance_json: path,
+        out: StringIO.new
+      )
+
+      manifest = JSON.parse(File.read(path))
+      assert_equal "build-digest", manifest.dig("source", "build_provenance_digest")
+      assert_equal "ami-output", manifest.dig("outputs", 0, "ami_id")
+      digest = Digest::SHA256.file(path).hexdigest
+      assert_equal(
+        {
+          resources: ["ami-output", "snap-ami-output"],
+          tags: [
+            { key: BuildProvenance::TAG_DIGEST, value: digest },
+            { key: BuildProvenance::TAG_URI, value: "https://example.test/release" }
+          ]
+        },
+        output_client.tagged_resources.last
+      )
+    ensure
+      ENV.delete("PROVENANCE_URI")
+    end
+  end
+
   def test_timeout_does_not_stop_later_regions_and_run_returns_false
-    source_image = build_image(image_id: "ami-source", name: "runs-on-dev-windows25-full-x64-123", state: "available", public: false)
+    source_image = build_image(
+      image_id: "ami-source",
+      name: "runs-on-dev-windows25-full-x64-123",
+      state: "available",
+      public: false,
+      tags: [FakeTag.new(BuildProvenance::TAG_DIGEST, "build-digest")]
+    )
     first_region_image = build_image(image_id: "ami-timeout", name: "runs-on-v2.2-windows25-full-x64-123", state: "pending", public: false)
     second_region_image = build_image(image_id: "ami-published", name: "runs-on-v2.2-windows25-full-x64-123", state: "available", public: false)
 
@@ -138,19 +208,25 @@ class CopyAmiTest < Minitest::Test
     success_client = FakeEc2Client.new(images_by_name: { second_region_image.name => second_region_image }, images_by_id: { second_region_image.image_id => second_region_image })
     out = StringIO.new
 
-    results = CopyAmi.copy_ami_to_regions(
-      source_image.name,
-      %w[us-east-2 us-west-2],
-      true,
-      source_client: source_client,
-      client_factory: lambda { |region|
-        region == "us-east-2" ? timeout_client : success_client
-      },
-      out: out
-    )
+    Dir.mktmpdir do |dir|
+      provenance_path = File.join(dir, "provenance.json")
+      results = CopyAmi.copy_ami_to_regions(
+        source_image.name,
+        %w[us-east-2 us-west-2],
+        true,
+        source_client: source_client,
+        client_factory: lambda { |region|
+          region == "us-east-2" ? timeout_client : success_client
+        },
+        provenance_json: provenance_path,
+        out: out
+      )
 
-    assert_equal ["timed out", "published"], results.map { |result| result[:status] }
-    assert_equal [false, true], results.map { |result| result[:success] }
+      assert_equal ["timed out", "published"], results.map { |result| result[:status] }
+      assert_equal [false, true], results.map { |result| result[:success] }
+      assert_equal ["ami-published"], JSON.parse(File.read(provenance_path)).fetch("outputs").map { |output| output.fetch("ami_id") }
+      refute_empty success_client.tagged_resources
+    end
     assert_includes out.string, "Region summary:"
   end
 
@@ -240,14 +316,15 @@ class CopyAmiTest < Minitest::Test
 
   private
 
-  def build_image(image_id:, name:, state:, public:)
+  def build_image(image_id:, name:, state:, public:, tags: [])
     FakeImage.new(
       image_id,
       name,
       state,
       public,
       "2026-03-13T07:38:00.000Z",
-      [FakeBlockDeviceMapping.new(FakeEbs.new("snap-#{image_id}"))]
+      [FakeBlockDeviceMapping.new(FakeEbs.new("snap-#{image_id}"))],
+      tags
     )
   end
 end

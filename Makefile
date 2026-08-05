@@ -19,8 +19,8 @@ INSPECTOR_SCANNER_CONFIG_JSON := $(shell ruby bin/inspector-scanner-config)
 help:
 	@printf "Available commands:\n"
 	@printf "  sync-<image-id>             Sync one image template\n"
-	@printf "  build-<image-id>            Sync and build one image\n"
-	@printf "  debug-<image-id>            Sync and build one image in debug mode\n"
+	@printf "  build-<image-id>            Build one image\n"
+	@printf "  debug-<image-id>            Build one image in debug mode\n"
 	@printf "  cleanup-dev                 Clean up development AMIs\n"
 	@printf "  cleanup-prod                Clean up production AMIs\n"
 	@printf "  inspector-stack-deploy      Deploy the Inspector AMI scanner stack\n"
@@ -29,7 +29,7 @@ help:
 	@printf "  inspector-stack-watch       List recent Inspector scanner executions\n"
 	@printf "  setup-roles                 Create the legacy SSM instance profile\n"
 	@printf "  efs-utils                   Build and upload efs-utils packages\n"
-	@printf "  reset                       Reset generated releases changes\n"
+	@printf "  reset                       Remove generated release inputs\n"
 	@printf "\nImage IDs:\n"
 	@printf "  %s\n" $(IMAGE_IDS)
 
@@ -39,12 +39,12 @@ sync-$(1):
 endef
 
 define build_template
-build-$(1): sync-$(1)
+build-$(1):
 	env $$(shell cat .env) bundle exec bin/build --image-id $(1)
 endef
 
 define debug_template
-debug-$(1): sync-$(1)
+debug-$(1):
 	env $$(shell cat .env) bundle exec bin/build --image-id $(1) --debug
 endef
 
@@ -53,7 +53,7 @@ $(foreach id,$(IMAGE_IDS),$(eval $(call build_template,$(id))))
 $(foreach id,$(IMAGE_IDS),$(eval $(call debug_template,$(id))))
 
 reset:
-	git reset releases && git checkout releases
+	rm -rf releases
 
 cleanup-dev:
 	env $(shell cat .env) AMI_PREFIX=runs-on-dev bundle exec bin/utils/cleanup-amis

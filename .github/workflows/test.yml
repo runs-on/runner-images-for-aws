@@ -161,7 +161,6 @@ jobs:
               sudo resolvectl domain "$interface" | grep -Eq '[[:alnum:]]'
               sudo networkctl status --all
               sudo resolvectl status
-
               direct_uefi_state=/var/lib/runs-on-direct-uefi
               if [[ -d "$direct_uefi_state" ]]; then
                 efi_output="$(sudo efibootmgr -v)"
@@ -215,7 +214,7 @@ jobs:
                 sudo cmp -s "/boot/vmlinuz-${kernel_release}" "$direct_kernel"
                 sudo sha256sum --check "$direct_uefi_state/fallback.sha256"
               fi
-            fi
+              fi
           else
             sudo cat /var/log/cloud-init-output.log
           fi

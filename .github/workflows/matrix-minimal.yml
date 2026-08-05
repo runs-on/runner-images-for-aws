@@ -12,8 +12,7 @@ on:
         description: ubuntu24-minimal-arm64
         default: true
   schedule:
-    # staggered after matrix-linux (08:00 same days) to avoid concurrent
-    # "Sync from upstream" auto-commit push races
+    # Staggered after matrix-linux (08:00 same days) to spread build load.
     - cron: '0 10 2,17 * *'
 
 jobs:
@@ -41,12 +40,9 @@ jobs:
   sync:
     uses: ./.github/workflows/sync.yml
     secrets: inherit
-    permissions:
-      contents: write
     with:
       release_prefix: minimal
       ami_cleanup_prefix: runs-on-dev-ubuntu24-minimal
-      dist_prefix: ubuntu
 
   build-test-release:
     name: Build/Test/Release ${{ matrix.image_id }}

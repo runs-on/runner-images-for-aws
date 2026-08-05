@@ -1,12 +1,16 @@
-# CI job writes and commits this, but we don't want it locally
+# Generated build input
+/releases/
+
+# Local configuration
 /.bundle/config
 /.env*
 warm-ami
 ec2-boot-bench
 .trash
 *.pem
-/releases/**/*.hcl
 /integrations
+/provenance/
+/.tmp/
 # locally built artifacts
 /dist/
 /vendor/
