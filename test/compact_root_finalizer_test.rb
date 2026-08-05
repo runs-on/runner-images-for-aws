@@ -241,9 +241,16 @@ class CompactRootFinalizerTest < Minitest::Test
   def test_workflow_requires_compact_tpm_acl_to_be_empty
     workflow = File.read(WORKFLOW_TEST)
 
+    assert_includes workflow, 'runtime_keystore=/var/lib/tpm2-tss/system/keystore'
+    assert_includes workflow, 'if sudo test -L "$runtime_keystore"; then'
+    assert_includes workflow, 'elif sudo test -e "$runtime_keystore"; then'
+    assert_includes workflow, 'sudo test -d "$runtime_keystore"'
     assert_includes workflow, 'test ! -s "$runtime_acl"'
-    assert_includes workflow, 'if sudo test -e "$upper_keystore"; then'
+    assert_includes workflow, 'if sudo test -L "$upper_keystore"; then'
+    assert_includes workflow, 'elif sudo test -e "$upper_keystore"; then'
+    assert_includes workflow, 'sudo test -d "$upper_keystore"'
     assert_includes workflow, 'test ! -s "$upper_acl"'
+    assert_includes workflow, 'if [[ -n "$runtime_acl" ]]; then'
     refute_match(/^\s*test -s "\$runtime_acl"/, workflow)
     refute_match(/^\s*test -s "\$upper_acl"/, workflow)
   end
@@ -318,6 +325,96 @@ class CompactRootFinalizerTest < Minitest::Test
       _stdout, stderr, status = Open3.capture3("bash", "-c", command)
 
       assert status.success?, stderr
+    end
+  end
+
+  def test_tpm_acl_normalization_accepts_a_missing_keystore
+    Dir.mktmpdir("compact-root-missing-tpm-keystore") do |dir|
+      root = File.join(dir, "root")
+      evidence = File.join(dir, "removed.getfacl")
+      command = <<~BASH
+        source #{Shellwords.escape(SCRIPT)}
+        trap - EXIT INT TERM
+        mkdir -p #{Shellwords.escape(root)}
+        getfacl() { return 99; }
+        setfacl() { return 99; }
+        remove_irrelevant_tpm_acl \
+          #{Shellwords.escape(root)} \
+          #{Shellwords.escape(evidence)}
+        [[ -f #{Shellwords.escape(evidence)} ]]
+        [[ ! -s #{Shellwords.escape(evidence)} ]]
+      BASH
+
+      _stdout, stderr, status = Open3.capture3("bash", "-c", command)
+
+      assert status.success?, stderr
+    end
+  end
+
+  def test_tpm_acl_normalization_rejects_a_non_directory_keystore
+    Dir.mktmpdir("compact-root-invalid-tpm-keystore") do |dir|
+      root = File.join(dir, "root")
+      keystore = File.join(root, "var/lib/tpm2-tss/system/keystore")
+      evidence = File.join(dir, "removed.getfacl")
+      command = <<~BASH
+        source #{Shellwords.escape(SCRIPT)}
+        trap - EXIT INT TERM
+        mkdir -p #{Shellwords.escape(File.dirname(keystore))}
+        : > #{Shellwords.escape(keystore)}
+        remove_irrelevant_tpm_acl \
+          #{Shellwords.escape(root)} \
+          #{Shellwords.escape(evidence)}
+      BASH
+
+      _stdout, stderr, status = Open3.capture3("bash", "-c", command)
+
+      refute status.success?
+      assert_includes stderr, "expected TPM keystore path is not a directory"
+    end
+  end
+
+  def test_tpm_acl_normalization_rejects_a_live_symlink_keystore
+    Dir.mktmpdir("compact-root-symlink-tpm-keystore") do |dir|
+      root = File.join(dir, "root")
+      keystore = File.join(root, "var/lib/tpm2-tss/system/keystore")
+      target = File.join(dir, "target")
+      evidence = File.join(dir, "removed.getfacl")
+      command = <<~BASH
+        source #{Shellwords.escape(SCRIPT)}
+        trap - EXIT INT TERM
+        mkdir -p #{Shellwords.escape(File.dirname(keystore))} #{Shellwords.escape(target)}
+        ln -s #{Shellwords.escape(target)} #{Shellwords.escape(keystore)}
+        remove_irrelevant_tpm_acl \
+          #{Shellwords.escape(root)} \
+          #{Shellwords.escape(evidence)}
+      BASH
+
+      _stdout, stderr, status = Open3.capture3("bash", "-c", command)
+
+      refute status.success?
+      assert_includes stderr, "expected TPM keystore path is not a directory"
+    end
+  end
+
+  def test_tpm_acl_normalization_rejects_a_dangling_symlink_keystore
+    Dir.mktmpdir("compact-root-dangling-tpm-keystore") do |dir|
+      root = File.join(dir, "root")
+      keystore = File.join(root, "var/lib/tpm2-tss/system/keystore")
+      evidence = File.join(dir, "removed.getfacl")
+      command = <<~BASH
+        source #{Shellwords.escape(SCRIPT)}
+        trap - EXIT INT TERM
+        mkdir -p #{Shellwords.escape(File.dirname(keystore))}
+        ln -s missing-target #{Shellwords.escape(keystore)}
+        remove_irrelevant_tpm_acl \
+          #{Shellwords.escape(root)} \
+          #{Shellwords.escape(evidence)}
+      BASH
+
+      _stdout, stderr, status = Open3.capture3("bash", "-c", command)
+
+      refute status.success?
+      assert_includes stderr, "expected TPM keystore path is not a directory"
     end
   end
 

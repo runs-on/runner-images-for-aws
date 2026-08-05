@@ -252,18 +252,32 @@ jobs:
                   [[ "$(sudo findmnt -nro OPTIONS --target "$backing_mount/runs-on-root/$runtime_dir/lower")" == *ro* ]]
                   sudo bash -c 'cd "$1" && sha256sum --check --strict rootfs.squashfs.sha256' \
                     _ "$backing_mount/runs-on-root"
-                  runtime_acl="$(mktemp)"
-                  sudo getfacl --omit-header --numeric --physical --skip-base /var/lib/tpm2-tss/system/keystore > "$runtime_acl"
-                  test ! -s "$runtime_acl"
+                  runtime_keystore=/var/lib/tpm2-tss/system/keystore
+                  runtime_acl=''
+                  if sudo test -L "$runtime_keystore"; then
+                    echo "runtime TPM keystore must not be a symlink" >&2
+                    exit 1
+                  elif sudo test -e "$runtime_keystore"; then
+                    sudo test -d "$runtime_keystore"
+                    runtime_acl="$(mktemp)"
+                    sudo getfacl --omit-header --numeric --physical --skip-base "$runtime_keystore" > "$runtime_acl"
+                    test ! -s "$runtime_acl"
+                  fi
                   upper_keystore="$backing_mount/runs-on-root/upper/var/lib/tpm2-tss/system/keystore"
-                  if sudo test -e "$upper_keystore"; then
+                  upper_acl=''
+                  if sudo test -L "$upper_keystore"; then
+                    echo "upper TPM keystore must not be a symlink" >&2
+                    exit 1
+                  elif sudo test -e "$upper_keystore"; then
+                    sudo test -d "$upper_keystore"
                     upper_acl="$(mktemp)"
                     sudo getfacl --omit-header --numeric --physical --skip-base "$upper_keystore" > "$upper_acl"
                     test ! -s "$upper_acl"
-                    cmp "$runtime_acl" "$upper_acl"
-                    rm -f "$upper_acl"
+                    if [[ -n "$runtime_acl" ]]; then
+                      cmp "$runtime_acl" "$upper_acl"
+                    fi
                   fi
-                  rm -f "$runtime_acl"
+                  rm -f "$runtime_acl" "$upper_acl"
                   if [[ "$IMAGE_ID" == *-arm64 ]]; then
                     test "$boot_path" = grub-initramfs-recovery
                   fi

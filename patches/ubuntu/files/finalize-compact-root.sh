@@ -416,7 +416,13 @@ remove_irrelevant_tpm_acl() {
   local before_acl after_acl
   [[ "${root}" == /* && -d "${root}" && ! -L "${root}" ]] \
     || fail "invalid ACL normalization root: ${root:-missing}"
-  [[ -d "${acl_path}" ]] || fail "expected TPM keystore directory is missing"
+  if [[ ! -e "${acl_path}" && ! -L "${acl_path}" ]]; then
+    : > "${evidence}"
+    log "TPM keystore is absent"
+    return
+  fi
+  [[ -d "${acl_path}" && ! -L "${acl_path}" ]] \
+    || fail "expected TPM keystore path is not a directory"
   before_acl="$(getfacl --absolute-names --numeric --skip-base --physical -- "${acl_path}")"
   if [[ -z "${before_acl}" ]]; then
     : > "${evidence}"
