@@ -241,6 +241,7 @@ class BuildResourcesTest < Minitest::Test
       compact_snapshot_limit_gib: 12,
       compact_root_volume_size_gib: 30,
       compact_root_throughput_mibps: 400,
+      compact_root_architecture: "x86_64",
       output: output,
       sleeper: ->(_delay) {}
     )
@@ -277,6 +278,7 @@ class BuildResourcesTest < Minitest::Test
         BuildResources.validate_compact_image!(
           ec2_client: client,
           image: candidate,
+          expected_architecture: "x86_64",
           limit_gib: 8,
           expected_volume_size_gib: 30,
           expected_throughput_mibps: 400,
@@ -285,6 +287,29 @@ class BuildResourcesTest < Minitest::Test
       end
       assert_includes error.message, "Compact AMI", field.to_s
     end
+  end
+
+  def test_compact_arm64_image_contract_accepts_arm64
+    ami_name = "runs-on-ubuntu26-full-arm64-123"
+    built_image = image(name: ami_name, architecture: "arm64")
+    snapshot = Resource.new(
+      snapshot_id: "snap-root",
+      full_snapshot_size_in_bytes: 7 * 1024 * 1024 * 1024
+    )
+    output = StringIO.new
+
+    result = BuildResources.validate_compact_image!(
+      ec2_client: FakeEc2.new(snapshots: [snapshot]),
+      image: built_image,
+      expected_architecture: "arm64",
+      limit_gib: 8,
+      expected_volume_size_gib: 30,
+      expected_throughput_mibps: 400,
+      output: output
+    )
+
+    assert_equal 7 * 1024 * 1024 * 1024, result
+    assert_includes output.string, "uefi-preferred, arm64"
   end
 
   def test_atomic_deregistration_falls_back_to_retrying_unsuccessful_snapshot_deletions
@@ -351,6 +376,7 @@ class BuildResourcesTest < Minitest::Test
         compact_snapshot_limit_gib: 8,
         compact_root_volume_size_gib: 30,
         compact_root_throughput_mibps: 400,
+        compact_root_architecture: "x86_64",
         output: StringIO.new,
         sleeper: ->(_delay) {}
       )

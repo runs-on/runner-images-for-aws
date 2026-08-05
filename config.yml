@@ -260,6 +260,8 @@ images:
 
   - id: ubuntu26-full-arm64
     template: ubuntu-full-arm64
+    compact_root: true
+    compact_snapshot_limit_gib: 8
     install_scripts:
       - install-actions-cache.sh
       - install-runner-package.sh
@@ -287,6 +289,7 @@ images:
       - install-python.sh
       - install-zstd.sh
     instance_type: m8g.large
+    builder_volume_size: 60
     volume_size: 30
     volume_throughput: 400
     source_ami_name: ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-arm64-server-*
@@ -319,7 +322,10 @@ images:
 
   - id: ubuntu26-stepsecurity-arm64
     template: ubuntu-stepsecurity-arm64
+    compact_root: true
+    compact_snapshot_limit_gib: 8
     instance_type: m8g.large
+    builder_volume_size: 60
     volume_size: 30
     volume_throughput: 400
     source_ami_name: runs-on-dev-ubuntu26-full-arm64-*

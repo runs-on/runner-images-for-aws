@@ -118,6 +118,35 @@ class FilterCompactRootBootProfileTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsafe"):
             MODULE.validate_report(unsafe, min_output_count=900, min_coverage_percent=99)
 
+    def test_arm64_maps_shared_loader_and_library_paths(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            loader = root / "usr/lib/ld-linux-aarch64.so.1"
+            library = root / "usr/lib/aarch64-linux-gnu/libsystemd.so.0"
+            loader.parent.mkdir(parents=True)
+            library.parent.mkdir(parents=True)
+            loader.write_text("loader", encoding="utf-8")
+            library.write_text("library", encoding="utf-8")
+
+            filtered, report = MODULE.filter_profile(
+                root,
+                [
+                    ("usr/lib64/ld-linux-x86-64.so.2", 100),
+                    ("usr/lib/x86_64-linux-gnu/libsystemd.so.0", 99),
+                ],
+                "new-aws",
+                architecture="arm64",
+            )
+
+            self.assertEqual(
+                [
+                    ("usr/lib/ld-linux-aarch64.so.1", 100),
+                    ("usr/lib/aarch64-linux-gnu/libsystemd.so.0", 99),
+                ],
+                filtered,
+            )
+            self.assertEqual(0, report["missing_count"])
+
     def test_absolute_symlink_stays_inside_supplied_root(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

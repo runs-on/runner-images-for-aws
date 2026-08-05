@@ -13,8 +13,19 @@ class CompactRootFinalizerTest < Minitest::Test
   RECOVERY_INIT = File.join(ROOT, "patches/ubuntu/files/compact-root-recovery-init")
   TEMPLATES = %w[
     ubuntu-full-x64.pkr.hcl
+    ubuntu-full-arm64.pkr.hcl
     ubuntu-gpu-x64.pkr.hcl
     ubuntu-stepsecurity-x64.pkr.hcl
+    ubuntu-stepsecurity-arm64.pkr.hcl
+  ].map { |name| File.join(ROOT, "patches/ubuntu/templates", name) }.freeze
+  DIRECT_TEMPLATES = %w[
+    ubuntu-full-x64.pkr.hcl
+    ubuntu-gpu-x64.pkr.hcl
+    ubuntu-stepsecurity-x64.pkr.hcl
+  ].map { |name| File.join(ROOT, "patches/ubuntu/templates", name) }.freeze
+  ARM64_TEMPLATES = %w[
+    ubuntu-full-arm64.pkr.hcl
+    ubuntu-stepsecurity-arm64.pkr.hcl
   ].map { |name| File.join(ROOT, "patches/ubuntu/templates", name) }.freeze
   AFTER_REBOOT = File.join(ROOT, "patches/ubuntu/files/after-reboot.sh")
   RESIZE_WAIT = File.join(ROOT, "patches/ubuntu/files/wait-for-compact-root-resize.sh")
@@ -67,7 +78,11 @@ class CompactRootFinalizerTest < Minitest::Test
     assert_includes wait_script, '"${part_number}" == 1'
     assert_includes wait_script, 'blockdev --getsize64 "${disk}"'
     assert_includes wait_script, 'filesystem_gap < 16 * 1024 * 1024'
-    TEMPLATES.drop(1).each do |path|
+    [
+      File.join(ROOT, "patches/ubuntu/templates", "ubuntu-gpu-x64.pkr.hcl"),
+      File.join(ROOT, "patches/ubuntu/templates", "ubuntu-stepsecurity-x64.pkr.hcl"),
+      File.join(ROOT, "patches/ubuntu/templates", "ubuntu-stepsecurity-arm64.pkr.hcl")
+    ].each do |path|
       template = File.read(path)
       wait_index = template.index("wait-for-compact-root-resize.sh")
       installer_index = path.include?("gpu") ? template.index("install-gpu.sh") : template.index("install-linux.sh")
@@ -231,6 +246,15 @@ class CompactRootFinalizerTest < Minitest::Test
     assert_includes workflow, 'test ! -s "$upper_acl"'
     refute_match(/^\s*test -s "\$runtime_acl"/, workflow)
     refute_match(/^\s*test -s "\$upper_acl"/, workflow)
+  end
+
+  def test_workflow_validates_arm64_compact_grub_boot
+    workflow = File.read(WORKFLOW_TEST)
+
+    assert_includes workflow, "ubuntu26-full-arm64|ubuntu26-stepsecurity-arm64"
+    assert_includes workflow, 'if [[ "$boot_path" == grub-initramfs-recovery ]]; then'
+    assert_includes workflow, 'runtime_dir=recovery-runtime'
+    assert_includes workflow, 'test "$boot_path" = grub-initramfs-recovery'
   end
 
   def test_tpm_acl_normalization_removes_only_the_expected_acl
@@ -598,8 +622,24 @@ class CompactRootFinalizerTest < Minitest::Test
     end
   end
 
+  def test_arm64_primary_grub_cmdline_selects_the_compact_root
+    command = <<~BASH
+      source #{Shellwords.escape(SCRIPT)}
+      trap - EXIT INT TERM
+      write_grub_boot_cmdline 8f2eaf70-4e41-4d0b-b0de-3f6253d7d4d4
+    BASH
+
+    stdout, stderr, status = Open3.capture3("bash", "-c", command)
+
+    assert status.success?, stderr
+    assert_equal(
+      "root=PARTUUID=8f2eaf70-4e41-4d0b-b0de-3f6253d7d4d4 rw runs_on.immutable=1 runs_on.squash_threads=percpu console=ttyS0 panic=0\n",
+      stdout
+    )
+  end
+
   def test_finalizer_is_last_and_surrogate_only
-    TEMPLATES.each do |path|
+    DIRECT_TEMPLATES.each do |path|
       template = File.read(path)
       finalizer = template.index("finalize-compact-root.sh")
 
@@ -609,5 +649,26 @@ class CompactRootFinalizerTest < Minitest::Test
       assert_includes final_block, 'only = ["amazon-ebssurrogate.compact_root"]', path
       assert_equal 1, template.scan("finalize-compact-root.sh").length, path
     end
+
+    ARM64_TEMPLATES.each do |path|
+      template = File.read(path)
+      finalizer = template.index("finalize-compact-root.sh")
+
+      refute_nil finalizer, path
+      refute_includes template, "prepare-direct-uefi.sh", path
+      refute_includes template, "compact-root-direct-init", path
+      final_block = template[template.rindex('provisioner "shell"', finalizer)..]
+      assert_includes final_block, 'only = ["amazon-ebssurrogate.compact_root"]', path
+      assert_equal 1, template.scan("finalize-compact-root.sh").length, path
+    end
+  end
+
+  def test_direct_uefi_init_is_installed_only_for_amd64
+    script = File.read(SCRIPT)
+
+    assert_match(
+      /if \[\[ "\$\{architecture\}" == amd64 \]\]; then\n\s+install -m 0755 "\$\{asset_dir\}\/compact-root-direct-init"/,
+      script,
+    )
   end
 end

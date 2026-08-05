@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 module BuildResources
-  COMPACT_ROOT_ARCHITECTURE = "x86_64"
   COMPACT_ROOT_BOOT_MODE = "uefi-preferred"
   COMPACT_ROOT_DEVICE_NAME = "/dev/sda1"
   COMPACT_ROOT_IOPS = 3_000
@@ -42,6 +41,7 @@ module BuildResources
   def validate_compact_image!(
     ec2_client:,
     image:,
+    expected_architecture:,
     limit_gib:,
     expected_volume_size_gib:,
     expected_throughput_mibps:,
@@ -53,7 +53,7 @@ module BuildResources
     end
 
     expected_image_values = {
-      architecture: COMPACT_ROOT_ARCHITECTURE,
+      architecture: expected_architecture,
       boot_mode: COMPACT_ROOT_BOOT_MODE,
       ena_support: true,
       imds_support: "v2.0",
@@ -125,10 +125,14 @@ module BuildResources
     compact_snapshot_limit_gib: nil,
     compact_root_volume_size_gib: nil,
     compact_root_throughput_mibps: nil,
+    compact_root_architecture: nil,
     output: $stdout,
     sleeper: Kernel.method(:sleep)
   )
     compact_root = !compact_snapshot_limit_gib.nil?
+    if compact_root && !%w[x86_64 arm64].include?(compact_root_architecture)
+      fail("Compact AMI architecture must be x86_64 or arm64")
+    end
     image = find_exact_build_image(
       ec2_client: ec2_client,
       ami_name: ami_name,
@@ -138,6 +142,7 @@ module BuildResources
       validate_compact_image!(
         ec2_client: ec2_client,
         image: image,
+        expected_architecture: compact_root_architecture,
         limit_gib: compact_snapshot_limit_gib,
         expected_volume_size_gib: compact_root_volume_size_gib,
         expected_throughput_mibps: compact_root_throughput_mibps,

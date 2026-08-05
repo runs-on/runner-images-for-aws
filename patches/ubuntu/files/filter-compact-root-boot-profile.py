@@ -20,6 +20,18 @@ CAPTURED_KERNEL_RELEASE = re.compile(
 MAX_SYMLINKS = 40
 
 
+def normalize_architecture_path(candidate: str, architecture: str) -> str:
+    """Map architecture-specific Ubuntu library paths in the shared profile."""
+    if architecture != "arm64":
+        return candidate
+
+    if candidate == "usr/lib64/ld-linux-x86-64.so.2":
+        return "usr/lib/ld-linux-aarch64.so.1"
+    return candidate.replace(
+        "usr/lib/x86_64-linux-gnu/", "usr/lib/aarch64-linux-gnu/"
+    )
+
+
 def safe_parts(path: str, base: list[str] | None = None) -> list[str]:
     parts = list(base or [])
     for part in PurePosixPath(path).parts:
@@ -81,6 +93,7 @@ def filter_profile(
     root: Path,
     entries: list[tuple[str, int]],
     kernel_release: str,
+    architecture: str = "amd64",
     exclusions: tuple[str, ...] = (),
     cross_filesystems: bool = False,
 ) -> tuple[list[tuple[str, int]], dict[str, int]]:
@@ -102,6 +115,7 @@ def filter_profile(
             f"usr/lib/modules/{kernel_release}", candidate
         )
         candidate = CAPTURED_KERNEL_RELEASE.sub(kernel_release, candidate)
+        candidate = normalize_architecture_path(candidate, architecture)
         if any(candidate == item or candidate.startswith(f"{item}/") for item in exclusions):
             report["excluded_count"] += 1
             continue
@@ -165,6 +179,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("root", type=Path)
     parser.add_argument("output", type=Path)
     parser.add_argument("--kernel-release", required=True)
+    parser.add_argument("--architecture", choices=("amd64", "arm64"), default="amd64")
     parser.add_argument("--report", type=Path)
     parser.add_argument("--exclude", action="append", default=[])
     parser.add_argument(
@@ -185,8 +200,9 @@ def main() -> None:
         args.root.resolve(),
         entries,
         args.kernel_release,
-        exclusions,
-        args.cross_filesystems,
+        architecture=args.architecture,
+        exclusions=exclusions,
+        cross_filesystems=args.cross_filesystems,
     )
     args.output.write_text(
         "".join(f"{path} {weight}\n" for path, weight in filtered),

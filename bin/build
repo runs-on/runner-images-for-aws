@@ -395,7 +395,7 @@ if compact_root_image
   fail("#{image.fetch('id')} enables compact_root without builder_volume_size") unless image.key?('builder_volume_size')
   fail("#{image.fetch('id')} enables compact_root without compact_snapshot_limit_gib") unless image.key?('compact_snapshot_limit_gib')
   fail("compact_snapshot_limit_gib must be positive") unless image.fetch('compact_snapshot_limit_gib').positive?
-  fail("compact_root is limited to Ubuntu 26 x64 images") unless image.fetch('id').match?(/\Aubuntu26-(?:full|gpu|stepsecurity)-x64\z/)
+  fail("compact_root is limited to Ubuntu 26 Full and StepSecurity arm64 or x64 images") unless image.fetch('id').match?(/\Aubuntu26-(?:full|stepsecurity)-(?:x64|arm64)\z|\Aubuntu26-gpu-x64\z/)
 end
 builder_selection = if supports_compact_root
                       compact_root_image ? "amazon-ebssurrogate.compact_root" : "amazon-ebs.build_ebs"
@@ -533,7 +533,8 @@ begin
     ami_name: ami_name,
     compact_snapshot_limit_gib: (image.fetch('compact_snapshot_limit_gib') if compact_root_image),
     compact_root_volume_size_gib: (image.fetch('volume_size') if compact_root_image),
-    compact_root_throughput_mibps: (image.fetch('volume_throughput') if compact_root_image)
+    compact_root_throughput_mibps: (image.fetch('volume_throughput') if compact_root_image),
+    compact_root_architecture: ({ "x64" => "x86_64", "arm64" => "arm64" }[arch] if compact_root_image)
   )
   ami_id = built_image.image_id
   puts "Found AMI ID: #{ami_id} for AMI name: #{ami_name} in #{options[:region]}"

@@ -236,13 +236,20 @@ jobs:
                 sudo cmp -s "/boot/vmlinuz-${kernel_release}" "$direct_kernel"
                 sudo sha256sum --check "$direct_uefi_state/fallback.sha256"
 
-                if [[ " $expected_cmdline " == *' runs_on.immutable=1 '* ]]; then
+              fi
+              case "$IMAGE_ID" in
+                ubuntu26-full-x64|ubuntu26-gpu-x64|ubuntu26-stepsecurity-x64|ubuntu26-full-arm64|ubuntu26-stepsecurity-arm64)
                   test "$(findmnt -nro FSTYPE /)" = overlay
                   sudo awk '$2 == "/boot/efi" && ("," $4 ",") ~ /,noauto,/ && ("," $4 ",") ~ /,x-systemd\.automount,/ { found = 1 } END { exit found ? 0 : 1 }' /etc/fstab
                   backing_mount="$(< /etc/runs-on-overlay/backing-root-mount)"
+                  boot_path="$(< /etc/runs-on-overlay/boot-path)"
+                  runtime_dir=runtime
+                  if [[ "$boot_path" == grub-initramfs-recovery ]]; then
+                    runtime_dir=recovery-runtime
+                  fi
                   test "$(findmnt -nro FSTYPE --target "$backing_mount")" = ext4
-                  test "$(sudo findmnt -nro FSTYPE --target "$backing_mount/runs-on-root/runtime/lower")" = squashfs
-                  [[ "$(sudo findmnt -nro OPTIONS --target "$backing_mount/runs-on-root/runtime/lower")" == *ro* ]]
+                  test "$(sudo findmnt -nro FSTYPE --target "$backing_mount/runs-on-root/$runtime_dir/lower")" = squashfs
+                  [[ "$(sudo findmnt -nro OPTIONS --target "$backing_mount/runs-on-root/$runtime_dir/lower")" == *ro* ]]
                   sudo bash -c 'cd "$1" && sha256sum --check --strict rootfs.squashfs.sha256' \
                     _ "$backing_mount/runs-on-root"
                   runtime_acl="$(mktemp)"
@@ -257,8 +264,11 @@ jobs:
                     rm -f "$upper_acl"
                   fi
                   rm -f "$runtime_acl"
-                fi
-              fi
+                  if [[ "$IMAGE_ID" == *-arm64 ]]; then
+                    test "$boot_path" = grub-initramfs-recovery
+                  fi
+                  ;;
+              esac
             fi
           else
             sudo cat /var/log/cloud-init-output.log

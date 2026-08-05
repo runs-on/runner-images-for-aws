@@ -439,7 +439,7 @@ hold_boot_packages() {
 
   install -d -m 0755 "${root%/}/etc/apt/preferences.d"
   cat > "${root%/}/etc/apt/preferences.d/runs-on-compact-boot" <<'EOF'
-Package: linux-aws linux-aws-headers-* linux-headers-aws linux-image-aws linux-headers-*-aws linux-image-*-aws linux-modules-*-aws linux-modules-extra-*-aws linux-tools-*-aws linux-modules-nvidia-*-aws linux-signatures-nvidia-*-aws grub-common grub2-common grub-pc grub-pc-bin grub-efi-amd64 grub-efi-amd64-bin grub-efi-amd64-signed grub-efi-amd64-unsigned shim-signed
+Package: linux-aws linux-aws-headers-* linux-headers-aws linux-image-aws linux-headers-*-aws linux-image-*-aws linux-modules-*-aws linux-modules-extra-*-aws linux-tools-*-aws linux-modules-nvidia-*-aws linux-signatures-nvidia-*-aws grub-common grub2-common grub-pc grub-pc-bin grub-efi-amd64 grub-efi-amd64-bin grub-efi-amd64-signed grub-efi-amd64-unsigned grub-efi-arm64 grub-efi-arm64-bin grub-efi-arm64-signed grub-efi-arm64-unsigned shim-signed
 Pin: version *
 Pin-Priority: -1
 EOF
@@ -473,8 +473,7 @@ EOF
 }
 
 build_squash() {
-  local source_root="$1"
-  local kernel_release="$2"
+  local source_root="$1" kernel_release="$2" architecture="$3"
   local excludes="${work_dir}/squash-excludes"
   local profile="${work_dir}/boot.sort"
   local profile_report="${work_dir}/boot-profile.json"
@@ -485,6 +484,7 @@ build_squash() {
   "${asset_dir}/filter-compact-root-boot-profile.py" \
     "${asset_dir}/compact-root.boot-profile" "${source_root}" "${profile}" \
     --kernel-release "${kernel_release}" \
+    --architecture "${architecture}" \
     --exclude boot --exclude dev --exclude proc --exclude sys --exclude run \
     --exclude tmp --exclude var/tmp --exclude mnt --exclude home/runner/_work \
     --exclude var/lib/docker --exclude var/lib/containerd --exclude var/lib/containers \
@@ -625,8 +625,14 @@ write_recovery_cmdline() {
   mv -f "${recovery_cmdline_path}.new" "${recovery_cmdline_path}"
 }
 
+write_grub_boot_cmdline() {
+  local root_partuuid="$1"
+  [[ "${root_partuuid}" =~ ^[0-9A-Fa-f-]+$ ]] || fail "invalid compact root PARTUUID"
+  printf 'root=PARTUUID=%s rw runs_on.immutable=1 runs_on.squash_threads=percpu console=ttyS0 panic=0\n' "${root_partuuid}"
+}
+
 write_grub_config() {
-  local boot_root="$1" kernel_release="$2" boot_uuid="$3" recovery_cmdline="$4"
+  local boot_root="$1" kernel_release="$2" boot_uuid="$3" recovery_cmdline="$4" entry_title="$5"
   install -d -m 0755 "${boot_root}/grub"
   cat > "${boot_root}/grub/grub.cfg" <<EOF
 set default=0
@@ -635,7 +641,7 @@ insmod part_gpt
 insmod ext2
 search --no-floppy --fs-uuid --set=root ${boot_uuid}
 
-menuentry 'RunsOn compact root recovery' {
+menuentry '${entry_title}' {
   linux /vmlinuz-${kernel_release} ${recovery_cmdline}
   initrd /runs-on-recovery-initrd-${kernel_release}.img
 }
@@ -651,21 +657,31 @@ verify_hash_manifest_at_root() {
 main() {
   [[ "${target_size_gib}" =~ ^[1-9][0-9]*$ ]] || fail "TARGET_VOLUME_SIZE_GB must be a positive integer"
   [[ "${IMAGE_OS:-}" == ubuntu26 ]] || fail "compact root is limited to Ubuntu 26"
-  [[ "$(dpkg --print-architecture)" == amd64 ]] || fail "compact root is limited to amd64"
+  local architecture compact_grub_package
+  architecture="$(dpkg --print-architecture)"
+  case "${architecture}" in
+    amd64) compact_grub_package=grub-pc-bin ;;
+    arm64) compact_grub_package=grub-efi-arm64-bin ;;
+    *) fail "compact root is limited to amd64 and arm64" ;;
+  esac
   grep -q '^VERSION_CODENAME=resolute$' /etc/os-release || fail "expected Ubuntu Resolute"
   [[ "${asset_dir}" == /run/runs-on-compact-root ]] || fail "assets must live on excluded /run"
 
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
     acl amazon-ec2-utils attr busybox-static cpio dosfstools e2fsprogs gdisk \
-    grub-pc-bin grub2-common kmod python3 rsync squashfs-tools zstd
+    "${compact_grub_package}" grub2-common kmod python3 rsync squashfs-tools zstd
   hold_boot_packages /
   apt-get clean
   rm -rf /var/lib/apt/lists/*
   for command in blkid blockdev cmp cpio dd e2fsck ebsnvme-id fallocate filefrag findmnt fsck.vfat getfacl grub-install lsblk mkfs.ext4 mkfs.vfat mksquashfs mount partprobe rsync setfacl sgdisk unsquashfs; do
     require_command "${command}"
   done
-  for helper in compact-root-direct-init compact-root-recovery-init compact-root-tree-manifest.py compact-root.boot-profile filter-compact-root-boot-profile.py prepare-direct-uefi.sh; do
+  local -a helpers=(compact-root-recovery-init compact-root-tree-manifest.py compact-root.boot-profile filter-compact-root-boot-profile.py)
+  if [[ "${architecture}" == amd64 ]]; then
+    helpers+=(compact-root-direct-init prepare-direct-uefi.sh)
+  fi
+  for helper in "${helpers[@]}"; do
     [[ -s "${asset_dir}/${helper}" ]] || fail "compact-root asset is missing: ${helper}"
   done
   isolate_builder_mounts
@@ -695,7 +711,9 @@ main() {
     grep -qx "${config_option}=y" "${kernel_config}" || fail "linux-aws kernel does not build ${config_option} into the image"
   done
   overlay_module="$(find_overlay_module "${kernel_release}")"
-  /bin/busybox sh -n "${asset_dir}/compact-root-direct-init"
+  if [[ "${architecture}" == amd64 ]]; then
+    /bin/busybox sh -n "${asset_dir}/compact-root-direct-init"
+  fi
 
   local source_root="${validation_dir}/source"
   create_source_view "${source_root}"
@@ -705,7 +723,7 @@ main() {
   "${asset_dir}/compact-root-tree-manifest.py" \
     "${source_root}" "${work_dir}/source-tree-full.json" \
     "${exclude_args[@]}" --cross-filesystems
-  build_squash "${source_root}" "${kernel_release}"
+  build_squash "${source_root}" "${kernel_release}" "${architecture}"
   assert_isolated_source_view "${source_root}"
   umount "${source_root}"
   rmdir "${source_root}"
@@ -755,7 +773,9 @@ main() {
   mount -o rw "${target_p1}" "${target_mount}"
   place_squash_first "${staged_squash}" "${target_mount}"
   install -m 0755 /bin/busybox "${target_mount}/runs-on-root/busybox"
-  install -m 0755 "${asset_dir}/compact-root-direct-init" "${target_mount}/runs-on-root/init"
+  if [[ "${architecture}" == amd64 ]]; then
+    install -m 0755 "${asset_dir}/compact-root-direct-init" "${target_mount}/runs-on-root/init"
+  fi
   install -m 0644 "${overlay_module}" "${target_mount}/runs-on-root/overlay.ko"
   printf '%s\n' "${kernel_release}" > "${target_mount}/runs-on-root/kernel-release"
   printf '%s\n' zstd > "${target_mount}/runs-on-root/compressor"
@@ -829,23 +849,33 @@ search.fs_uuid ${boot_uuid} root hd0,gpt13
 set prefix=(\$root)'/grub'
 configfile \$prefix/grub.cfg
 EOF
-  grub-install --target=i386-pc --boot-directory="${target_mount}/boot" --recheck "${target_disk}"
-  cmp -s -n 446 "${target_disk}" /dev/zero && fail "GRUB did not install protective-MBR boot code"
-  cmp -s -n "$(blockdev --getsize64 "${target_p14}")" "${target_p14}" /dev/zero && fail "GRUB did not install a BIOS core image"
+  case "${architecture}" in
+    amd64)
+      grub-install --target=i386-pc --boot-directory="${target_mount}/boot" --recheck "${target_disk}"
+      cmp -s -n 446 "${target_disk}" /dev/zero && fail "GRUB did not install protective-MBR boot code"
+      cmp -s -n "$(blockdev --getsize64 "${target_p14}")" "${target_p14}" /dev/zero && fail "GRUB did not install a BIOS core image"
 
-  direct_state_dir="${target_mount}/runs-on-root/upper/var/lib/runs-on-direct-uefi"
-  DIRECT_UEFI_ESP_MOUNT="${target_mount}/boot/efi" \
-  DIRECT_UEFI_DISK="${target_disk}" \
-  DIRECT_UEFI_ESP_PARTITION=15 \
-  DIRECT_UEFI_KERNEL_BOOT_DIR="${target_mount}/boot" \
-  DIRECT_UEFI_ROOT_PARTUUID="${root_partuuid}" \
-  DIRECT_UEFI_EXTRA_ARGUMENTS='rw init=/runs-on-root/init runs_on.immutable=1 runs_on.squash_threads=percpu' \
-  DIRECT_UEFI_STATE_DIR="${direct_state_dir}" \
-    "${asset_dir}/prepare-direct-uefi.sh"
-  recovery_cmdline_path="${direct_state_dir}/expected-recovery-cmdline"
-  write_recovery_cmdline "${direct_state_dir}/expected-cmdline" "${recovery_cmdline_path}"
-  recovery_cmdline="$(< "${recovery_cmdline_path}")"
-  write_grub_config "${target_mount}/boot" "${kernel_release}" "${boot_uuid}" "${recovery_cmdline}"
+      direct_state_dir="${target_mount}/runs-on-root/upper/var/lib/runs-on-direct-uefi"
+      DIRECT_UEFI_ESP_MOUNT="${target_mount}/boot/efi" \
+      DIRECT_UEFI_DISK="${target_disk}" \
+      DIRECT_UEFI_ESP_PARTITION=15 \
+      DIRECT_UEFI_KERNEL_BOOT_DIR="${target_mount}/boot" \
+      DIRECT_UEFI_ROOT_PARTUUID="${root_partuuid}" \
+      DIRECT_UEFI_EXTRA_ARGUMENTS='rw init=/runs-on-root/init runs_on.immutable=1 runs_on.squash_threads=percpu' \
+      DIRECT_UEFI_STATE_DIR="${direct_state_dir}" \
+        "${asset_dir}/prepare-direct-uefi.sh"
+      recovery_cmdline_path="${direct_state_dir}/expected-recovery-cmdline"
+      write_recovery_cmdline "${direct_state_dir}/expected-cmdline" "${recovery_cmdline_path}"
+      recovery_cmdline="$(< "${recovery_cmdline_path}")"
+      write_grub_config "${target_mount}/boot" "${kernel_release}" "${boot_uuid}" "${recovery_cmdline}" 'RunsOn compact root recovery'
+      ;;
+    arm64)
+      [[ -s "${target_mount}/boot/efi/EFI/BOOT/BOOTAA64.EFI" ]] \
+        || fail "ARM64 GRUB fallback is missing from the ESP"
+      recovery_cmdline="$(write_grub_boot_cmdline "${root_partuuid}")"
+      write_grub_config "${target_mount}/boot" "${kernel_release}" "${boot_uuid}" "${recovery_cmdline}" 'RunsOn compact root'
+      ;;
+  esac
 
   target_disk_guid="$(sgdisk -p "${target_disk}" | awk -F: '/Disk identifier \(GUID\)/ {gsub(/ /, "", $2); print tolower($2)}')"
   target_root_uuid="$(blkid -s UUID -o value "${target_p1}")"
@@ -870,10 +900,16 @@ EOF
   mount -o ro,noload "${target_p13}" "${target_mount}/boot"
   mount -o ro "${target_p15}" "${target_mount}/boot/efi"
   (cd "${target_mount}/runs-on-root" && sha256sum -c --strict rootfs.squashfs.sha256)
-  recovery_cmdline="$(< "${target_mount}/runs-on-root/upper/var/lib/runs-on-direct-uefi/expected-recovery-cmdline")"
-  grep -Fqx "  linux /vmlinuz-${kernel_release} ${recovery_cmdline}" "${target_mount}/boot/grub/grub.cfg" || fail "persisted GRUB recovery cmdline differs from state"
-  verify_hash_manifest_at_root "${target_mount}" "${target_mount}/runs-on-root/upper/var/lib/runs-on-direct-uefi/direct-kernel.sha256"
-  verify_hash_manifest_at_root "${target_mount}" "${target_mount}/runs-on-root/upper/var/lib/runs-on-direct-uefi/fallback.sha256"
+  if [[ "${architecture}" == amd64 ]]; then
+    recovery_cmdline="$(< "${target_mount}/runs-on-root/upper/var/lib/runs-on-direct-uefi/expected-recovery-cmdline")"
+    grep -Fqx "  linux /vmlinuz-${kernel_release} ${recovery_cmdline}" "${target_mount}/boot/grub/grub.cfg" || fail "persisted GRUB recovery cmdline differs from state"
+    verify_hash_manifest_at_root "${target_mount}" "${target_mount}/runs-on-root/upper/var/lib/runs-on-direct-uefi/direct-kernel.sha256"
+    verify_hash_manifest_at_root "${target_mount}" "${target_mount}/runs-on-root/upper/var/lib/runs-on-direct-uefi/fallback.sha256"
+  else
+    [[ -s "${target_mount}/boot/efi/EFI/BOOT/BOOTAA64.EFI" ]] \
+      || fail "persisted ARM64 GRUB fallback is missing from the ESP"
+    grep -Fqx "  linux /vmlinuz-${kernel_release} ${recovery_cmdline}" "${target_mount}/boot/grub/grub.cfg" || fail "persisted ARM64 GRUB cmdline differs from state"
+  fi
   mount -t squashfs -o loop,ro "${target_mount}/runs-on-root/rootfs.squashfs" "${lower}"
   assert_variant "${lower}"
   umount "${lower}"
