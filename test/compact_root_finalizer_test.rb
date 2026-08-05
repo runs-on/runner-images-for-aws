@@ -579,6 +579,18 @@ class CompactRootFinalizerTest < Minitest::Test
     assert_operator script.index('install -d -m 0755 -o runner -g runner "/${path}"'), :<, script.index('copy_tree "/${path}"')
   end
 
+  def test_persistent_temporary_tree_preserves_sticky_mode
+    script = File.read(SCRIPT)
+
+    assert_includes script, 'rsync -aHAXx --numeric-ids "${source%/}" "${destination_parent}/"'
+  end
+
+  def test_finalizer_creates_temporary_directories_with_sticky_mode
+    script = File.read(SCRIPT)
+
+    assert_includes script, 'tmp|var/tmp) install -d -m 1777 "/${path}"'
+  end
+
   def test_boot_paths_use_fresh_target_and_stable_direct_kernel
     script = File.read(SCRIPT)
 

@@ -298,9 +298,10 @@ manifest_exclude_args() {
 }
 
 copy_tree() {
-  local source="$1" destination="$2"
-  install -d "${destination}"
-  rsync -aHAXx --numeric-ids "${source%/}/" "${destination%/}/"
+  local source="$1" destination="$2" destination_parent
+  destination_parent="$(dirname "${destination%/}")"
+  install -d "${destination_parent}"
+  rsync -aHAXx --numeric-ids "${source%/}" "${destination_parent}/"
 }
 
 validate_copy_manifest() {
@@ -820,11 +821,11 @@ main() {
 
   local path
   for path in home/runner/_work mnt tmp var/tmp var/lib/docker var/lib/containerd var/lib/containers; do
-    if [[ "${path}" == home/runner/_work ]]; then
-      install -d -m 0755 -o runner -g runner "/${path}"
-    else
-      install -d "/${path}"
-    fi
+    case "${path}" in
+      home/runner/_work) install -d -m 0755 -o runner -g runner "/${path}" ;;
+      tmp|var/tmp) install -d -m 1777 "/${path}" ;;
+      *) install -d "/${path}" ;;
+    esac
     copy_tree "/${path}" "${target_mount}/runs-on-root/persist/${path}"
     validate_copy_manifest "/${path}" "${target_mount}/runs-on-root/persist/${path}" "persist-${path//\//-}"
   done
