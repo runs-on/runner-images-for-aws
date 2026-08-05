@@ -27,12 +27,16 @@ jobs:
           ruby-version: 3.2.2
           bundler-cache: true
       - name: Resolve current upstream revision
+        id: upstream
         run: bin/update-upstream-lock
       - name: Validate Ubuntu sync and patches
+        if: steps.upstream.outputs.changed == 'true'
         run: bundle exec bin/sync --dist-prefix ubuntu
       - name: Validate Windows sync and patches
+        if: steps.upstream.outputs.changed == 'true'
         run: bundle exec bin/sync --dist-prefix windows
       - name: Commit updated lock
+        if: steps.upstream.outputs.changed == 'true'
         uses: stefanzweifel/git-auto-commit-action@04702edda442b2e678b25b537cec683a1493fcb9 # v7
         with:
           commit_message: Update upstream lock
