@@ -30,7 +30,18 @@ rm -f \
   /var/lib/rolaunch/instance-identity.json \
   /var/lib/rolaunch/runs-on-user-data.done \
   /var/lib/rolaunch/timings.json \
-  /var/lib/rolaunch/user-data.sh
+  /var/lib/rolaunch/user-data.sh \
+  /runs-on/config.json \
+  /runs-on/instance-config.json \
+  /runs-on/env \
+  /runs-on/env.custom \
+  /runs-on/aws-container-auth-token \
+  /home/runner/.credentials \
+  /home/runner/.credentials_rsaparams \
+  /home/runner/.runner \
+  /home/runner/.runner_migrated
+
+rm -rf /var/lib/rolaunch/prefetch /var/lib/rolaunch/agent
 
 # Descendants retain the parent's direct networkd configuration and must not
 # reuse a netplan file generated for their builder instance.

@@ -69,24 +69,25 @@ type authorizedKeysTarget struct {
 }
 
 type instanceIdentity struct {
-	DevpayProductCodes      []string  `json:"devpayProductCodes,omitempty"`
-	MarketplaceProductCodes []string  `json:"marketplaceProductCodes,omitempty"`
-	AvailabilityZone        string    `json:"availabilityZone"`
-	PrivateIP               string    `json:"privateIp"`
-	LocalHostname           string    `json:"localHostname,omitempty"`
-	Version                 string    `json:"version,omitempty"`
-	Region                  string    `json:"region"`
-	InstanceID              string    `json:"instanceId"`
-	BillingProducts         []string  `json:"billingProducts,omitempty"`
-	InstanceType            string    `json:"instanceType"`
-	AccountID               string    `json:"accountId,omitempty"`
-	PendingTime             time.Time `json:"pendingTime"`
-	ImageID                 string    `json:"imageId"`
-	KernelID                string    `json:"kernelId,omitempty"`
-	RamdiskID               string    `json:"ramdiskId,omitempty"`
-	Architecture            string    `json:"architecture"`
-	PublicIPv4              *string   `json:"publicIpv4,omitempty"`
-	InstanceLifecycle       *string   `json:"instanceLifecycle,omitempty"`
+	DevpayProductCodes      []string          `json:"devpayProductCodes,omitempty"`
+	MarketplaceProductCodes []string          `json:"marketplaceProductCodes,omitempty"`
+	AvailabilityZone        string            `json:"availabilityZone"`
+	PrivateIP               string            `json:"privateIp"`
+	LocalHostname           string            `json:"localHostname,omitempty"`
+	Version                 string            `json:"version,omitempty"`
+	Region                  string            `json:"region"`
+	InstanceID              string            `json:"instanceId"`
+	BillingProducts         []string          `json:"billingProducts,omitempty"`
+	InstanceType            string            `json:"instanceType"`
+	AccountID               string            `json:"accountId,omitempty"`
+	PendingTime             time.Time         `json:"pendingTime"`
+	ImageID                 string            `json:"imageId"`
+	KernelID                string            `json:"kernelId,omitempty"`
+	RamdiskID               string            `json:"ramdiskId,omitempty"`
+	Architecture            string            `json:"architecture"`
+	PublicIPv4              *string           `json:"publicIpv4,omitempty"`
+	InstanceLifecycle       *string           `json:"instanceLifecycle,omitempty"`
+	Tags                    map[string]string `json:"tags,omitempty"`
 }
 
 type taskResult[T any] struct {
@@ -95,8 +96,9 @@ type taskResult[T any] struct {
 }
 
 type Step struct {
-	Name string
-	Time time.Time
+	Name                  string
+	Time                  time.Time
+	MonotonicMilliseconds int64 `json:"MonotonicMilliseconds,omitempty"`
 }
 
 type rootResizeResult struct {
@@ -105,8 +107,9 @@ type rootResizeResult struct {
 }
 
 type timingRecorder struct {
-	mu    sync.Mutex
-	steps []Step
+	mu      sync.Mutex
+	started time.Time
+	steps   []Step
 }
 
 type asyncResult[T any] struct {
@@ -155,10 +158,10 @@ func defaultLauncherOps() launcherOps {
 			return awsState.fetchTemporaryPublicKey(ctx, cfg)
 		},
 		prefetchMatchingBootstrap: func(ctx context.Context, cfg config, region string, raw []byte) (bool, error) {
-			return awsState.prefetchMatchingBootstrap(ctx, cfg, region, raw)
+			return awsState.prefetchDescriptorAgent(ctx, cfg, region, raw)
 		},
 		prefetchAgentConfigFiles: func(ctx context.Context, cfg config, identity instanceIdentity, raw []byte) error {
-			return awsState.prefetchAgentConfigFiles(ctx, cfg, identity, raw)
+			return awsState.prefetchDescriptorConfigs(ctx, cfg, identity, raw)
 		},
 		markerMatchesInstance:       markerMatchesInstance,
 		installAuthorizedKey:        installAuthorizedKey,
@@ -374,6 +377,7 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 	}
 	if prefetchedBootstrap {
 		recorder.add("rolaunch.agent-prefetched")
+		recorder.add("rolaunch.agent-handoff")
 	}
 	recorder.add("rolaunch.bootstrap-ready")
 	if cfg.isFullMode() && ops.waitForRootFilesystemResize(rootResizeDone) {
@@ -973,7 +977,7 @@ func markDone(path string, instanceID string) error {
 }
 
 func newTimingRecorder() *timingRecorder {
-	return &timingRecorder{}
+	return &timingRecorder{started: time.Now()}
 }
 
 func persistTimingMilestones(recorder *timingRecorder, path string) {
@@ -986,11 +990,14 @@ func (r *timingRecorder) add(name string, at ...time.Time) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	stepTime := time.Now().UTC()
+	now := time.Now()
+	stepTime := now.UTC()
+	elapsed := now.Sub(r.started).Milliseconds()
 	if len(at) > 0 {
 		stepTime = at[0]
+		elapsed = 0
 	}
-	r.steps = append(r.steps, Step{Name: name, Time: stepTime})
+	r.steps = append(r.steps, Step{Name: name, Time: stepTime, MonotonicMilliseconds: elapsed})
 }
 
 func (r *timingRecorder) save(path string) error {
