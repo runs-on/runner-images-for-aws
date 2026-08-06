@@ -503,6 +503,12 @@ build {
     skip_clean       = true
   }
 
+  provisioner "powershell" {
+    scripts = [
+      "${path.root}/../custom/boot-config.ps1"
+    ]
+  }
+
   # added: disable page file (1GiB)
   provisioner "powershell" {
     inline = [

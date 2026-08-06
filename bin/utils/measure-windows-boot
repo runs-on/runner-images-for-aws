@@ -1,0 +1,338 @@
+#!/usr/bin/env ruby
+
+require 'bundler/setup'
+require 'aws-sdk-ec2'
+require 'aws-sdk-ssm'
+require 'base64'
+require 'json'
+require 'net/http'
+require 'slop'
+require 'time'
+
+options = {}
+
+usage = Slop::Options.new do |opts|
+  opts.banner = "Usage: #{$0} AMI_NAME_OR_ID [options]"
+  opts.string '--instance-type', 'Instance type override', default: 'm8i.large'
+  opts.string '--region', 'AWS region', default: ENV['AWS_REGION'] || ENV['AWS_DEFAULT_REGION'] || 'us-east-1'
+  opts.string '--subnet-id', 'Subnet with tag test=true used if not provided'
+  opts.integer '--ssh-timeout', 'Max seconds to wait for SSM agent', default: 600
+  opts.integer '--warm-runs', 'Warm-up launches before measurement', default: 1
+  opts.integer '--measure-runs', 'Measured launches after warm-up', default: 3
+  opts.bool '-h', '--help', 'Show help'
+end
+
+begin
+  options = usage.parse(ARGV).to_hash
+  options[:ami_name_or_id] = ARGV.shift
+rescue Slop::Error => e
+  warn "Error: #{e.message}"
+  warn
+  warn usage
+  exit 1
+end
+
+if options[:help] || options[:ami_name_or_id].nil?
+  puts usage
+  exit(options[:help] ? 0 : 1)
+end
+
+ec2 = Aws::EC2::Client.new(region: options[:region])
+ssm = Aws::SSM::Client.new(region: options[:region])
+
+def find_latest_ami(ec2, ami_name_or_id)
+  filters = [{ name: 'state', values: ['available'] }]
+  if ami_name_or_id.start_with?('ami-')
+    filters << { name: 'image-id', values: [ami_name_or_id] }
+  else
+    filters << { name: 'name', values: ["#{ami_name_or_id}*"] }
+  end
+
+  images = ec2.describe_images(filters: filters).images
+  raise "No AMIs found matching #{ami_name_or_id.inspect}" if images.empty?
+
+  images.max_by(&:creation_date)
+end
+
+def resolve_subnet(ec2, subnet_id)
+  return ec2.describe_subnets(subnet_ids: [subnet_id]).subnets.first if subnet_id
+
+  subnet = ec2.describe_subnets(
+    filters: [{ name: 'tag:test', values: ['true'] }]
+  ).subnets.first
+  raise 'No subnet found with tag test=true. Tag a subnet or pass --subnet-id.' unless subnet
+
+  subnet
+end
+
+def current_public_ip
+  Net::HTTP.get(URI('https://checkip.amazonaws.com')).strip
+end
+
+def create_temp_security_group(ec2, subnet, caller_ip)
+  name = "measure-win-boot-#{Time.now.to_i}-#{rand(1000)}"
+  sg = ec2.create_security_group(
+    group_name: name,
+    description: 'Temporary for Windows boot measurement',
+    vpc_id: subnet.vpc_id,
+    tag_specifications: [
+      {
+        resource_type: 'security-group',
+        tags: [
+          { key: 'Name', value: name },
+          { key: 'application', value: 'RunsOn' }
+        ]
+      }
+    ]
+  )
+  ec2.authorize_security_group_ingress(
+    group_id: sg.group_id,
+    ip_permissions: [
+      {
+        ip_protocol: 'tcp',
+        from_port: 3389,
+        to_port: 3389,
+        ip_ranges: [{ cidr_ip: "#{caller_ip}/32", description: 'measure-win-boot' }]
+      }
+    ]
+  )
+  sg.group_id
+end
+
+def launch_instance(ec2:, image:, instance_type:, subnet:, security_group_id:)
+  launched_at = Time.now.utc
+  instance = ec2.run_instances(
+    image_id: image.image_id,
+    instance_type: instance_type,
+    min_count: 1,
+    max_count: 1,
+    instance_initiated_shutdown_behavior: 'terminate',
+    network_interfaces: [
+      {
+        device_index: 0,
+        subnet_id: subnet.subnet_id,
+        groups: [security_group_id],
+        associate_public_ip_address: true,
+        delete_on_termination: true
+      }
+    ],
+    tag_specifications: [
+      {
+        resource_type: 'instance',
+        tags: [
+          { key: 'Name', value: 'measure-win-boot' },
+          { key: 'application', value: 'RunsOn' }
+        ]
+      },
+      {
+        resource_type: 'volume',
+        tags: [
+          { key: 'Name', value: 'measure-win-boot' },
+          { key: 'application', value: 'RunsOn' }
+        ]
+      }
+    ]
+  ).instances.first
+  [instance.instance_id, launched_at]
+end
+
+def wait_for_instance_running(ec2, instance_id:)
+  ec2.wait_until(:instance_running, instance_ids: [instance_id])
+end
+
+def wait_for_ssm_agent(ssm, instance_id:, timeout_seconds:)
+  deadline = Time.now + timeout_seconds
+  loop do
+    response = ssm.describe_instance_information(
+      filters: [{ key: 'InstanceIds', values: [instance_id] }]
+    )
+    unless response.instance_information_list.empty?
+      agent = response.instance_information_list.first
+      return [Time.now, agent.ping_status]
+    end
+
+    if Time.now >= deadline
+      raise "Timed out waiting for SSM agent on #{instance_id}"
+    end
+    sleep 5
+  end
+end
+
+def run_ssm_command(ssm, instance_id:, command:, timeout_seconds: 120)
+  resp = ssm.send_command(
+    instance_ids: [instance_id],
+    document_name: 'AWS-RunPowerShellScript',
+    parameters: { 'commands' => [command] },
+    timeout_seconds: timeout_seconds
+  )
+  command_id = resp.command.command_id
+
+  deadline = Time.now + timeout_seconds
+  loop do
+    invocation = ssm.get_command_invocation(
+      command_id: command_id,
+      instance_id: instance_id
+    )
+    case invocation.status
+    when 'Success'
+      return invocation.standard_output_content.strip
+    when 'Failed', 'Cancelled', 'TimedOut'
+      raise "SSM command failed: #{invocation.status} - #{invocation.standard_error_content}"
+    end
+
+    if Time.now >= deadline
+      raise "SSM command timed out: #{command_id}"
+    end
+    sleep 3
+  end
+end
+
+def terminate_instance(ec2, instance_id)
+  ec2.terminate_instances(instance_ids: [instance_id])
+rescue Aws::EC2::Errors::InvalidInstanceIDNotFound
+  nil
+end
+
+def wait_for_instance_terminated(ec2, instance_id)
+  ec2.wait_until(:instance_terminated, instance_ids: [instance_id])
+rescue Aws::EC2::Errors::InvalidInstanceIDNotFound
+  nil
+end
+
+def cleanup(ec2, security_group_id)
+  begin
+    ec2.delete_security_group(group_id: security_group_id)
+  rescue StandardError => e
+    warn "Failed to delete security group #{security_group_id}: #{e.message}"
+  end
+end
+
+image = find_latest_ami(ec2, options[:ami_name_or_id])
+subnet = resolve_subnet(ec2, options[:subnet_id])
+caller_ip = current_public_ip
+security_group_id = create_temp_security_group(ec2, subnet, caller_ip)
+
+begin
+  instance_type = options[:instance_type]
+  total_runs = options[:warm_runs] + options[:measure_runs]
+  results = []
+
+  puts "AMI: #{image.name} (#{image.image_id})"
+  puts "Platform: #{image.platform || 'Windows'}"
+  puts "Instance type: #{instance_type}"
+  puts "Region: #{options[:region]}"
+  puts "Subnet: #{subnet.subnet_id}"
+  puts "Warm-up runs: #{options[:warm_runs]}"
+  puts "Measured runs: #{options[:measure_runs]}"
+  puts "SSM timeout: #{options[:ssh_timeout]}s"
+  puts
+
+  total_runs.times do |idx|
+    phase = idx < options[:warm_runs] ? 'warm' : 'measure'
+    run_number = idx + 1
+    instance_id = nil
+
+    begin
+      puts "[#{phase}] launch #{run_number}/#{total_runs}"
+
+      instance_id, launched_at = launch_instance(
+        ec2: ec2,
+        image: image,
+        instance_type: instance_type,
+        subnet: subnet,
+        security_group_id: security_group_id
+      )
+      puts "  Instance: #{instance_id}"
+
+      wait_for_instance_running(ec2, instance_id: instance_id)
+      running_at = Time.now
+
+      instance = ec2.describe_instances(instance_ids: [instance_id]).reservations.first.instances.first
+      puts "  Public IP: #{instance.public_ip_address}"
+
+      ssm_ready_at, ping_status = wait_for_ssm_agent(
+        ssm, instance_id: instance_id, timeout_seconds: options[:ssh_timeout]
+      )
+
+      # Run a quick command to verify connectivity
+      begin
+        output = run_ssm_command(
+          ssm, instance_id: instance_id, command: '$PSVersionTable.PSVersion.ToString()'
+        )
+        cmd_ready_at = Time.now
+      rescue StandardError => e
+        output = "ERROR: #{e.message}"
+        cmd_ready_at = nil
+      end
+
+      elapsed_run_to_ssm = (running_at - launched_at).round(2)
+      elapsed_launch_to_ssm = (ssm_ready_at - launched_at).round(2)
+
+      puts format("  Instance running: %.2fs", elapsed_run_to_ssm)
+      puts format("  SSM agent ready: %.2fs (launch → agent)", elapsed_launch_to_ssm)
+      if cmd_ready_at
+        elapsed_cmd = (cmd_ready_at - launched_at).round(2)
+        puts format("  SSM cmd ready:   %.2fs (launch → command)", elapsed_cmd)
+      end
+      puts "  PowerShell: #{output}"
+
+      results << {
+        phase: phase,
+        instance_id: instance_id,
+        public_ip: instance.public_ip_address,
+        launched_at: launched_at.iso8601,
+        running_at: running_at.iso8601,
+        ssm_ready_at: ssm_ready_at.iso8601,
+        cmd_ready_at: cmd_ready_at&.iso8601,
+        elapsed_run_s: elapsed_run_to_ssm,
+        elapsed_ssm_s: elapsed_launch_to_ssm,
+        elapsed_cmd_s: cmd_ready_at ? (cmd_ready_at - launched_at).round(2) : nil,
+        ssm_ping_status: ping_status,
+        ps_version: output
+      }
+    ensure
+      if instance_id
+        begin
+          terminate_instance(ec2, instance_id)
+          wait_for_instance_terminated(ec2, instance_id)
+          puts "  Terminated."
+        rescue StandardError => e
+          warn "  Cleanup error: #{e.message}"
+        end
+      end
+    end
+  end
+
+  measured = results.select { |r| r[:phase] == 'measure' }
+
+  if measured.empty?
+    warn "No measured runs to summarize"
+    exit 1
+  end
+
+  avg_run = measured.sum { |r| r[:elapsed_run_s] } / measured.length
+  avg_ssm = measured.sum { |r| r[:elapsed_ssm_s] } / measured.length
+  cmd_vals = measured.map { |r| r[:elapsed_cmd_s] }.compact
+  avg_cmd = cmd_vals.empty? ? nil : (cmd_vals.sum / cmd_vals.length)
+
+  summary = {
+    ami_id: image.image_id,
+    ami_name: image.name,
+    instance_type: instance_type,
+    subnet_id: subnet.subnet_id,
+    warm_runs: options[:warm_runs],
+    measured_runs: options[:measure_runs],
+    average_running_s: avg_run.round(2),
+    average_ssm_ready_s: avg_ssm.round(2),
+    average_cmd_ready_s: avg_cmd&.round(2),
+    min_ssm_ready_s: measured.map { |r| r[:elapsed_ssm_s] }.min.round(2),
+    max_ssm_ready_s: measured.map { |r| r[:elapsed_ssm_s] }.max.round(2),
+    results: results
+  }
+
+  puts
+  puts JSON.pretty_generate(summary)
+ensure
+  cleanup(ec2, security_group_id)
+  puts "Security group cleaned up."
+end
