@@ -37,7 +37,8 @@ improved by `32.1545%`. Both cohorts and all raw values are retained below.
   version 11; Fleet inherited that mapping instead of replacing it
 - workflow commit for cohort 1: `b7d1386`
 - workflow commit for cohort 2: `45f79ee`
-- monorepo checkpoint commit: `be663b27`
+- measured monorepo commit: `be663b27`
+- final monorepo PR head: `af3948a5` (build-neutral interface-only CI fix)
 - runner-images checkpoint commit: `938163d`
 
 The final baseline and candidate AMIs were each built from the exact Canonical
