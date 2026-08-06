@@ -2,8 +2,9 @@
 
 ## Outcome
 
-The cumulative candidate passed the requested mean gate when both predeclared,
-interleaved cohorts were pooled without removing any successful sample:
+The direct early-lease prototype passed the requested small-cohort mean gate
+when both predeclared, interleaved cohorts were pooled without removing any
+successful sample:
 
 - baseline mean: `22.093897499s` (n=6, sample SD `12.531710717s`)
 - candidate mean: `16.122213729s` (n=6, sample SD `3.893236338s`)
@@ -18,6 +19,18 @@ Flex dev server 1.053 seconds after creation and completed successfully. It is
 the GitHub dispatch tail that the direct early-lease Worker is intended to
 remove. The first cohort alone improved by `18.8707%`; the second cohort alone
 improved by `32.1545%`. Both cohorts and all raw values are retained below.
+
+The latency result does **not** make the direct-listener design acceptable for
+production. The experiment is closed and that part of the candidate is
+rejected. Its relay depends on private Listener/Worker framing: advertising a
+newer runner version while implementing behavior copied from an older release
+can select incompatible GitHub broker behavior or violate the newer Worker's
+payload assumptions, while advertising the older version can trigger update
+enforcement. Runner upgrade timing belongs to the user's control plane, so the
+bridge cannot safely pin or impersonate a version. At 200-way overlap it also
+required one bridge and one official Listener per job, consuming about 23.8 GiB
+aggregate RSS on the dev host, which cannot fit the production control plane's
+512 MiB allocation.
 
 ## Frozen inputs
 
@@ -99,13 +112,79 @@ repeatedly before stabilized conclusions were drawn.
   duplicate IMDS path (about 100 ms) while retaining cloud-init/no-rolaunch
   fallback compatibility.
 
+## 200-job scale experiment
+
+The final candidate soak was run
+[`31097515591`](https://github.com/runs-on/test/actions/runs/31097515591)
+against the dev Flex server's native medium preset: 8 provisioning workers, 4
+registration workers, and the normal 8/s EC2 limiter. It used 200 on-demand
+`m8a.large` jobs, `max-parallel: 200`, the frozen inputs above, and a 300-second
+hold. No additional 2 requests/s pacing override was used.
+
+- All 200 scale jobs completed successfully.
+- All 200 emitted a first-step marker and validated the exact AMI, rolaunch and
+  live agent hashes, assignment, and early-lease mode.
+- The observer reached 200 bridges, 200 official Listeners, and 200 acquired
+  leases concurrently.
+- Three CreateFleet responses included a partial `RequestLimitExceeded`, but
+  every response returned the requested instance; no launch was retried.
+- The GitHub-hosted analysis job failed before publishing CSV/JSON. The run is
+  therefore not claimed as a complete analyzer or 200-sample performance pass.
+
+Sanitized telemetry from 408 one-second samples:
+
+| Metric | Value |
+| --- | ---: |
+| Maximum Flex CPU / RSS | 16.467% / 102,092 KiB |
+| Maximum Flex threads / FDs | 217 / 446 |
+| Maximum host processes | 1,309 |
+| Maximum bridges / Listeners | 200 / 200 |
+| Maximum aggregate bridge RSS | 2,126,464 KiB |
+| Maximum aggregate Listener RSS | 21,677,468 KiB |
+| Minimum available host memory | 33,386,192 KiB |
+| Maximum bridge log count / bytes | 400 / 200,892 |
+| Maximum acquired leases | 200 |
+
+After normal completion, bridge and Listener processes, matching EC2
+instances, assignment-scoped S3 objects, and experiment claims converged to
+zero. The lock table contained only `server-background-tasks-leader`. Flex
+exhausted its GitHub App rate budget and skipped explicit unregister calls for
+some completed runners; the available CLI credential lacked organization-runner
+enumeration permission, so runner-registration convergence was not proven.
+
+The following scale runs were rejected without excluding their failures:
+
+| Run | Reason |
+| --- | --- |
+| `31086263646` | workflow parser failure |
+| `31086410356` | temporary-filesystem inode exhaustion |
+| `31088068753` | Listener configuration/symlink failure |
+| `31088863341` | validation/setup defects |
+| `31090209948` | live agent hash resolved a deleted executable path |
+| `31091363417` | transient receipt assertion |
+| `31091753294` | transient acknowledgement assertion; 22 old Listeners needed cleanup |
+| `31093405031` | concurrent timing-file rewrite; cancellation left 122 lease objects for exact-prefix cleanup |
+| `31094368263` | harness incorrectly rejected compatible fallback handoff |
+| `31094997056` | 199/200 leases; one official Listener stalled; xhigh preset |
+| `31095760091` | xhigh EC2 throttle storm; stopped |
+| `31096379646` | medium reached 199/200; one official Listener stopped progressing after a 100-second broker GET timeout |
+
+Sequential Listener recovery was implemented and exercised by focused tests,
+but the final 200-job wave did not need it. It treats a symptom while adding
+supervision around a private protocol; it does not resolve version fidelity or
+the resource model.
+
+The planned independent 200-job baseline, candidate, and mass-cancellation
+cohorts were not run after the experiment was closed. No mean/p95 scale claim is
+made from the final soak.
+
 ## Experiment disposition
 
 | Experiment | Evidence | Decision |
 | --- | --- | --- |
 | Concurrent rolaunch config prefetch and secure descriptor handoff | Exact hash/ownership/version checks passed; candidate adopted the handoff in every measured run | accepted |
 | Earlier Flex/Fleet config publication and JIT overlap | Config and JIT were published while EC2 booted; no stale assignment or correctness failure | accepted |
-| Secure direct Listener/Worker lease delivery | Main phase reduction above; pooled gate passed | accepted |
+| Secure direct Listener/Worker lease delivery | Main phase reduction and 200-way execution succeeded, but the relay depends on private versioned framing and consumed about 23.8 GiB aggregate RSS | rejected for production; experiment closed |
 | Skip duplicate agent IMDS/metadata fetch when rolaunch supplied it | About 100 ms removed; descriptor-free/cloud-init fallback tests pass | accepted |
 | Skip duplicate cold mount/instance-store probes and fixed script delay | Focused tests pass; retained as small hot-path reductions | accepted |
 | Lazy legacy Actions connection and OAuth reuse | Direct Worker delivery bypasses this Listener connection path entirely | inapplicable/superseded |
