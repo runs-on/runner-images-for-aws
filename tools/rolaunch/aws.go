@@ -7,10 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"path/filepath"
-	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +16,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
+	"github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
 )
@@ -27,15 +26,13 @@ const (
 	imdsPublicKeysMetadataPath = "public-keys"
 	imdsPublicKeySuffix        = "openssh-key"
 	imdsLocalHostnamePath      = "local-hostname"
-	runsOnInstanceConfigPath   = "/runs-on/instance-config.json"
-	runsOnRunnerConfigPath     = "/runs-on/config.json"
 )
 
 type awsState struct {
 	mu             sync.Mutex
 	metadataClient *imds.Client
+	ec2Clients     map[string]*ec2.Client
 	s3Clients      map[string]*s3.Client
-	s3Errors       map[string]error
 }
 
 type bootstrapPrefetchSpec struct {
@@ -47,19 +44,14 @@ type bootstrapPrefetchSpec struct {
 	DownloadedBinPath string
 }
 
-type bootstrapEnvValues struct {
-	S3BucketCache string
-	RoleID        string
-}
-
 type s3ObjectGetter interface {
 	GetObject(context.Context, *s3.GetObjectInput, ...func(*s3.Options)) (*s3.GetObjectOutput, error)
 }
 
 func newAWSState() *awsState {
 	return &awsState{
-		s3Clients: make(map[string]*s3.Client),
-		s3Errors:  make(map[string]error),
+		ec2Clients: make(map[string]*ec2.Client),
+		s3Clients:  make(map[string]*s3.Client),
 	}
 }
 
@@ -137,6 +129,10 @@ func (s *awsState) fetchInstanceIdentity(ctx context.Context, cfg config) (insta
 }
 
 func (s *awsState) enrichOptionalInstanceIdentity(ctx context.Context, cfg config, identity instanceIdentity) (instanceIdentity, error) {
+	tagsTask := startAsync(func() (map[string]string, error) {
+		return s.fetchInstanceTags(ctx, cfg, identity.Region, identity.InstanceID)
+	})
+
 	if body, found, err := s.fetchMetadataPath(ctx, cfg, "public-ipv4"); err == nil {
 		value := ""
 		if found {
@@ -157,7 +153,44 @@ func (s *awsState) enrichOptionalInstanceIdentity(ctx context.Context, cfg confi
 		return instanceIdentity{}, err
 	}
 
+	tags, err := tagsTask.wait()
+	if err != nil {
+		return instanceIdentity{}, err
+	}
+	identity.Tags = tags
+
 	return identity, nil
+}
+
+type ec2TagDescriber interface {
+	DescribeTags(context.Context, *ec2.DescribeTagsInput, ...func(*ec2.Options)) (*ec2.DescribeTagsOutput, error)
+}
+
+func (s *awsState) fetchInstanceTags(ctx context.Context, cfg config, region, instanceID string) (map[string]string, error) {
+	client, err := s.ec2ClientFor(ctx, cfg, region)
+	if err != nil {
+		return nil, err
+	}
+	return describeInstanceTags(ctx, client, instanceID)
+}
+
+func describeInstanceTags(ctx context.Context, client ec2TagDescriber, instanceID string) (map[string]string, error) {
+	output, err := client.DescribeTags(ctx, &ec2.DescribeTagsInput{Filters: []ec2types.Filter{{
+		Name:   aws.String("resource-id"),
+		Values: []string{instanceID},
+	}}})
+	if err != nil {
+		return nil, fmt.Errorf("describe tags for instance %s: %w", instanceID, err)
+	}
+
+	tags := make(map[string]string, len(output.Tags))
+	for _, tag := range output.Tags {
+		if tag.Key == nil || tag.Value == nil {
+			continue
+		}
+		tags[*tag.Key] = *tag.Value
+	}
+	return tags, nil
 }
 
 func (s *awsState) fetchUserData(ctx context.Context, cfg config) ([]byte, error) {
@@ -228,61 +261,6 @@ func (s *awsState) fetchMetadataPathRequired(ctx context.Context, cfg config, pa
 	return body, nil
 }
 
-func (s *awsState) prefetchMatchingBootstrap(ctx context.Context, cfg config, region string, raw []byte) (bool, error) {
-	spec, matched, err := detectMonorepoBootstrapPrefetch(cfg.workDir, raw)
-	if err != nil || !matched {
-		return matched, err
-	}
-
-	s3Client, err := s.s3ClientFor(ctx, cfg, region)
-	if err != nil {
-		return true, err
-	}
-
-	if err := downloadS3ObjectToFile(ctx, s3Client, spec.S3Bucket, spec.S3Key, spec.DownloadedBinPath); err != nil {
-		return true, err
-	}
-	if err := installBootstrapWrapper(spec.BootstrapPath, spec.DownloadedBinPath); err != nil {
-		return true, err
-	}
-
-	log.Printf("prefetched RunsOn agent from s3://%s/%s to %s", spec.S3Bucket, spec.S3Key, spec.DownloadedBinPath)
-	return true, nil
-}
-
-func (s *awsState) prefetchAgentConfigFiles(ctx context.Context, cfg config, identity instanceIdentity, raw []byte) error {
-	s3Client, err := s.s3ClientFor(ctx, cfg, identity.Region)
-	if err != nil {
-		log.Printf("warning: failed to bootstrap S3 client for agent config prefetch: %v", err)
-		return nil
-	}
-
-	return prefetchAgentConfigFilesWithClient(ctx, s3Client, identity, raw, runsOnInstanceConfigPath, runsOnRunnerConfigPath)
-}
-
-func prefetchAgentConfigFilesWithClient(ctx context.Context, client s3ObjectGetter, identity instanceIdentity, raw []byte, instanceConfigPath string, runnerConfigPath string) error {
-	values, ok := extractBootstrapEnvValues(raw)
-	if !ok {
-		return nil
-	}
-
-	instanceConfigKey := fmt.Sprintf("runners/%s:%s/instance-config.json", values.RoleID, identity.InstanceID)
-	if err := downloadS3ObjectToFile(ctx, client, values.S3BucketCache, instanceConfigKey, instanceConfigPath); err != nil {
-		log.Printf("warning: failed to prefetch instance config from s3://%s/%s: %v", values.S3BucketCache, instanceConfigKey, err)
-	}
-
-	runnerConfigKey := fmt.Sprintf("runners/%s:%s/runner-config.json", values.RoleID, identity.InstanceID)
-	if err := downloadS3ObjectToFile(ctx, client, values.S3BucketCache, runnerConfigKey, runnerConfigPath); err != nil {
-		if isS3NotFound(err) {
-			log.Printf("runner config not found in s3://%s/%s, skipping best-effort prefetch", values.S3BucketCache, runnerConfigKey)
-			return nil
-		}
-		log.Printf("warning: failed to prefetch runner config from s3://%s/%s: %v", values.S3BucketCache, runnerConfigKey, err)
-	}
-
-	return nil
-}
-
 func (s *awsState) metadataClientFor(cfg config) *imds.Client {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -308,18 +286,11 @@ func (s *awsState) s3ClientFor(ctx context.Context, cfg config, region string) (
 		s.mu.Unlock()
 		return client, nil
 	}
-	if err, ok := s.s3Errors[region]; ok {
-		s.mu.Unlock()
-		return nil, err
-	}
 	s.mu.Unlock()
 
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, append(metadataLoadOptions(cfg), awsconfig.WithRegion(region))...)
 	if err != nil {
 		err = fmt.Errorf("load AWS config for region %s: %w", region, err)
-		s.mu.Lock()
-		s.s3Errors[region] = err
-		s.mu.Unlock()
 		return nil, err
 	}
 
@@ -330,6 +301,29 @@ func (s *awsState) s3ClientFor(ctx context.Context, cfg config, region string) (
 	client := s3.NewFromConfig(awsCfg)
 	s.mu.Lock()
 	s.s3Clients[region] = client
+	s.mu.Unlock()
+	return client, nil
+}
+
+func (s *awsState) ec2ClientFor(ctx context.Context, cfg config, region string) (*ec2.Client, error) {
+	s.mu.Lock()
+	if client, ok := s.ec2Clients[region]; ok {
+		s.mu.Unlock()
+		return client, nil
+	}
+	s.mu.Unlock()
+
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, append(metadataLoadOptions(cfg), awsconfig.WithRegion(region))...)
+	if err != nil {
+		return nil, fmt.Errorf("load AWS config for region %s: %w", region, err)
+	}
+	awsCfg.Retryer = func() aws.Retryer {
+		return retry.AddWithMaxAttempts(retry.NewStandard(), 1)
+	}
+
+	client := ec2.NewFromConfig(awsCfg)
+	s.mu.Lock()
+	s.ec2Clients[region] = client
 	s.mu.Unlock()
 	return client, nil
 }
@@ -372,98 +366,6 @@ func discoverPublicKeyIndex(body []byte) (string, bool) {
 	return "", false
 }
 
-func detectMonorepoBootstrapPrefetch(workDir string, raw []byte) (bootstrapPrefetchSpec, bool, error) {
-	script := string(raw)
-	if !strings.Contains(script, `BOOTSTRAP_BIN="/usr/local/bin/runs-on-bootstrap-$RUNS_ON_BOOTSTRAP_TAG"`) ||
-		!strings.Contains(script, `AGENT_BINARY_URL="$RUNS_ON_AGENT_S3_BUCKET/agent-linux-$(uname -m)"`) ||
-		!strings.Contains(script, `cat <<'EOF' > /etc/systemd/system/runs-on-bootstrap.service`) {
-		return bootstrapPrefetchSpec{}, false, nil
-	}
-
-	bootstrapTag, found := extractQuotedEnvAssignment(script, "RUNS_ON_BOOTSTRAP_TAG")
-	if !found {
-		return bootstrapPrefetchSpec{}, false, fmt.Errorf("matched RunsOn bootstrap template missing RUNS_ON_BOOTSTRAP_TAG")
-	}
-	agentS3URL, found := extractQuotedEnvAssignment(script, "RUNS_ON_AGENT_S3_BUCKET")
-	if !found {
-		return bootstrapPrefetchSpec{}, false, fmt.Errorf("matched RunsOn bootstrap template missing RUNS_ON_AGENT_S3_BUCKET")
-	}
-
-	agentBinaryName, err := agentArtifactNameForArch(runtime.GOARCH)
-	if err != nil {
-		return bootstrapPrefetchSpec{}, true, err
-	}
-
-	bucket, prefix, err := parseS3URL(agentS3URL)
-	if err != nil {
-		return bootstrapPrefetchSpec{}, true, err
-	}
-	key := agentBinaryName
-	if prefix != "" {
-		key = strings.TrimSuffix(prefix, "/") + "/" + agentBinaryName
-	}
-
-	return bootstrapPrefetchSpec{
-		BootstrapTag:      bootstrapTag,
-		BootstrapPath:     filepath.Join("/usr/local/bin", "runs-on-bootstrap-"+bootstrapTag),
-		AgentBinaryName:   agentBinaryName,
-		S3Bucket:          bucket,
-		S3Key:             key,
-		DownloadedBinPath: filepath.Join(workDir, "prefetched", bootstrapTag, agentBinaryName),
-	}, true, nil
-}
-
-func extractQuotedEnvAssignment(script string, key string) (string, bool) {
-	prefix := key + `="`
-	for _, line := range strings.Split(script, "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, prefix) || !strings.HasSuffix(line, `"`) {
-			continue
-		}
-		return strings.TrimSuffix(strings.TrimPrefix(line, prefix), `"`), true
-	}
-	return "", false
-}
-
-func extractBootstrapEnvValues(raw []byte) (bootstrapEnvValues, bool) {
-	script := string(raw)
-	bucketCache, found := extractQuotedEnvAssignment(script, "RUNS_ON_S3_BUCKET_CACHE")
-	if !found {
-		return bootstrapEnvValues{}, false
-	}
-	roleID, found := extractQuotedEnvAssignment(script, "RUNS_ON_ROLE_ID")
-	if !found {
-		return bootstrapEnvValues{}, false
-	}
-
-	return bootstrapEnvValues{
-		S3BucketCache: bucketCache,
-		RoleID:        roleID,
-	}, true
-}
-
-func parseS3URL(raw string) (bucket string, prefix string, err error) {
-	if !strings.HasPrefix(raw, "s3://") {
-		return "", "", fmt.Errorf("invalid s3 url %q", raw)
-	}
-
-	path := strings.TrimPrefix(raw, "s3://")
-	if path == "" {
-		return "", "", fmt.Errorf("invalid s3 url %q", raw)
-	}
-
-	parts := strings.SplitN(path, "/", 2)
-	if strings.TrimSpace(parts[0]) == "" {
-		return "", "", fmt.Errorf("invalid s3 url %q", raw)
-	}
-
-	bucket = parts[0]
-	if len(parts) == 2 {
-		prefix = strings.Trim(parts[1], "/")
-	}
-	return bucket, prefix, nil
-}
-
 func agentArtifactNameForArch(goArch string) (string, error) {
 	switch goArch {
 	case "amd64":
@@ -473,82 +375,4 @@ func agentArtifactNameForArch(goArch string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported runtime arch %q", goArch)
 	}
-}
-
-func downloadS3ObjectToFile(ctx context.Context, client s3ObjectGetter, bucket string, key string, destPath string) error {
-	if err := os.MkdirAll(filepath.Dir(destPath), 0o755); err != nil {
-		return fmt.Errorf("create download directory for %s: %w", destPath, err)
-	}
-
-	output, err := client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(bucket),
-		Key:    aws.String(key),
-	})
-	if err != nil {
-		return fmt.Errorf("download s3://%s/%s: %w", bucket, key, err)
-	}
-	defer output.Body.Close()
-
-	tempFile, err := os.CreateTemp(filepath.Dir(destPath), filepath.Base(destPath)+".tmp-*")
-	if err != nil {
-		return fmt.Errorf("create temp download file for %s: %w", destPath, err)
-	}
-	tempPath := tempFile.Name()
-	defer func() { _ = os.Remove(tempPath) }()
-
-	if _, err := io.Copy(tempFile, output.Body); err != nil {
-		_ = tempFile.Close()
-		return fmt.Errorf("write temp download file for %s: %w", destPath, err)
-	}
-	if err := tempFile.Close(); err != nil {
-		return fmt.Errorf("close temp download file for %s: %w", destPath, err)
-	}
-	if err := os.Chmod(tempPath, 0o755); err != nil {
-		return fmt.Errorf("chmod temp download file for %s: %w", destPath, err)
-	}
-	if err := os.Rename(tempPath, destPath); err != nil {
-		return fmt.Errorf("rename temp download file for %s: %w", destPath, err)
-	}
-	return nil
-}
-
-func isS3NotFound(err error) bool {
-	var responseErr *smithyhttp.ResponseError
-	return errors.As(err, &responseErr) && responseErr.HTTPStatusCode() == 404
-}
-
-func installBootstrapWrapper(path string, downloadedAgentPath string) error {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return fmt.Errorf("create bootstrap wrapper directory for %s: %w", path, err)
-	}
-
-	body := fmt.Sprintf(
-		"#!/bin/bash\nset -euo pipefail\nexec %s\n",
-		strconv.Quote(downloadedAgentPath),
-	)
-	if err := writeExecutableFile(path, []byte(body)); err != nil {
-		return fmt.Errorf("install bootstrap wrapper %s: %w", path, err)
-	}
-	return nil
-}
-
-func writeExecutableFile(path string, body []byte) error {
-	tempFile, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return err
-	}
-	tempPath := tempFile.Name()
-	defer func() { _ = os.Remove(tempPath) }()
-
-	if _, err := tempFile.Write(body); err != nil {
-		_ = tempFile.Close()
-		return err
-	}
-	if err := tempFile.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tempPath, 0o755); err != nil {
-		return err
-	}
-	return os.Rename(tempPath, path)
 }
