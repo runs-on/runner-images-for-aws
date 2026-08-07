@@ -48,6 +48,11 @@ variable "volume_size" {
   default = 100
 }
 
+variable "volume_throughput" {
+  type    = number
+  default = 400
+}
+
 variable "volume_type" {
   type    = string
   default = "gp3"
@@ -114,6 +119,7 @@ EOF
     device_name           = "/dev/sda1"
     volume_type           = var.volume_type
     volume_size           = var.volume_size
+    throughput            = var.volume_throughput
     delete_on_termination = "true"
     encrypted             = "false"
   }
