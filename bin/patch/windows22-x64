@@ -49,7 +49,8 @@ gnu_sed -i 's/| Out-Null//' $build_dir/Install-NativeImages.ps1
 
 gnu_sed -i 's|Invoke-PesterTests.*|# removed: Invoke-PesterTests|' $build_dir/*.ps1
 
-# cat patches/windows/files/boot-config.ps1 >> $build_dir/Configure-System.ps1
+# boot-config.ps1 is applied via the template as a separate provisioner
+# from patches/windows/custom/boot-config.ps1 -> images/windows/custom/boot-config.ps1
 
 # custom stuff
 rm -rf $release_dir/images/windows/custom
