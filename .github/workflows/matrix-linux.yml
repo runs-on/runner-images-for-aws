@@ -22,11 +22,11 @@ on:
       ubuntu26_full_x64:
         type: boolean
         description: ubuntu26-full-x64
-        default: false
+        default: true
       ubuntu26_full_arm64:
         type: boolean
         description: ubuntu26-full-arm64
-        default: false
+        default: true
   schedule:
     - cron: '0 8 2,17 * *'
 
