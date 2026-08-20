@@ -40,6 +40,7 @@ Windows GPU images include the AWS GRID driver plus the CUDA toolkit.
 
 * `ubuntu22-gpu-x64`
 * `ubuntu24-gpu-x64`
+* `ubuntu24-gpu-arm64`
 * `windows25-gpu-x64`
 
 ### StepSecurity

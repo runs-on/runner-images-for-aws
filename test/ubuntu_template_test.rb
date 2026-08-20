@@ -19,6 +19,8 @@ class UbuntuTemplateTest < Minitest::Test
   PATCH_LIB = File.expand_path("../bin/patch/lib.sh", __dir__)
   PRE_SCRIPT = File.expand_path("../patches/ubuntu/files/pre.sh", __dir__)
   TEST_WORKFLOW = File.expand_path("../.github/workflows/test.yml", __dir__)
+  GPU_MATRIX_WORKFLOW = File.expand_path("../.github/workflows/matrix-gpu.yml", __dir__)
+  REPRODUCTIONS_WORKFLOW = File.expand_path("../.github/workflows/reproductions.yml", __dir__)
 
   def test_configure_image_data_gets_helper_scripts_env
     offenders = Dir[File.join(TEMPLATE_DIR, "*.pkr.hcl")].filter_map do |template|
@@ -135,6 +137,38 @@ class UbuntuTemplateTest < Minitest::Test
     assert_includes content, '/usr/local/cuda-${CUDA_MAJOR_VERSION}/lib64'
     assert_match(/if ! is_ubuntu26; then\s+cloud-init single --name cc_growpart\s+cloud-init single --name cc_resizefs/m, content)
     refute_includes content, "/usr/local/cuda-12/"
+  end
+
+  def test_ubuntu24_gpu_supports_x64_and_arm64_with_cuda_13
+    configured = CONFIG.fetch("images").filter_map do |image|
+      id = image.fetch("id")
+      [id, image] if id.match?(/\Aubuntu24-gpu-(?:x64|arm64)\z/)
+    end.to_h
+
+    assert_equal %w[ubuntu24-gpu-arm64 ubuntu24-gpu-x64], configured.keys.sort
+    assert_equal "g4dn.xlarge", configured.fetch("ubuntu24-gpu-x64").fetch("instance_type")
+    assert_equal "g5g.xlarge", configured.fetch("ubuntu24-gpu-arm64").fetch("instance_type")
+    assert_equal "runs-on-dev-ubuntu24-full-arm64-*", configured.fetch("ubuntu24-gpu-arm64").fetch("source_ami_name")
+
+    content = File.read(GPU_INSTALL_SCRIPT)
+    assert_includes content, 'NVIDIA_DRIVER_PACKAGES="linux-modules-nvidia-580-open-aws nvidia-driver-580-open"'
+    assert_includes content, 'CUDA_PACKAGES="cuda-toolkit-13-0"'
+    assert_match(/elif is_ubuntu24; then.*?CUDA_MAJOR_VERSION="13"/m, content)
+    assert_match(/if is_arm64; then\s+CUDA_REPO_ARCH="sbsa"\s+else\s+CUDA_REPO_ARCH="x86_64"/m, content)
+    assert_includes content, 'repos/$DIST_SLUG/$CUDA_REPO_ARCH/$DEBIAN_FILE'
+  end
+
+  def test_gpu_build_wiring_includes_ubuntu24_arm64
+    patch_lib = File.read(PATCH_LIB)
+    matrix = File.read(GPU_MATRIX_WORKFLOW)
+    reproductions = File.read(REPRODUCTIONS_WORKFLOW)
+
+    refute_match(/if \[ "\$ARCH" = "x64" \]; then\s+# add gpu install script/m, patch_lib)
+    assert_includes matrix, "ubuntu24_gpu_arm64:"
+    assert_includes matrix, 'images+=("ubuntu24-gpu-arm64")'
+    assert_includes reproductions, "issue-41-ubuntu24-gpu-arm64:"
+    assert_includes reproductions, "issue-46-ubuntu24-cuda13-x64:"
+    assert_includes reproductions, "issue-55-ubuntu24-blackwell-x64:"
   end
 
   def test_ubuntu26_descendants_clear_inherited_launch_state

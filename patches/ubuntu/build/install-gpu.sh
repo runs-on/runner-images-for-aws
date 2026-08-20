@@ -9,6 +9,7 @@ DIST_SLUG=""
 NVIDIA_DRIVER_PACKAGES=""
 CUDA_PACKAGES="cuda-12-9 cuda-toolkit-12-9"
 CUDA_MAJOR_VERSION="12"
+CUDA_REPO_ARCH=""
 if is_ubuntu26; then
     DIST_SLUG="ubuntu2604"
     NVIDIA_DRIVER_PACKAGES="linux-modules-nvidia-595-aws nvidia-driver-595"
@@ -16,13 +17,21 @@ if is_ubuntu26; then
     CUDA_MAJOR_VERSION="13"
 elif is_ubuntu24; then
     DIST_SLUG="ubuntu2404"
-    NVIDIA_DRIVER_PACKAGES="linux-modules-nvidia-580-aws nvidia-driver-580"
+    NVIDIA_DRIVER_PACKAGES="linux-modules-nvidia-580-open-aws nvidia-driver-580-open"
+    CUDA_PACKAGES="cuda-toolkit-13-0"
+    CUDA_MAJOR_VERSION="13"
 elif is_ubuntu22; then
     DIST_SLUG="ubuntu2204"
     NVIDIA_DRIVER_PACKAGES="cuda-drivers-575"
 else
     echo "Unsupported ubuntu version"
     exit 1
+fi
+
+if is_arm64; then
+    CUDA_REPO_ARCH="sbsa"
+else
+    CUDA_REPO_ARCH="x86_64"
 fi
 
 set -eox pipefail
@@ -48,7 +57,7 @@ fi
 
 # NVIDIA CUDA drivers and toolkit
 DEBIAN_FILE="cuda-keyring_1.1-1_all.deb"
-REPO_URL="https://developer.download.nvidia.com/compute/cuda/repos/$DIST_SLUG/x86_64/$DEBIAN_FILE"
+REPO_URL="https://developer.download.nvidia.com/compute/cuda/repos/$DIST_SLUG/$CUDA_REPO_ARCH/$DEBIAN_FILE"
 wget $REPO_URL
 dpkg -i $DEBIAN_FILE && rm $DEBIAN_FILE
 
@@ -71,7 +80,7 @@ Pin-Priority: 1001
 EOF
 fi
 
-# Pin CUDA version to 12
+# Pin the CUDA toolkit for each Ubuntu release.
 # cuda-toolkit vs nvidia-cuda-toolkit:
 # - cuda-toolkit is NVIDIA's official package from their repository
 # - nvidia-cuda-toolkit is Ubuntu's packaged version of CUDA toolkit (often outdated version)
