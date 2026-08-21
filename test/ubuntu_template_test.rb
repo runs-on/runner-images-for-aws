@@ -3,6 +3,7 @@ require "yaml"
 
 class UbuntuTemplateTest < Minitest::Test
   BUILD_WORKFLOW = File.expand_path("../.github/workflows/build.yml", __dir__)
+  BUILD_TEST_RELEASE_WORKFLOW = File.expand_path("../.github/workflows/build-test-release.yml", __dir__)
   BUILD_SCRIPT = File.expand_path("../bin/build", __dir__)
   CONFIG = YAML.load_file(File.expand_path("../config.yml", __dir__))
   TEMPLATE_DIR = File.expand_path("../patches/ubuntu/templates", __dir__)
@@ -20,6 +21,8 @@ class UbuntuTemplateTest < Minitest::Test
   PATCH_LIB = File.expand_path("../bin/patch/lib.sh", __dir__)
   PRE_SCRIPT = File.expand_path("../patches/ubuntu/files/pre.sh", __dir__)
   TEST_WORKFLOW = File.expand_path("../.github/workflows/test.yml", __dir__)
+  GPU_MATRIX_WORKFLOW = File.expand_path("../.github/workflows/matrix-gpu.yml", __dir__)
+  REPRODUCTIONS_WORKFLOW = File.expand_path("../.github/workflows/reproductions.yml", __dir__)
 
   def test_configure_image_data_gets_helper_scripts_env
     offenders = Dir[File.join(TEMPLATE_DIR, "*.pkr.hcl")].filter_map do |template|
@@ -147,7 +150,8 @@ class UbuntuTemplateTest < Minitest::Test
 
     assert_includes content, "if is_ubuntu26; then"
     assert_includes content, 'DIST_SLUG="ubuntu2604"'
-    assert_includes content, 'linux-modules-nvidia-595-aws nvidia-driver-595'
+    assert_includes content, 'linux-modules-nvidia-595-open-aws nvidia-driver-595-open'
+    refute_includes content, 'linux-modules-nvidia-595-aws nvidia-driver-595'
     assert_includes content, 'CUDA_PACKAGES="cuda-toolkit-13-3"'
     assert_includes content, 'CUDA_MAJOR_VERSION="13"'
     assert_includes content, 'grep "release $CUDA_MAJOR_VERSION"'
@@ -155,6 +159,76 @@ class UbuntuTemplateTest < Minitest::Test
     assert_includes content, '/usr/local/cuda-${CUDA_MAJOR_VERSION}/lib64'
     assert_match(/if ! is_ubuntu26; then\s+cloud-init single --name cc_growpart\s+cloud-init single --name cc_resizefs/m, content)
     refute_includes content, "/usr/local/cuda-12/"
+  end
+
+  def test_ubuntu24_gpu_supports_x64_and_arm64_with_cuda_13
+    configured = CONFIG.fetch("images").filter_map do |image|
+      id = image.fetch("id")
+      [id, image] if id.match?(/\Aubuntu24-gpu-(?:x64|arm64)\z/)
+    end.to_h
+
+    assert_equal %w[ubuntu24-gpu-arm64 ubuntu24-gpu-x64], configured.keys.sort
+    assert_equal "g4dn.xlarge", configured.fetch("ubuntu24-gpu-x64").fetch("instance_type")
+    assert_equal "g5g.xlarge", configured.fetch("ubuntu24-gpu-arm64").fetch("instance_type")
+    assert_equal "runs-on-dev-ubuntu24-full-arm64-*", configured.fetch("ubuntu24-gpu-arm64").fetch("source_ami_name")
+
+    content = File.read(GPU_INSTALL_SCRIPT)
+    assert_includes content, 'NVIDIA_DRIVER_PACKAGES="linux-modules-nvidia-580-open-aws nvidia-driver-580-open"'
+    assert_includes content, 'CUDA_PACKAGES="cuda-toolkit-13-0"'
+    assert_match(/elif is_ubuntu24; then.*?CUDA_MAJOR_VERSION="13"/m, content)
+    assert_match(/if is_arm64; then\s+CUDA_REPO_ARCH="sbsa"\s+else\s+CUDA_REPO_ARCH="x86_64"/m, content)
+    assert_includes content, 'repos/$DIST_SLUG/$CUDA_REPO_ARCH/$DEBIAN_FILE'
+  end
+
+  def test_gpu_build_wiring_includes_ubuntu24_arm64
+    patch_lib = File.read(PATCH_LIB)
+    matrix = File.read(GPU_MATRIX_WORKFLOW)
+    reproductions = File.read(REPRODUCTIONS_WORKFLOW)
+
+    refute_match(/if \[ "\$ARCH" = "x64" \]; then\s+# add gpu install script/m, patch_lib)
+    assert_includes matrix, "ubuntu24_gpu_arm64:"
+    assert_includes matrix, 'images+=("ubuntu24-gpu-arm64")'
+    assert_includes reproductions, "issue-41-ubuntu24-gpu-arm64:"
+    assert_includes reproductions, "runner=4cpu-linux-arm64/image=ubuntu24-gpu-arm64/family=g5g"
+    assert_includes reproductions, "issue-46-ubuntu24-cuda13-x64:"
+    assert_includes reproductions, "runner=4cpu-linux-x64/image=ubuntu24-gpu-x64/family=g4dn"
+    assert_includes reproductions, "issue-55-ubuntu24-blackwell-x64:"
+    assert_includes reproductions, "runner=8cpu-linux-x64/image=ubuntu24-gpu-x64/family=g7e"
+  end
+
+  def test_gpu_release_gate_checks_the_complete_cuda_stack
+    build_test_release = File.read(BUILD_TEST_RELEASE_WORKFLOW)
+    test_workflow = File.read(TEST_WORKFLOW)
+
+    assert_includes build_test_release, 'image_id: ${{ inputs.image_id }}'
+    assert_equal 8, build_test_release.scan('image_id: ${{ inputs.image_id }}').size
+    assert_match(/workflow_dispatch:.*?image_id:\s+required: true/m, test_workflow)
+    assert_match(/workflow_call:.*?image_id:\s+required: true/m, test_workflow)
+    assert_match(/test-gpu:.*?uses: .\/\.github\/workflows\/test\.yml.*?gpu: true/m, build_test_release)
+    assert_includes test_workflow, "test-gpu-linux:"
+    assert_includes test_workflow, "test-gpu-windows:"
+    assert_includes test_workflow, "!inputs.gpu"
+    assert_includes build_test_release, "test-gpu-blackwell:"
+    assert_includes build_test_release, "inputs.image_id == 'ubuntu26-gpu-x64'"
+    assert_includes build_test_release, "instance_family: g7e"
+    assert_includes build_test_release, 'cpu: "8"'
+    assert_match(/release:.*?needs:.*?- test-gpu-blackwell/m, build_test_release)
+    assert_includes test_workflow, 'cpu=${{ inputs.cpu }}'
+    assert_includes test_workflow, "ubuntu22-gpu-x64)"
+    assert_includes test_workflow, "ubuntu24-gpu-x64|ubuntu24-gpu-arm64)"
+    assert_includes test_workflow, "ubuntu26-gpu-x64)"
+    assert_match(/ubuntu26-gpu-x64\).*?expect_open_driver=true/m, test_workflow)
+    assert_includes test_workflow, "nvcc --version"
+    assert_includes test_workflow, 'modinfo -F license nvidia | grep -Fx "Dual MIT/GPL"'
+    assert_includes test_workflow, "cudaGetDeviceCount"
+    assert_includes test_workflow, "set_value<<<1, 1>>>(value)"
+    assert_includes test_workflow, "cudaDeviceSynchronize()"
+    assert_includes test_workflow, 'nvcc -arch=native'
+    assert_includes test_workflow, "release 12\\.9"
+    assert_includes test_workflow, "VsDevCmd.bat"
+    assert_includes test_workflow, "windows25-gpu-x64"
+    assert_includes test_workflow, 'docker run --rm --gpus all "$cuda_container" nvidia-smi -L'
+    assert_includes test_workflow, '"$cuda_container" /cuda-smoke'
   end
 
   def test_ubuntu26_descendants_clear_inherited_launch_state

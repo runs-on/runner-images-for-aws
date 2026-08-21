@@ -39,10 +39,8 @@ patch_ubuntu() {
   rolaunch_bin="$dist_dir/rolaunch-linux-$goarch"
 
   ## Script overrides
-  if [ "$ARCH" = "x64" ]; then
-    # add gpu install script
-    cp patches/ubuntu/build/install-gpu.sh "$build_dir/"
-  fi
+  # add gpu install script
+  cp patches/ubuntu/build/install-gpu.sh "$build_dir/"
   # install apt common packages in one transaction to avoid repeated apt service checks
   cp patches/ubuntu/build/install-apt-common.sh "$build_dir/"
   # restore runner install script

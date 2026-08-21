@@ -115,6 +115,47 @@ jobs:
           command -v rustup
           command -v dotnet
 
+  issue-41-ubuntu24-gpu-arm64:
+    name: issue 41 Ubuntu 24 GPU ARM64 on g5g
+    runs-on: runs-on=${{ github.run_id }}/runner=4cpu-linux-arm64/image=ubuntu24-gpu-arm64/family=g5g
+    steps:
+      - name: Check native CUDA 13 and the open driver
+        run: |
+          set -euo pipefail
+          test "$(dpkg --print-architecture)" = arm64
+          nvcc --version | grep -F "release 13.0"
+          modinfo -F license nvidia | grep -F "Dual MIT/GPL"
+          nvidia-smi
+          nvidia-smi -L
+      - name: Check CUDA 13 container access
+        run: docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi -L
+
+  issue-46-ubuntu24-cuda13-x64:
+    name: issue 46 CUDA 13 on Ubuntu 24 GPU x64
+    runs-on: runs-on=${{ github.run_id }}/runner=4cpu-linux-x64/image=ubuntu24-gpu-x64/family=g4dn
+    steps:
+      - name: Check native CUDA 13
+        run: |
+          set -euo pipefail
+          nvcc --version | grep -F "release 13.0"
+          nvidia-smi
+          nvidia-smi -L
+      - name: Check CUDA 13 container access
+        run: docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi -L
+
+  issue-55-ubuntu24-blackwell-x64:
+    name: issue 55 Ubuntu 24 open driver on Blackwell
+    runs-on: runs-on=${{ github.run_id }}/runner=8cpu-linux-x64/image=ubuntu24-gpu-x64/family=g7e
+    steps:
+      - name: Check Blackwell with the open driver
+        run: |
+          set -euo pipefail
+          modinfo -F license nvidia | grep -F "Dual MIT/GPL"
+          nvidia-smi --query-gpu=name --format=csv,noheader | grep -i blackwell
+          nvidia-smi -L
+      - name: Check CUDA 13 container access
+        run: docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi -L
+
   issue-19-windows25-hyperv-vs-cpp:
     name: issue-19 windows25 Hyper-V + VS + C++
     runs-on: runs-on=${{ github.run_id }}/image=windows25-dev-x64/family=m8i

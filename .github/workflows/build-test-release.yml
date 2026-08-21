@@ -33,6 +33,7 @@ jobs:
     uses: ./.github/workflows/test.yml
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
+      image_id: ${{ inputs.image_id }}
       index: 1
       platform: ${{ inputs.platform }}
       gpu: false
@@ -44,6 +45,7 @@ jobs:
     uses: ./.github/workflows/test.yml
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
+      image_id: ${{ inputs.image_id }}
       index: 2
       platform: ${{ inputs.platform }}
       gpu: false
@@ -55,6 +57,7 @@ jobs:
     uses: ./.github/workflows/test.yml
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
+      image_id: ${{ inputs.image_id }}
       index: 3
       extras: "s3-cache"
       platform: ${{ inputs.platform }}
@@ -67,6 +70,7 @@ jobs:
     uses: ./.github/workflows/test.yml
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
+      image_id: ${{ inputs.image_id }}
       index: 4
       extras: "s3-cache"
       platform: ${{ inputs.platform }}
@@ -80,8 +84,24 @@ jobs:
     uses: ./.github/workflows/test.yml
     with:
       ami_id: ${{ needs.build.outputs.ami_id }}
+      image_id: ${{ inputs.image_id }}
       index: 5
       instance_family: ${{ endsWith(inputs.image_id, '-arm64') && 'g5g' || 'g4dn' }}
+      platform: ${{ inputs.platform }}
+      gpu: true
+
+  test-gpu-blackwell:
+    if: inputs.image_id == 'ubuntu24-gpu-x64' || inputs.image_id == 'ubuntu26-gpu-x64'
+    needs:
+      - build
+      - test-gpu
+    uses: ./.github/workflows/test.yml
+    with:
+      ami_id: ${{ needs.build.outputs.ami_id }}
+      image_id: ${{ inputs.image_id }}
+      index: 6
+      instance_family: g7e
+      cpu: "8"
       platform: ${{ inputs.platform }}
       gpu: true
 
@@ -90,6 +110,7 @@ jobs:
     needs:
       - build
       - test-gpu
+      - test-gpu-blackwell
     uses: ./.github/workflows/release.yml
     secrets: inherit
     with:
