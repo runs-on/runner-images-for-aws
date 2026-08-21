@@ -12,7 +12,7 @@ CUDA_MAJOR_VERSION="12"
 CUDA_REPO_ARCH=""
 if is_ubuntu26; then
     DIST_SLUG="ubuntu2604"
-    NVIDIA_DRIVER_PACKAGES="linux-modules-nvidia-595-aws nvidia-driver-595"
+    NVIDIA_DRIVER_PACKAGES="linux-modules-nvidia-595-open-aws nvidia-driver-595-open"
     CUDA_PACKAGES="cuda-toolkit-13-3"
     CUDA_MAJOR_VERSION="13"
 elif is_ubuntu24; then

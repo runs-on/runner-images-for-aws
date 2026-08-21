@@ -91,7 +91,7 @@ jobs:
       gpu: true
 
   test-gpu-blackwell:
-    if: inputs.image_id == 'ubuntu24-gpu-x64'
+    if: inputs.image_id == 'ubuntu24-gpu-x64' || inputs.image_id == 'ubuntu26-gpu-x64'
     needs:
       - build
       - test-gpu

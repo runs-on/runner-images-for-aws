@@ -150,7 +150,8 @@ class UbuntuTemplateTest < Minitest::Test
 
     assert_includes content, "if is_ubuntu26; then"
     assert_includes content, 'DIST_SLUG="ubuntu2604"'
-    assert_includes content, 'linux-modules-nvidia-595-aws nvidia-driver-595'
+    assert_includes content, 'linux-modules-nvidia-595-open-aws nvidia-driver-595-open'
+    refute_includes content, 'linux-modules-nvidia-595-aws nvidia-driver-595'
     assert_includes content, 'CUDA_PACKAGES="cuda-toolkit-13-3"'
     assert_includes content, 'CUDA_MAJOR_VERSION="13"'
     assert_includes content, 'grep "release $CUDA_MAJOR_VERSION"'
@@ -208,6 +209,7 @@ class UbuntuTemplateTest < Minitest::Test
     assert_includes test_workflow, "test-gpu-windows:"
     assert_includes test_workflow, "!inputs.gpu"
     assert_includes build_test_release, "test-gpu-blackwell:"
+    assert_includes build_test_release, "inputs.image_id == 'ubuntu26-gpu-x64'"
     assert_includes build_test_release, "instance_family: g7e"
     assert_includes build_test_release, 'cpu: "8"'
     assert_match(/release:.*?needs:.*?- test-gpu-blackwell/m, build_test_release)
@@ -215,6 +217,7 @@ class UbuntuTemplateTest < Minitest::Test
     assert_includes test_workflow, "ubuntu22-gpu-x64)"
     assert_includes test_workflow, "ubuntu24-gpu-x64|ubuntu24-gpu-arm64)"
     assert_includes test_workflow, "ubuntu26-gpu-x64)"
+    assert_match(/ubuntu26-gpu-x64\).*?expect_open_driver=true/m, test_workflow)
     assert_includes test_workflow, "nvcc --version"
     assert_includes test_workflow, 'modinfo -F license nvidia | grep -Fx "Dual MIT/GPL"'
     assert_includes test_workflow, "cudaGetDeviceCount"

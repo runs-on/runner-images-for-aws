@@ -477,7 +477,7 @@ jobs:
             ubuntu26-gpu-x64)
               expected_cuda_release=13.3
               cuda_container=nvidia/cuda:13.3.1-base-ubuntu26.04
-              expect_open_driver=false
+              expect_open_driver=true
               ;;
             *)
               echo "Unsupported GPU image ID: $IMAGE_ID" >&2
