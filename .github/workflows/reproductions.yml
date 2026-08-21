@@ -81,6 +81,40 @@ jobs:
           apt-config dump | grep -Fx 'Acquire::https::Timeout "20";'
           sudo apt-get update -y
 
+  issue-31-runner-home-path-ubuntu24-full-x64:
+    name: issue 31 runner HOME paths on ubuntu24-full-x64
+    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-dev-x64
+    steps:
+      - name: Check runner HOME paths and tools
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          literal_home="\$HOME"
+          if grep -qF "${literal_home}" /etc/environment; then
+            echo "/etc/environment contains a literal ${literal_home}" >&2
+            exit 1
+          fi
+
+          case "${PATH}" in
+            *"${literal_home}"*) echo "PATH contains a literal ${literal_home}" >&2; exit 1 ;;
+          esac
+
+          for expected in \
+            /home/runner/.local/bin \
+            /home/runner/.cargo/bin \
+            /home/runner/.config/composer/vendor/bin \
+            /home/runner/.dotnet/tools; do
+            case ":${PATH}:" in
+              *":${expected}:"*) ;;
+              *) echo "PATH is missing ${expected}" >&2; exit 1 ;;
+            esac
+          done
+
+          command -v cargo
+          command -v rustup
+          command -v dotnet
+
   issue-41-ubuntu24-gpu-arm64:
     name: issue 41 Ubuntu 24 GPU ARM64 on g5g
     runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-arm64/image=ubuntu24-gpu-arm64/family=g5g

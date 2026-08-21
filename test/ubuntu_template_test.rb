@@ -13,6 +13,7 @@ class UbuntuTemplateTest < Minitest::Test
   STEPSECURITY_ARM64_TEMPLATE = File.join(TEMPLATE_DIR, "ubuntu-stepsecurity-arm64.pkr.hcl")
   DESCENDANT_TEMPLATES = [GPU_X64_TEMPLATE, STEPSECURITY_X64_TEMPLATE, STEPSECURITY_ARM64_TEMPLATE].freeze
   FULL_ROLAUNCH_SCRIPT = File.expand_path("../patches/ubuntu/files/configure-full-rolaunch.sh", __dir__)
+  ENVIRONMENT_FINALIZER = File.expand_path("../patches/ubuntu/files/finalize-runner-environment.sh", __dir__)
   DESCENDANT_ROLAUNCH_SCRIPT = File.expand_path("../patches/ubuntu/files/finalize-rolaunch-descendant.sh", __dir__)
   GPU_INSTALL_SCRIPT = File.expand_path("../patches/ubuntu/build/install-gpu.sh", __dir__)
   MINIMAL_BASE_SCRIPT = File.expand_path("../patches/ubuntu/files/bootstrap-minimal-base.sh", __dir__)
@@ -53,6 +54,25 @@ class UbuntuTemplateTest < Minitest::Test
     assert_includes content, "https://archive.ubuntu.com/ubuntu/"
     assert_includes content, "https://security.ubuntu.com/ubuntu/"
     assert_includes content, "https://ports.ubuntu.com/ubuntu-ports/"
+  end
+
+  def test_full_images_finalize_environment_for_runner_user
+    [FULL_X64_TEMPLATE, FULL_ARM64_TEMPLATE].each do |path|
+      template = File.read(path)
+      configure_system = template.index("configure-system.sh")
+      finalize_environment = template.index("finalize-runner-environment.sh")
+
+      refute_nil configure_system, path
+      refute_nil finalize_environment, path
+      assert_operator finalize_environment, :>, configure_system, path
+    end
+  end
+
+  def test_environment_finalizer_resolves_the_runner_account_home
+    script = File.read(ENVIRONMENT_FINALIZER)
+
+    assert_includes script, "getent passwd runner"
+    assert_includes script, %(grep -qF '$HOME' /etc/environment)
   end
 
   def test_minimal_images_use_architecture_appropriate_cdn_apt_mirrors
