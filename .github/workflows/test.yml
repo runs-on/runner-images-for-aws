@@ -7,10 +7,21 @@ on:
       ami_id:
         required: true
         type: string
+      image_id:
+        required: true
+        type: string
+      index:
+        required: false
+        type: number
+        default: 1
       instance_family:
         required: false
         type: string
         default: "m7"
+      cpu:
+        required: false
+        type: string
+        default: "2+4"
       platform:
         required: false
         type: string
@@ -28,6 +39,9 @@ on:
       ami_id:
         required: true
         type: string
+      image_id:
+        required: true
+        type: string
       index:
         required: true
         type: number
@@ -35,6 +49,10 @@ on:
         required: false
         type: string
         default: "m7"
+      cpu:
+        required: false
+        type: string
+        default: "2+4"
       platform:
         required: false
         type: string
@@ -50,7 +68,7 @@ on:
 
 jobs:
   test-windows:
-    if: ${{ inputs.platform == 'windows' }}
+    if: ${{ inputs.platform == 'windows' && !inputs.gpu }}
     name: Test${{ inputs.index || '1' }}
     runs-on: runs-on=${{ github.run_id }}-${{ inputs.index }}/env=bootstrap/volume=60g/family=${{ inputs.instance_family || 'm7' }}/cpu=2+4/ami=${{ inputs.ami_id }}/extras=${{ inputs.extras }}
     steps:
@@ -112,15 +130,8 @@ jobs:
         run: |
           dir C:\ProgramData\Amazon\EC2Launch\config
           Get-Content -Path C:\ProgramData\Amazon\EC2Launch\sysprep\unattend.xml
-      - name: Ensure NVIDIA drivers are ok
-        if: inputs.gpu
-        run: |
-          $nvidiaSmi = Get-Command nvidia-smi.exe -ErrorAction Stop
-          & $nvidiaSmi.Source
-          & $nvidiaSmi.Source -L
-
   test-linux:
-    if: ${{ inputs.platform == 'linux' }}
+    if: ${{ inputs.platform == 'linux' && !inputs.gpu }}
     name: Test${{ inputs.index || '1' }}
     runs-on: runs-on=${{ github.run_id }}-${{ inputs.index }}/env=bootstrap/family=${{ inputs.instance_family || 'm7' }}/cpu=2+4/ami=${{ inputs.ami_id }}/extras=${{ inputs.extras }}
     env:
@@ -254,12 +265,6 @@ jobs:
           echo $PATH
           rustc --version
           cargo --version
-      - name: Ensure NVIDIA drivers are ok
-        if: inputs.gpu
-        run: |
-          nvidia-smi
-          nvidia-smi -L
-          nvidia-smi -q -d Memory
       # Test for docker build and caching
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -329,6 +334,7 @@ jobs:
             echo "MD5 hash mismatch"
             exit 1
           fi
+
       - name: Save to cache (runs-on/cache)
         uses: runs-on/cache/save@a5f51d6f3fece787d03b7b4e981c82538a0654ed # v4
         with:
@@ -355,3 +361,199 @@ jobs:
             echo "MD5 hash mismatch"
             exit 1
           fi
+
+  test-gpu-windows:
+    if: ${{ inputs.gpu && inputs.platform == 'windows' }}
+    name: Test GPU ${{ inputs.image_id }} on ${{ inputs.instance_family }}
+    runs-on: runs-on=${{ github.run_id }}-${{ inputs.index }}/env=bootstrap/volume=60g/family=${{ inputs.instance_family }}/cpu=${{ inputs.cpu }}/ami=${{ inputs.ami_id }}
+    steps:
+      - name: Check NVIDIA GPU stack
+        shell: pwsh
+        env:
+          IMAGE_ID: ${{ inputs.image_id }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:IMAGE_ID -ne 'windows25-gpu-x64') {
+            throw "Unsupported GPU image ID: $env:IMAGE_ID"
+          }
+
+          $nvidiaSmi = Get-Command nvidia-smi.exe -ErrorAction Stop
+          & $nvidiaSmi.Source
+          & $nvidiaSmi.Source -L
+
+          $nvccCommand = Get-Command nvcc.exe -ErrorAction SilentlyContinue
+          $nvcc = if ($nvccCommand) {
+            $nvccCommand.Source
+          } else {
+            'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.9\bin\nvcc.exe'
+          }
+          if (-not (Test-Path $nvcc)) {
+            throw "nvcc.exe not found at $nvcc"
+          }
+          $nvccVersion = (& $nvcc --version | Out-String)
+          if ($LASTEXITCODE -ne 0 -or $nvccVersion -notmatch 'release 12\.9') {
+            throw "Expected CUDA 12.9, got: $nvccVersion"
+          }
+
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsInstallPath = (& $vswhere -latest -products * -property installationPath | Select-Object -First 1).Trim()
+          if (-not $vsInstallPath) {
+            throw 'Visual Studio installation path not found'
+          }
+          $vsDevCmd = Join-Path $vsInstallPath 'Common7\Tools\VsDevCmd.bat'
+          if (-not (Test-Path $vsDevCmd)) {
+            throw "VsDevCmd.bat not found at $vsDevCmd"
+          }
+
+          $source = Join-Path $env:RUNNER_TEMP 'cuda-smoke.cu'
+          $binary = Join-Path $env:RUNNER_TEMP 'cuda-smoke.exe'
+          @'
+          #include <cuda_runtime.h>
+
+          #include <cstdio>
+
+          __global__ void set_value(int* value) {
+            *value = 42;
+          }
+
+          int main() {
+            int* value = nullptr;
+            cudaError_t result = cudaMallocManaged(&value, sizeof(*value));
+            if (result != cudaSuccess) {
+              std::fprintf(stderr, "cudaMallocManaged failed: %s\n", cudaGetErrorString(result));
+              return 1;
+            }
+
+            set_value<<<1, 1>>>(value);
+            result = cudaGetLastError();
+            if (result == cudaSuccess) {
+              result = cudaDeviceSynchronize();
+            }
+            if (result != cudaSuccess || *value != 42) {
+              std::fprintf(stderr, "CUDA kernel failed: %s (value %d)\n", cudaGetErrorString(result), *value);
+              cudaFree(value);
+              return 1;
+            }
+
+            std::printf("CUDA kernel returned %d\n", *value);
+            cudaFree(value);
+            return 0;
+          }
+          '@ | Set-Content -Path $source -Encoding ascii
+
+          $compile = "call `"$vsDevCmd`" -arch=x64 >nul && `"$nvcc`" -arch=native `"$source`" -o `"$binary`""
+          cmd.exe /d /s /c $compile
+          if ($LASTEXITCODE -ne 0) {
+            throw "nvcc failed with exit code $LASTEXITCODE"
+          }
+          & $binary
+          if ($LASTEXITCODE -ne 0) {
+            throw "CUDA smoke test failed with exit code $LASTEXITCODE"
+          }
+
+  test-gpu-linux:
+    if: ${{ inputs.gpu && inputs.platform == 'linux' }}
+    name: Test GPU ${{ inputs.image_id }} on ${{ inputs.instance_family }}
+    runs-on: runs-on=${{ github.run_id }}-${{ inputs.index }}/env=bootstrap/family=${{ inputs.instance_family }}/cpu=${{ inputs.cpu }}/ami=${{ inputs.ami_id }}
+    steps:
+      - name: Check NVIDIA GPU stack
+        shell: bash
+        env:
+          IMAGE_ID: ${{ inputs.image_id }}
+        run: |
+          set -euo pipefail
+
+          case "$IMAGE_ID" in
+            ubuntu22-gpu-x64)
+              expected_cuda_release=12.9
+              cuda_container=nvidia/cuda:12.9.1-base-ubuntu22.04
+              expect_open_driver=false
+              ;;
+            ubuntu24-gpu-x64|ubuntu24-gpu-arm64)
+              expected_cuda_release=13.0
+              cuda_container=nvidia/cuda:13.0.2-base-ubuntu24.04
+              expect_open_driver=true
+              ;;
+            ubuntu26-gpu-x64)
+              expected_cuda_release=13.3
+              cuda_container=nvidia/cuda:13.3.1-base-ubuntu26.04
+              expect_open_driver=false
+              ;;
+            *)
+              echo "Unsupported GPU image ID: $IMAGE_ID" >&2
+              exit 1
+              ;;
+          esac
+
+          nvidia-smi
+          nvidia-smi -L
+          nvidia-smi -q -d Memory
+          nvcc --version | grep -F "release $expected_cuda_release"
+
+          if [[ "$expect_open_driver" == true ]]; then
+            modinfo -F license nvidia | grep -Fx "Dual MIT/GPL"
+          fi
+
+          cat > "$RUNNER_TEMP/cuda-smoke.cu" <<'CUDA'
+          #include <cuda_runtime.h>
+
+          #include <cstdio>
+
+          __global__ void set_value(int* value) {
+            *value = 42;
+          }
+
+          int main() {
+            int device_count = 0;
+            cudaError_t result = cudaGetDeviceCount(&device_count);
+            if (result != cudaSuccess) {
+              std::fprintf(stderr, "cudaGetDeviceCount failed: %s\n", cudaGetErrorString(result));
+              return 1;
+            }
+            if (device_count < 1) {
+              std::fprintf(stderr, "No CUDA devices found\n");
+              return 1;
+            }
+
+            cudaDeviceProp device{};
+            result = cudaGetDeviceProperties(&device, 0);
+            if (result != cudaSuccess) {
+              std::fprintf(stderr, "cudaGetDeviceProperties failed: %s\n", cudaGetErrorString(result));
+              return 1;
+            }
+
+            int* value = nullptr;
+            result = cudaMallocManaged(&value, sizeof(*value));
+            if (result != cudaSuccess) {
+              std::fprintf(stderr, "cudaMallocManaged failed: %s\n", cudaGetErrorString(result));
+              return 1;
+            }
+
+            set_value<<<1, 1>>>(value);
+            result = cudaGetLastError();
+            if (result == cudaSuccess) {
+              result = cudaDeviceSynchronize();
+            }
+            if (result != cudaSuccess) {
+              std::fprintf(stderr, "CUDA kernel failed: %s\n", cudaGetErrorString(result));
+              cudaFree(value);
+              return 1;
+            }
+            if (*value != 42) {
+              std::fprintf(stderr, "CUDA kernel returned %d instead of 42\n", *value);
+              cudaFree(value);
+              return 1;
+            }
+
+            std::printf("CUDA device: %s (compute capability %d.%d)\n", device.name, device.major, device.minor);
+            cudaFree(value);
+            return 0;
+          }
+          CUDA
+          nvcc -arch=native "$RUNNER_TEMP/cuda-smoke.cu" -o "$RUNNER_TEMP/cuda-smoke"
+          "$RUNNER_TEMP/cuda-smoke"
+
+          docker run --rm --gpus all "$cuda_container" nvidia-smi -L
+          docker run --rm --gpus all \
+            --volume "$RUNNER_TEMP/cuda-smoke:/cuda-smoke:ro" \
+            "$cuda_container" /cuda-smoke

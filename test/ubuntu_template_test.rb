@@ -3,6 +3,7 @@ require "yaml"
 
 class UbuntuTemplateTest < Minitest::Test
   BUILD_WORKFLOW = File.expand_path("../.github/workflows/build.yml", __dir__)
+  BUILD_TEST_RELEASE_WORKFLOW = File.expand_path("../.github/workflows/build-test-release.yml", __dir__)
   BUILD_SCRIPT = File.expand_path("../bin/build", __dir__)
   CONFIG = YAML.load_file(File.expand_path("../config.yml", __dir__))
   TEMPLATE_DIR = File.expand_path("../patches/ubuntu/templates", __dir__)
@@ -187,8 +188,44 @@ class UbuntuTemplateTest < Minitest::Test
     assert_includes matrix, "ubuntu24_gpu_arm64:"
     assert_includes matrix, 'images+=("ubuntu24-gpu-arm64")'
     assert_includes reproductions, "issue-41-ubuntu24-gpu-arm64:"
+    assert_includes reproductions, "runner=4cpu-linux-arm64/image=ubuntu24-gpu-arm64/family=g5g"
     assert_includes reproductions, "issue-46-ubuntu24-cuda13-x64:"
+    assert_includes reproductions, "runner=4cpu-linux-x64/image=ubuntu24-gpu-x64/family=g4dn"
     assert_includes reproductions, "issue-55-ubuntu24-blackwell-x64:"
+    assert_includes reproductions, "runner=8cpu-linux-x64/image=ubuntu24-gpu-x64/family=g7e"
+  end
+
+  def test_gpu_release_gate_checks_the_complete_cuda_stack
+    build_test_release = File.read(BUILD_TEST_RELEASE_WORKFLOW)
+    test_workflow = File.read(TEST_WORKFLOW)
+
+    assert_includes build_test_release, 'image_id: ${{ inputs.image_id }}'
+    assert_equal 8, build_test_release.scan('image_id: ${{ inputs.image_id }}').size
+    assert_match(/workflow_dispatch:.*?image_id:\s+required: true/m, test_workflow)
+    assert_match(/workflow_call:.*?image_id:\s+required: true/m, test_workflow)
+    assert_match(/test-gpu:.*?uses: .\/\.github\/workflows\/test\.yml.*?gpu: true/m, build_test_release)
+    assert_includes test_workflow, "test-gpu-linux:"
+    assert_includes test_workflow, "test-gpu-windows:"
+    assert_includes test_workflow, "!inputs.gpu"
+    assert_includes build_test_release, "test-gpu-blackwell:"
+    assert_includes build_test_release, "instance_family: g7e"
+    assert_includes build_test_release, 'cpu: "8"'
+    assert_match(/release:.*?needs:.*?- test-gpu-blackwell/m, build_test_release)
+    assert_includes test_workflow, 'cpu=${{ inputs.cpu }}'
+    assert_includes test_workflow, "ubuntu22-gpu-x64)"
+    assert_includes test_workflow, "ubuntu24-gpu-x64|ubuntu24-gpu-arm64)"
+    assert_includes test_workflow, "ubuntu26-gpu-x64)"
+    assert_includes test_workflow, "nvcc --version"
+    assert_includes test_workflow, 'modinfo -F license nvidia | grep -Fx "Dual MIT/GPL"'
+    assert_includes test_workflow, "cudaGetDeviceCount"
+    assert_includes test_workflow, "set_value<<<1, 1>>>(value)"
+    assert_includes test_workflow, "cudaDeviceSynchronize()"
+    assert_includes test_workflow, 'nvcc -arch=native'
+    assert_includes test_workflow, "release 12\\.9"
+    assert_includes test_workflow, "VsDevCmd.bat"
+    assert_includes test_workflow, "windows25-gpu-x64"
+    assert_includes test_workflow, 'docker run --rm --gpus all "$cuda_container" nvidia-smi -L'
+    assert_includes test_workflow, '"$cuda_container" /cuda-smoke'
   end
 
   def test_ubuntu26_descendants_clear_inherited_launch_state
