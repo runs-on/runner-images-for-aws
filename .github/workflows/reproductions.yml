@@ -2,18 +2,12 @@ name: Reproductions
 
 on:
   workflow_dispatch:
-    inputs:
-      issue:
-        description: Run only one issue reproduction
-        required: false
-        type: string
 
 permissions:
   contents: read
 
 jobs:
   issue-20-setup-python-isolated-ubuntu24-full-x64:
-    if: github.event.inputs.issue == '' || github.event.inputs.issue == '20'
     name: issue 20 isolated Python ${{ matrix.python-version }} on ubuntu24-full-x64
     strategy:
       fail-fast: false
@@ -37,7 +31,6 @@ jobs:
           env -i "${python_path}" -c 'import sys; print(sys.version)'
 
   php-ubuntu24-arm64:
-    if: github.event.inputs.issue == ''
     name: Fast PHP installs on ubuntu24-full-arm64
     runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-arm64/image=ubuntu24-dev-arm64
     steps:
@@ -61,7 +54,6 @@ jobs:
         run: php -v
 
   git-lfs-ubuntu24-arm64:
-    if: github.event.inputs.issue == ''
     name: git-lfs on ubuntu24-full-arm64
     runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-arm64/image=ubuntu24-dev-arm64
     steps:
@@ -71,7 +63,6 @@ jobs:
           git-lfs version
 
   imageos-ubuntu24-x64:
-    if: github.event.inputs.issue == ''
     name: ImageOS/ImageVersion on ubuntu24-full-x64
     runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-full-x64
     steps:
@@ -83,7 +74,6 @@ jobs:
           test -n "$ImageVersion" || (echo "ERROR: ImageVersion is not set" && exit 1)
 
   issue-61-apt-cdn-ubuntu24-full-x64:
-    if: github.event.inputs.issue == ''
     name: issue 61 CDN apt mirror on ubuntu24-full-x64
     runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-dev-x64
     steps:
@@ -115,7 +105,6 @@ jobs:
           sudo apt-get update -y
 
   issue-31-runner-home-path-ubuntu24-full-x64:
-    if: github.event.inputs.issue == ''
     name: issue 31 runner HOME paths on ubuntu24-full-x64
     runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-dev-x64
     steps:
@@ -150,7 +139,6 @@ jobs:
           command -v dotnet
 
   issue-41-ubuntu24-gpu-arm64:
-    if: github.event.inputs.issue == ''
     name: issue 41 Ubuntu 24 GPU ARM64 on g5g
     runs-on: runs-on=${{ github.run_id }}/runner=4cpu-linux-arm64/image=ubuntu24-gpu-arm64/family=g5g
     steps:
@@ -166,7 +154,6 @@ jobs:
         run: docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi -L
 
   issue-46-ubuntu24-cuda13-x64:
-    if: github.event.inputs.issue == ''
     name: issue 46 CUDA 13 on Ubuntu 24 GPU x64
     runs-on: runs-on=${{ github.run_id }}/runner=4cpu-linux-x64/image=ubuntu24-gpu-x64/family=g4dn
     steps:
@@ -180,7 +167,6 @@ jobs:
         run: docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi -L
 
   issue-55-ubuntu24-blackwell-x64:
-    if: github.event.inputs.issue == ''
     name: issue 55 Ubuntu 24 open driver on Blackwell
     runs-on: runs-on=${{ github.run_id }}/runner=8cpu-linux-x64/image=ubuntu24-gpu-x64/family=g7e
     steps:
@@ -194,7 +180,6 @@ jobs:
         run: docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi -L
 
   issue-19-windows25-hyperv-vs-cpp:
-    if: github.event.inputs.issue == ''
     name: issue-19 windows25 Hyper-V + VS + C++
     runs-on: runs-on=${{ github.run_id }}/image=windows25-dev-x64/family=m8i
     steps:
