@@ -51,6 +51,8 @@ Those are the full Ubuntu images with the [StepSecurity](https://www.stepsecurit
 * `ubuntu22-stepsecurity-arm64`
 * `ubuntu24-stepsecurity-x64`
 * `ubuntu24-stepsecurity-arm64`
+* `ubuntu26-stepsecurity-x64`
+* `ubuntu26-stepsecurity-arm64`
 
 ## Supported regions
 
