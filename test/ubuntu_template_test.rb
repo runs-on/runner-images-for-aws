@@ -22,6 +22,8 @@ class UbuntuTemplateTest < Minitest::Test
   PRE_SCRIPT = File.expand_path("../patches/ubuntu/files/pre.sh", __dir__)
   TEST_WORKFLOW = File.expand_path("../.github/workflows/test.yml", __dir__)
   GPU_MATRIX_WORKFLOW = File.expand_path("../.github/workflows/matrix-gpu.yml", __dir__)
+  STEPSECURITY_MATRIX_WORKFLOW = File.expand_path("../.github/workflows/matrix-stepsecurity.yml", __dir__)
+  README = File.expand_path("../README.md", __dir__)
   REPRODUCTIONS_WORKFLOW = File.expand_path("../.github/workflows/reproductions.yml", __dir__)
 
   def test_configure_image_data_gets_helper_scripts_env
@@ -128,6 +130,20 @@ class UbuntuTemplateTest < Minitest::Test
     assert_equal "ubuntu-stepsecurity-x64", configured.fetch("ubuntu26-stepsecurity-x64").fetch("template")
     assert_equal "ubuntu-stepsecurity-arm64", configured.fetch("ubuntu26-stepsecurity-arm64").fetch("template")
     configured.each_value { |image| assert_equal 400, image.fetch("volume_throughput") }
+  end
+
+  def test_ubuntu26_stepsecurity_images_are_enabled_by_default
+    workflow = File.read(STEPSECURITY_MATRIX_WORKFLOW)
+    readme = File.read(README)
+
+    %w[x64 arm64].each do |architecture|
+      assert_match(
+        /^      ubuntu26_stepsecurity_#{architecture}:\n(?:        [^\n]+\n)*        default: true$/,
+        workflow
+      )
+      assert_includes workflow, %(images+=("ubuntu26-stepsecurity-#{architecture}"))
+      assert_includes readme, "`ubuntu26-stepsecurity-#{architecture}`"
+    end
   end
 
   def test_full_image_publication_can_be_disabled_without_changing_the_default

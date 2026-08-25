@@ -22,11 +22,11 @@ on:
       ubuntu26_stepsecurity_x64:
         type: boolean
         description: ubuntu26-stepsecurity-x64
-        default: false
+        default: true
       ubuntu26_stepsecurity_arm64:
         type: boolean
         description: ubuntu26-stepsecurity-arm64
-        default: false
+        default: true
   workflow_run:
     workflows: ['Linux images']
     branches: [main]
