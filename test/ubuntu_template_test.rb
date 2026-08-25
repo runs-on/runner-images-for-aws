@@ -196,6 +196,56 @@ class UbuntuTemplateTest < Minitest::Test
     assert_includes content, 'repos/$DIST_SLUG/$CUDA_REPO_ARCH/$DEBIAN_FILE'
   end
 
+  def test_ubuntu24_gpu_stepsecurity_images_layer_on_gpu_bases
+    configured = CONFIG.fetch("images").filter_map do |image|
+      id = image.fetch("id")
+      [id, image] if id.match?(/\Aubuntu24-gpu-stepsecurity-(?:x64|arm64)\z/)
+    end.to_h
+
+    assert_equal %w[ubuntu24-gpu-stepsecurity-arm64 ubuntu24-gpu-stepsecurity-x64], configured.keys.sort
+
+    x64 = configured.fetch("ubuntu24-gpu-stepsecurity-x64")
+    assert_equal "ubuntu-stepsecurity-x64", x64.fetch("template")
+    assert_equal "g4dn.xlarge", x64.fetch("instance_type")
+    assert_equal 40, x64.fetch("volume_size")
+    assert_equal "runs-on-dev-ubuntu24-gpu-x64-*", x64.fetch("source_ami_name")
+
+    arm64 = configured.fetch("ubuntu24-gpu-stepsecurity-arm64")
+    assert_equal "ubuntu-stepsecurity-arm64", arm64.fetch("template")
+    assert_equal "g5g.xlarge", arm64.fetch("instance_type")
+    assert_equal 40, arm64.fetch("volume_size")
+    assert_equal "runs-on-dev-ubuntu24-gpu-arm64-*", arm64.fetch("source_ami_name")
+  end
+
+  def test_gpu_stepsecurity_builds_follow_their_gpu_bases
+    matrix = File.read(GPU_MATRIX_WORKFLOW)
+    build_test_release = File.read(BUILD_TEST_RELEASE_WORKFLOW)
+    test_workflow = File.read(TEST_WORKFLOW)
+    readme = File.read(README)
+
+    assert_match(
+      /^      ubuntu24_gpu_stepsecurity_x64:\n(?:        [^\n]+\n)*        default: true$/,
+      matrix
+    )
+    assert_match(
+      /^      ubuntu24_gpu_stepsecurity_arm64:\n(?:        [^\n]+\n)*        default: false$/,
+      matrix
+    )
+    assert_includes matrix, "github.event_name != 'workflow_dispatch' || inputs.ubuntu24_gpu_stepsecurity_x64"
+    assert_includes matrix, "github.event_name == 'workflow_dispatch' && inputs.ubuntu24_gpu_stepsecurity_arm64"
+    assert_includes matrix, 'images+=("ubuntu24-gpu-x64")'
+    assert_includes matrix, 'images+=("ubuntu24-gpu-arm64")'
+    assert_includes matrix, 'gpu_stepsecurity_images+=("ubuntu24-gpu-stepsecurity-x64")'
+    assert_includes matrix, 'gpu_stepsecurity_images+=("ubuntu24-gpu-stepsecurity-arm64")'
+    assert_match(/build-test-release-stepsecurity:.*?needs:.*?- build-test-release/m, matrix)
+
+    assert_includes build_test_release, "inputs.image_id == 'ubuntu24-gpu-stepsecurity-x64'"
+    assert_includes test_workflow, "ubuntu24-gpu-stepsecurity-x64|ubuntu24-gpu-stepsecurity-arm64"
+    assert_includes test_workflow, "contains(inputs.image_id, '-stepsecurity-')"
+    assert_includes readme, "`ubuntu24-gpu-stepsecurity-x64`"
+    assert_includes readme, "`ubuntu24-gpu-stepsecurity-arm64`"
+  end
+
   def test_gpu_build_wiring_includes_ubuntu24_arm64
     patch_lib = File.read(PATCH_LIB)
     matrix = File.read(GPU_MATRIX_WORKFLOW)
@@ -231,7 +281,7 @@ class UbuntuTemplateTest < Minitest::Test
     assert_match(/release:.*?needs:.*?- test-gpu-blackwell/m, build_test_release)
     assert_includes test_workflow, 'cpu=${{ inputs.cpu }}'
     assert_includes test_workflow, "ubuntu22-gpu-x64)"
-    assert_includes test_workflow, "ubuntu24-gpu-x64|ubuntu24-gpu-arm64)"
+    assert_includes test_workflow, "ubuntu24-gpu-x64|ubuntu24-gpu-arm64|ubuntu24-gpu-stepsecurity-x64|ubuntu24-gpu-stepsecurity-arm64)"
     assert_includes test_workflow, "ubuntu26-gpu-x64)"
     assert_match(/ubuntu26-gpu-x64\).*?expect_open_driver=true/m, test_workflow)
     assert_includes test_workflow, "nvcc --version"
