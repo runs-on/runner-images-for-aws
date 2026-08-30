@@ -60,6 +60,15 @@ gnu_sed -i '/Remove-Item -Path "\$sdkManifestPath\\\$($_.BaseName)" -Recurse -Fo
 gnu_sed -i 's|"$env:SystemRoot\\Temp",|# RunsOn preserved: "$env:SystemRoot\\Temp",|' $build_dir/Invoke-Cleanup.ps1
 gnu_sed -i 's|"$env:TEMP",|# RunsOn preserved: "$env:TEMP",|' $build_dir/Invoke-Cleanup.ps1
 
+# make yarn/npm cache cleanup non-fatal (tools may be absent in experiment/minimal builds)
+gnu_sed -i 's|throw "Failed to clean yarn cache"|Write-Warning "yarn cache clean skipped (yarn may not be installed)"|' $build_dir/Invoke-Cleanup.ps1
+gnu_sed -i 's|throw "Failed to clean npm cache"|Write-Warning "npm cache clean skipped (npm may not be installed)"|' $build_dir/Invoke-Cleanup.ps1
+
+# docker may not be installed in experiment/minimal builds
+gnu_sed -i 's|throw "docker version failed with exit code|Write-Warning "docker validation skipped (docker may not be installed), exit code|' $build_dir/Configure-System.ps1
+gnu_sed -i "s|throw \\\"Required service|Write-Warning \\\"Service|g" $build_dir/Configure-System.ps1
+gnu_sed -i '/Write-Warning "Service.*not present"/a\        return' $build_dir/Configure-System.ps1
+
 set -x
 
 gnu_sed -i 's|Invoke-PesterTests.*|# removed: Invoke-PesterTests|' $build_dir/*.ps1
@@ -67,7 +76,11 @@ gnu_sed -i 's|Invoke-PesterTests.*|# removed: Invoke-PesterTests|' $build_dir/*.
 # linked path not available on Windows 25
 gnu_sed -i 's|New-Item -ItemType SymbolicLink.*|# RunsOn removed: &|' $build_dir/Install-Docker.ps1
 
-# cat patches/windows/files/boot-config.ps1 >> $build_dir/Configure-System.ps1
+# wslbash symlink target not present when WSL2 is not installed
+gnu_sed -i 's|New-Item -ItemType SymbolicLink -Path "\$shellPath\\wslbash\.exe".*|# RunsOn removed: &|' $build_dir/Configure-Shell.ps1
+
+# boot-config.ps1 is applied via the template as a separate provisioner
+# from patches/windows/custom/boot-config.ps1 -> images/windows/custom/boot-config.ps1
 
 # custom stuff
 rm -rf $release_dir/images/windows/custom
