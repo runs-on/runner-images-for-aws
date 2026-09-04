@@ -19,6 +19,14 @@ on:
         type: boolean
         description: ubuntu26-gpu-x64
         default: false
+      ubuntu24_gpu_stepsecurity_x64:
+        type: boolean
+        description: ubuntu24-gpu-stepsecurity-x64
+        default: true
+      ubuntu24_gpu_stepsecurity_arm64:
+        type: boolean
+        description: ubuntu24-gpu-stepsecurity-arm64
+        default: false
   workflow_run:
     workflows: ['Linux images']
     branches: [main]
@@ -32,6 +40,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       image_ids: ${{ steps.select.outputs.image_ids }}
+      gpu_stepsecurity_image_ids: ${{ steps.select.outputs.gpu_stepsecurity_image_ids }}
+      has_gpu_stepsecurity_images: ${{ steps.select.outputs.has_gpu_stepsecurity_images }}
     steps:
       - id: select
         env:
@@ -39,18 +49,37 @@ jobs:
           UBUNTU24_GPU_X64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu24_gpu_x64 }}
           UBUNTU24_GPU_ARM64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu24_gpu_arm64 }}
           UBUNTU26_GPU_X64: ${{ github.event_name == 'workflow_dispatch' && inputs.ubuntu26_gpu_x64 }}
+          UBUNTU24_GPU_STEPSECURITY_X64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu24_gpu_stepsecurity_x64 }}
+          UBUNTU24_GPU_STEPSECURITY_ARM64: ${{ github.event_name == 'workflow_dispatch' && inputs.ubuntu24_gpu_stepsecurity_arm64 }}
         run: |
           images=()
+          gpu_stepsecurity_images=()
           [ "$UBUNTU22_GPU_X64" = "true" ] && images+=("ubuntu22-gpu-x64")
           [ "$UBUNTU24_GPU_X64" = "true" ] && images+=("ubuntu24-gpu-x64")
           [ "$UBUNTU24_GPU_ARM64" = "true" ] && images+=("ubuntu24-gpu-arm64")
           [ "$UBUNTU26_GPU_X64" = "true" ] && images+=("ubuntu26-gpu-x64")
+          if [ "$UBUNTU24_GPU_STEPSECURITY_X64" = "true" ]; then
+            images+=("ubuntu24-gpu-x64")
+            gpu_stepsecurity_images+=("ubuntu24-gpu-stepsecurity-x64")
+          fi
+          if [ "$UBUNTU24_GPU_STEPSECURITY_ARM64" = "true" ]; then
+            images+=("ubuntu24-gpu-arm64")
+            gpu_stepsecurity_images+=("ubuntu24-gpu-stepsecurity-arm64")
+          fi
           if [ "${#images[@]}" -eq 0 ]; then
             echo "No images selected" >&2
             exit 1
           fi
-          image_ids="$(printf '%s\n' "${images[@]}" | jq -R . | jq -s -c .)"
+          image_ids="$(printf '%s\n' "${images[@]}" | sort -u | jq -R . | jq -s -c .)"
           echo "image_ids=$image_ids" >> "$GITHUB_OUTPUT"
+          if [ "${#gpu_stepsecurity_images[@]}" -eq 0 ]; then
+            echo 'gpu_stepsecurity_image_ids=[]' >> "$GITHUB_OUTPUT"
+            echo 'has_gpu_stepsecurity_images=false' >> "$GITHUB_OUTPUT"
+          else
+            gpu_stepsecurity_image_ids="$(printf '%s\n' "${gpu_stepsecurity_images[@]}" | jq -R . | jq -s -c .)"
+            echo "gpu_stepsecurity_image_ids=$gpu_stepsecurity_image_ids" >> "$GITHUB_OUTPUT"
+            echo 'has_gpu_stepsecurity_images=true' >> "$GITHUB_OUTPUT"
+          fi
 
   build-test-release:
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
@@ -60,6 +89,21 @@ jobs:
       fail-fast: false
       matrix:
         image_id: ${{ fromJSON(needs.select-images.outputs.image_ids) }}
+    uses: ./.github/workflows/build-test-release.yml
+    secrets: inherit
+    with:
+      image_id: ${{ matrix.image_id }}
+
+  build-test-release-stepsecurity:
+    if: ${{ needs.select-images.outputs.has_gpu_stepsecurity_images == 'true' }}
+    name: Build/Test/Release ${{ matrix.image_id }}
+    needs:
+      - select-images
+      - build-test-release
+    strategy:
+      fail-fast: false
+      matrix:
+        image_id: ${{ fromJSON(needs.select-images.outputs.gpu_stepsecurity_image_ids) }}
     uses: ./.github/workflows/build-test-release.yml
     secrets: inherit
     with:

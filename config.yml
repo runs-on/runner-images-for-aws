@@ -333,6 +333,22 @@ images:
     source_ami_owner: 135269210855
     description: RunsOn Ubuntu24 GPU optimized arm64
 
+  - id: ubuntu24-gpu-stepsecurity-x64
+    template: ubuntu-stepsecurity-x64
+    instance_type: g4dn.xlarge
+    volume_size: 40
+    source_ami_name: runs-on-dev-ubuntu24-gpu-x64-*
+    source_ami_owner: 135269210855
+    description: RunsOn Ubuntu24 GPU optimized + StepSecurity x64
+
+  - id: ubuntu24-gpu-stepsecurity-arm64
+    template: ubuntu-stepsecurity-arm64
+    instance_type: g5g.xlarge
+    volume_size: 40
+    source_ami_name: runs-on-dev-ubuntu24-gpu-arm64-*
+    source_ami_owner: 135269210855
+    description: RunsOn Ubuntu24 GPU optimized + StepSecurity arm64
+
   - id: ubuntu24-stepsecurity-x64
     template: ubuntu-stepsecurity-x64
     instance_type: m8a.large
