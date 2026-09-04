@@ -1,0 +1,432 @@
+#!/usr/bin/env ruby
+
+require "bundler/setup"
+require "aws-sdk-ec2"
+require "aws-sdk-ssm"
+require "base64"
+require "json"
+require "slop"
+require "time"
+
+options = {}
+usage = Slop::Options.new do |opts|
+  opts.banner = "Usage: #{$0} AMI_NAME_OR_ID [options]"
+  opts.string "--instance-type", "Instance type override", default: "m8i.xlarge"
+  opts.string "--nested-virtualization", "CPU virtualization extensions: enabled or disabled", default: "disabled"
+  opts.string "--iam-instance-profile", "IAM instance profile for post-boot diagnostics"
+  opts.string "--user-data-file", "Raw EC2 user data used to exercise RunsOnLaunch"
+  opts.string "--diagnostics-s3-uri", "Upload paired first-boot evidence to this S3 prefix"
+  opts.string "--full-stack-smoke-script", "Run this local PowerShell smoke script through SSM after boot"
+  opts.string "--region", "AWS region", default: ENV["AWS_REGION"] || ENV["AWS_DEFAULT_REGION"] || "us-east-1"
+  opts.string "--subnet-id", "Subnet to launch into"
+  opts.integer "--timeout", "Maximum seconds to wait for Windows readiness", default: 600
+  opts.integer "--warm-runs", "Warm-up launches before measurement", default: 0
+  opts.integer "--measure-runs", "Measured launches", default: 3
+  opts.integer "--root-initialization-rate", "Provisioned snapshot initialization rate in MiB/s (100-300)", default: 200
+  opts.integer "--root-throughput", "Root gp3 throughput in MiB/s", default: 400
+  opts.string "--output-json", "Write the complete benchmark result to this path"
+  opts.bool "-h", "--help", "Show help"
+end
+
+begin
+  options = usage.parse(ARGV).to_hash
+  options[:ami_name_or_id] = ARGV.shift
+rescue Slop::Error => e
+  warn "Error: #{e.message}"
+  warn usage
+  exit 1
+end
+
+if options[:help] || options[:ami_name_or_id].nil?
+  puts usage
+  exit(options[:help] ? 0 : 1)
+end
+
+unless (100..300).cover?(options[:root_initialization_rate])
+  warn "--root-initialization-rate must be between 100 and 300 MiB/s"
+  exit 1
+end
+
+raise "--warm-runs must be zero or greater" if options[:warm_runs].negative?
+raise "--measure-runs must be greater than zero" unless options[:measure_runs].positive?
+if options[:diagnostics_s3_uri] && !options[:iam_instance_profile]
+  raise "--diagnostics-s3-uri requires --iam-instance-profile"
+end
+if options[:full_stack_smoke_script] && !options[:iam_instance_profile]
+  raise "--full-stack-smoke-script requires --iam-instance-profile"
+end
+unless %w[enabled disabled].include?(options[:nested_virtualization])
+  raise "--nested-virtualization must be enabled or disabled"
+end
+
+def find_latest_windows_ami(ec2, name_or_id)
+  filters = [{ name: "state", values: ["available"] }]
+  filter_name = name_or_id.start_with?("ami-") ? "image-id" : "name"
+  filter_value = name_or_id.start_with?("ami-") ? name_or_id : "#{name_or_id}*"
+  filters << { name: filter_name, values: [filter_value] }
+  images = ec2.describe_images(filters: filters).images
+  raise "No AMIs found matching #{name_or_id.inspect}" if images.empty?
+
+  image = images.max_by(&:creation_date)
+  raise "AMI #{image.image_id} is not Windows" unless image.platform&.downcase == "windows"
+
+  image
+end
+
+def resolve_subnet(ec2, subnet_id)
+  return ec2.describe_subnets(subnet_ids: [subnet_id]).subnets.first if subnet_id
+
+  subnet = ec2.describe_subnets(filters: [{ name: "tag:runner-image-for-aws", values: ["true"] }]).subnets.first
+  raise "No subnet found with tag runner-image-for-aws=true" unless subnet
+
+  subnet
+end
+
+def default_security_group_id(ec2, vpc_id)
+  groups = ec2.describe_security_groups(
+    filters: [
+      { name: "vpc-id", values: [vpc_id] },
+      { name: "group-name", values: ["default"] }
+    ]
+  ).security_groups
+  raise "No default security group found for #{vpc_id}" if groups.empty?
+
+  groups.first.group_id
+end
+
+def root_mapping(image, initialization_rate:, throughput:)
+  root = image.block_device_mappings.find { |mapping| mapping.device_name == image.root_device_name && mapping.ebs }
+  raise "Root block device not found for #{image.image_id}" unless root
+
+  {
+    device_name: root.device_name,
+    ebs: {
+      delete_on_termination: true,
+      volume_size: root.ebs.volume_size,
+      volume_type: "gp3",
+      iops: [root.ebs.iops || 3_000, 3_000].max,
+      throughput: throughput,
+      volume_initialization_rate: initialization_rate
+    }
+  }
+end
+
+def launch_instance(ec2:, image:, instance_type:, subnet_id:, security_group_id:, initialization_rate:, throughput:, phase:, nested_virtualization: "disabled", iam_instance_profile: nil, user_data: nil)
+  request = {
+    image_id: image.image_id,
+    instance_type: instance_type,
+    min_count: 1,
+    max_count: 1,
+    subnet_id: subnet_id,
+    security_group_ids: [security_group_id],
+    instance_initiated_shutdown_behavior: "terminate",
+    block_device_mappings: [
+      root_mapping(image, initialization_rate: initialization_rate, throughput: throughput)
+    ],
+    cpu_options: { nested_virtualization: nested_virtualization },
+    tag_specifications: [
+      {
+        resource_type: "instance",
+        tags: [
+          { key: "Name", value: "measure-windows-launch-time" },
+          { key: "application", value: "RunsOn" },
+          { key: "goal", value: "windows-full-boot-under-60s" },
+          { key: "benchmark-phase", value: phase }
+        ]
+      },
+      {
+        resource_type: "volume",
+        tags: [
+          { key: "Name", value: "measure-windows-launch-time" },
+          { key: "application", value: "RunsOn" },
+          { key: "goal", value: "windows-full-boot-under-60s" }
+        ]
+      }
+    ]
+  }
+  request[:iam_instance_profile] = { name: iam_instance_profile } if iam_instance_profile
+  request[:user_data] = user_data if user_data
+  ec2.run_instances(request).instances.first
+end
+
+def windows_ready_time(console_output)
+  pattern = %r{(?<timestamp>\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}Z): (?:Message: )?Windows is Ready to use}i
+  console_output.to_s.scan(pattern).flatten.filter_map do |timestamp|
+    Time.iso8601(timestamp.tr("/", "-").sub(" ", "T"))
+  rescue ArgumentError
+    nil
+  end.max
+end
+
+def console_milestone_time(console_output, message)
+  pattern = %r{(?<timestamp>\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}Z): .*#{Regexp.escape(message)}}i
+  console_output.to_s.scan(pattern).flatten.filter_map do |timestamp|
+    Time.iso8601(timestamp.tr("/", "-").sub(" ", "T"))
+  rescue ArgumentError
+    nil
+  end.max
+end
+
+def decode_console_output(encoded_output)
+  Base64.strict_decode64(encoded_output.to_s)
+rescue ArgumentError
+  encoded_output.to_s
+end
+
+def wait_for_windows_ready(ec2, instance_id:, launch_time:, timeout_seconds:, poll_interval: 1)
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout_seconds
+  last_output = ""
+
+  loop do
+    response = ec2.get_console_output(instance_id: instance_id, latest: true)
+    last_output = decode_console_output(response.output)
+    ready_at = windows_ready_time(last_output)
+    return [ready_at - launch_time, ready_at, last_output] if ready_at && ready_at >= launch_time - 1
+
+    raise "Timed out waiting for Windows readiness on #{instance_id}" if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+    sleep poll_interval
+  end
+end
+
+def root_volume_configuration(ec2, instance_id:, root_device_name:)
+  instance = ec2.describe_instances(instance_ids: [instance_id]).reservations.first.instances.first
+  mapping = instance.block_device_mappings.find { |candidate| candidate.device_name == root_device_name }
+  raise "Root volume not found for #{instance_id}" unless mapping&.ebs&.volume_id
+
+  volume = ec2.describe_volumes(volume_ids: [mapping.ebs.volume_id]).volumes.first
+  {
+    volume_id: volume.volume_id,
+    size_gib: volume.size,
+    type: volume.volume_type,
+    iops: volume.iops,
+    throughput_mibps: volume.throughput,
+    initialization_rate_mibps: volume.volume_initialization_rate
+  }
+end
+
+def verify_storage!(configuration, initialization_rate:, throughput:)
+  actual_rate = configuration.fetch(:initialization_rate_mibps)
+  actual_throughput = configuration.fetch(:throughput_mibps)
+  raise "Initialization rate mismatch: requested #{initialization_rate}, got #{actual_rate.inspect}" unless actual_rate == initialization_rate
+  raise "Throughput mismatch: requested #{throughput}, got #{actual_throughput.inspect}" unless actual_throughput == throughput
+end
+
+def wait_for_ssm(ssm, instance_id:, timeout_seconds:)
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout_seconds
+  loop do
+    response = ssm.describe_instance_information(filters: [{ key: "InstanceIds", values: [instance_id] }])
+    return if response.instance_information_list.any? { |item| item.ping_status == "Online" }
+    raise "Timed out waiting for SSM on #{instance_id}" if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+    sleep 1
+  end
+end
+
+def run_ssm_powershell(ssm, instance_id:, command:, timeout_seconds:)
+  response = ssm.send_command(
+    instance_ids: [instance_id],
+    document_name: "AWS-RunPowerShellScript",
+    parameters: { "commands" => [command] },
+    timeout_seconds: timeout_seconds
+  )
+  command_id = response.command.command_id
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout_seconds
+  loop do
+    begin
+      invocation = ssm.get_command_invocation(command_id: command_id, instance_id: instance_id)
+    rescue Aws::SSM::Errors::InvocationDoesNotExist
+      raise "Timed out waiting for SSM command #{command_id}" if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+      sleep 1
+      next
+    end
+    return invocation.standard_output_content if invocation.status == "Success"
+    if %w[Cancelled Failed TimedOut].include?(invocation.status)
+      raise "SSM command #{command_id} #{invocation.status}: #{invocation.standard_error_content}\n#{invocation.standard_output_content}"
+    end
+    raise "Timed out waiting for SSM command #{command_id}" if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+    sleep 1
+  end
+end
+
+def run_full_stack_smoke(ssm, instance_id:, script_path:, nested_virtualization:, timeout_seconds:)
+  script = File.binread(script_path)
+  encoded_script = Base64.strict_encode64(script)
+  run_container = nested_virtualization == "enabled" ? " -RunWindowsContainer" : ""
+  command = <<~POWERSHELL
+    $raw = [Convert]::FromBase64String('#{encoded_script}')
+    $script = 'C:\\Windows\\Temp\\windows-full-stack-smoke.ps1'
+    [IO.File]::WriteAllBytes($script, $raw)
+    $output = & $script -NestedVirtualization '#{nested_virtualization.capitalize}'#{run_container} | Out-String
+    'RUNS_ON_FULL_STACK:' + $output.Trim()
+  POWERSHELL
+  output = run_ssm_powershell(ssm, instance_id: instance_id, command: command, timeout_seconds: timeout_seconds)
+  summary = output[/RUNS_ON_FULL_STACK:(\{.*\})/m, 1]
+  raise "Full-stack smoke did not return a JSON summary" unless summary
+
+  result = JSON.parse(summary)
+  raise "Full-stack smoke reported failed checks: #{Array(result["FailedChecks"]).join(", ")}" unless result.fetch("Success")
+
+  result
+end
+
+def launch_service_milestones(ssm, instance_id:, launch_time:, timeout_seconds:, diagnostics_s3_uri: nil)
+  wait_for_ssm(ssm, instance_id: instance_id, timeout_seconds: timeout_seconds)
+  raw = run_ssm_powershell(
+    ssm,
+    instance_id: instance_id,
+    command: "Get-Content 'C:\\ProgramData\\RunsOn\\Launch\\timings.json' -Raw",
+    timeout_seconds: timeout_seconds
+  )
+  state = JSON.parse(raw)
+  milestones = state.fetch("milestones").to_h do |milestone|
+    timestamp = Time.iso8601(milestone.fetch("time"))
+    [milestone.fetch("name"), { "time" => timestamp.utc.iso8601(3), "seconds" => (timestamp - launch_time).round(3) }]
+  end
+  bootstrap = milestones["runs-on-launch.bootstrap-started"]
+  ssm_start = milestones["runs-on-launch.ssm-started"]
+  raise "RunsOn bootstrap did not start on #{instance_id}" unless bootstrap
+  raise "RunsOn did not start SSM on #{instance_id}" unless ssm_start
+  raise "SSM started before RunsOn on #{instance_id}" unless bootstrap.fetch("seconds") < ssm_start.fetch("seconds")
+
+  result = { "status" => state.fetch("status"), "milestones" => milestones }
+  if diagnostics_s3_uri
+    collector = File.binread(File.expand_path("collect-windows-boot-diagnostics.ps1", __dir__))
+    encoded_collector = Base64.strict_encode64(collector)
+    destination = "#{diagnostics_s3_uri.sub(%r{/+$}, '')}/#{instance_id}.zip"
+    command = <<~POWERSHELL
+      $raw = [Convert]::FromBase64String('#{encoded_collector}')
+      $script = 'C:\\Windows\\Temp\\collect-windows-boot-diagnostics.ps1'
+      [IO.File]::WriteAllBytes($script, $raw)
+      & $script | Out-Null
+      aws s3 cp 'C:\\ProgramData\\RunsOn\\BootDiagnostics\\export.zip' '#{destination}' --only-show-errors
+      if ($LASTEXITCODE -ne 0) { throw 'Diagnostics upload failed' }
+      'RUNS_ON_DIAGNOSTICS:' + (Get-Content 'C:\\ProgramData\\RunsOn\\BootDiagnostics\\export\\milestones.json' -Raw -Encoding UTF8)
+    POWERSHELL
+    output = run_ssm_powershell(ssm, instance_id: instance_id, command: command, timeout_seconds: timeout_seconds)
+    summary = output[/RUNS_ON_DIAGNOSTICS:(\{.*\})/m, 1]
+    raise "Diagnostics command did not return a milestone summary" unless summary
+
+    result["diagnostics_s3_uri"] = destination
+    result["diagnostics"] = JSON.parse(summary)
+  end
+  result
+end
+
+def terminate_and_wait(ec2, instance_id)
+  ec2.terminate_instances(instance_ids: [instance_id])
+  ec2.wait_until(:instance_terminated, instance_ids: [instance_id])
+rescue Aws::EC2::Errors::InvalidInstanceIDNotFound
+  nil
+end
+
+ec2 = Aws::EC2::Client.new(region: options[:region])
+ssm = Aws::SSM::Client.new(region: options[:region]) if options[:iam_instance_profile]
+image = find_latest_windows_ami(ec2, options[:ami_name_or_id])
+subnet = resolve_subnet(ec2, options[:subnet_id])
+security_group_id = default_security_group_id(ec2, subnet.vpc_id)
+user_data = Base64.strict_encode64(File.binread(options[:user_data_file])) if options[:user_data_file]
+
+puts "AMI: #{image.name} (#{image.image_id})"
+puts "Instance type: #{options[:instance_type]}"
+puts "Nested virtualization: #{options[:nested_virtualization]}"
+puts "Region: #{options[:region]}"
+puts "Root initialization rate: #{options[:root_initialization_rate]} MiB/s"
+puts "Root gp3 throughput: #{options[:root_throughput]} MiB/s"
+
+results = []
+total_runs = options[:warm_runs] + options[:measure_runs]
+total_runs.times do |index|
+  phase = index < options[:warm_runs] ? "warm" : "measure"
+  instance = nil
+  begin
+    instance = launch_instance(
+      ec2: ec2,
+      image: image,
+      instance_type: options[:instance_type],
+      subnet_id: subnet.subnet_id,
+      security_group_id: security_group_id,
+      initialization_rate: options[:root_initialization_rate],
+      throughput: options[:root_throughput],
+      phase: phase,
+      nested_virtualization: options[:nested_virtualization],
+      iam_instance_profile: options[:iam_instance_profile],
+      user_data: user_data
+    )
+    elapsed, ready_at, console_output = wait_for_windows_ready(
+      ec2,
+      instance_id: instance.instance_id,
+      launch_time: instance.launch_time,
+      timeout_seconds: options[:timeout]
+    )
+    storage = root_volume_configuration(ec2, instance_id: instance.instance_id, root_device_name: image.root_device_name)
+    verify_storage!(storage, initialization_rate: options[:root_initialization_rate], throughput: options[:root_throughput])
+    sysprep_at = console_milestone_time(console_output, "Windows sysprep configuration complete")
+    service_milestones = if ssm
+      launch_service_milestones(
+        ssm,
+        instance_id: instance.instance_id,
+        launch_time: instance.launch_time,
+        timeout_seconds: options[:timeout],
+        diagnostics_s3_uri: options[:diagnostics_s3_uri]
+      )
+    end
+    full_stack_smoke = if options[:full_stack_smoke_script]
+      run_full_stack_smoke(
+        ssm,
+        instance_id: instance.instance_id,
+        script_path: options[:full_stack_smoke_script],
+        nested_virtualization: options[:nested_virtualization],
+        timeout_seconds: options[:timeout]
+      )
+    end
+
+    result = {
+      phase: phase,
+      instance_id: instance.instance_id,
+      launch_time: instance.launch_time.utc.iso8601(3),
+      windows_ready_time: ready_at.iso8601(3),
+      windows_ready_s: elapsed.round(3),
+      sysprep_complete_time: sysprep_at&.iso8601(3),
+      sysprep_complete_s: sysprep_at ? (sysprep_at - instance.launch_time).round(3) : nil,
+      ec2launch_after_sysprep_s: sysprep_at ? (ready_at - sysprep_at).round(3) : nil,
+      launch_service: service_milestones,
+      full_stack_smoke: full_stack_smoke,
+      storage: storage,
+      console_output: console_output
+    }
+    results << result
+    puts format("[%s] %s Windows ready in %.3fs", phase, instance.instance_id, elapsed)
+  ensure
+    terminate_and_wait(ec2, instance.instance_id) if instance
+  end
+end
+
+measured = results.select { |result| result.fetch(:phase) == "measure" }
+values = measured.map { |result| result.fetch(:windows_ready_s) }
+summary = {
+  ami_id: image.image_id,
+  ami_name: image.name,
+  instance_type: options[:instance_type],
+  nested_virtualization: options[:nested_virtualization],
+  region: options[:region],
+  subnet_id: subnet.subnet_id,
+  root_initialization_rate_mibps: options[:root_initialization_rate],
+  root_throughput_mibps: options[:root_throughput],
+  user_data_file: options[:user_data_file],
+  diagnostics_s3_uri: options[:diagnostics_s3_uri],
+  full_stack_smoke_script: options[:full_stack_smoke_script],
+  warm_runs: options[:warm_runs],
+  measured_runs: options[:measure_runs],
+  average_windows_ready_s: (values.sum / values.length).round(3),
+  maximum_windows_ready_s: values.max,
+  under_60_seconds: values.all? { |value| value < 60 },
+  under_30_seconds: values.all? { |value| value < 30 },
+  results: results
+}
+
+output = JSON.pretty_generate(summary)
+puts output
+File.write(options[:output_json], "#{output}\n") if options[:output_json]
