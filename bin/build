@@ -382,6 +382,18 @@ if packer_template_content.include?('variable "publish_publicly"')
 
   shared_template_vars += ["-var", "publish_publicly=#{publish_publicly}"]
 end
+if packer_template_content.include?('variable "server_core_feasibility"')
+  shared_template_vars += ["-var", "server_core_feasibility=#{image.fetch('server_core_feasibility', false)}"]
+end
+if packer_template_content.include?('variable "hypervisor_launch_type"')
+  hypervisor_launch_type = ENV.fetch("HYPERVISOR_LAUNCH_TYPE", "Auto")
+  fail("HYPERVISOR_LAUNCH_TYPE must be Auto or Off") unless %w[Auto Off].include?(hypervisor_launch_type)
+  if hypervisor_launch_type == "Off" && ENV.fetch("AMI_PUBLIC", "true").downcase != "false"
+    fail("HYPERVISOR_LAUNCH_TYPE=Off requires AMI_PUBLIC=false")
+  end
+
+  shared_template_vars += ["-var", "hypervisor_launch_type=#{hypervisor_launch_type}"]
+end
 
 source_ami_name_override = ENV.fetch("SOURCE_AMI_NAME", "").strip
 source_ami_owner_override = ENV.fetch("SOURCE_AMI_OWNER", "").strip
@@ -397,8 +409,13 @@ source_ami = BuildProvenance.resolve_source_ami(
 )
 puts "Resolved source AMI #{source_ami.image_id} (#{source_ami.name})"
 
+packer_on_error = ENV.fetch("PACKER_ON_ERROR", "cleanup")
+valid_packer_on_error = %w[cleanup abort ask run-cleanup-provisioner]
+fail("PACKER_ON_ERROR must be one of: #{valid_packer_on_error.join(', ')}") unless valid_packer_on_error.include?(packer_on_error)
+
 packer_build_cmd = [
   "packer", "build",
+  "-on-error=#{packer_on_error}",
   options[:debug] ? "-debug" : nil,
   *shared_template_vars,
   "-var", %{ami_regions=["us-east-1"]},

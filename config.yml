@@ -369,6 +369,7 @@ images:
   - id: windows22-full-x64
     instance_type: m7a.large
     volume_size: 50
+    volume_throughput: 400
     source_ami_name: Windows_Server-2022-English-Full-Base-*
     source_ami_owner: 801119661308
     description: RunsOn Windows2022 x64
@@ -377,6 +378,7 @@ images:
   - id: windows25-full-x64
     instance_type: m8i.xlarge
     volume_size: 100
+    volume_throughput: 400
     source_ami_name: Windows_Server-2025-English-Full-Base-*
     source_ami_owner: 801119661308
     description: RunsOn Windows2025 x64
@@ -384,6 +386,7 @@ images:
   - id: windows25-gpu-x64
     instance_type: g4dn.xlarge
     volume_size: 100
+    volume_throughput: 400
     source_ami_name: runs-on-dev-windows25-full-x64-*
     source_ami_owner: 135269210855
     description: RunsOn Windows2025 GPU optimized x64
