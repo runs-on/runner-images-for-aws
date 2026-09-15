@@ -48,13 +48,20 @@ patch_ubuntu() {
   # add runs-on/action@v2 to action archive cache
   cp patches/ubuntu/build/install-actions-cache.sh "$build_dir/"
 
-  # Use effective retry settings and fail quickly enough to recover from an
-  # unresponsive package endpoint within a typical CI job timeout.
-  gnu_sed -i 's/Enable retry logic for apt up to 10 times/Enable retry logic for apt up to 5 times/' "$build_dir/configure-apt.sh"
-  gnu_sed -i 's/APT::Acquire::Retries \\"10\\"/Acquire::Retries \\"5\\"/' "$build_dir/configure-apt.sh"
-  gnu_sed -i '/Acquire::http::Timeout "20";/d; /Acquire::https::Timeout "20";/d' "$build_dir/configure-apt.sh"
-  gnu_sed -i '/Acquire::http::Pipeline-Depth 0;/a Acquire::http::Timeout "20";' "$build_dir/configure-apt.sh"
-  gnu_sed -i '/Acquire::https::Pipeline-Depth 0;/a Acquire::https::Timeout "20";' "$build_dir/configure-apt.sh"
+  # Preserve apt failures instead of letting the lock-retry wrapper hide them.
+  cp patches/ubuntu/build/configure-apt-mock.sh "$build_dir/"
+
+  # AWS uses direct Ubuntu sources, without Azure's mirror-list file.
+  gnu_sed -i "/^echo 'APT mirrors'$/d; /^cat \/etc\/apt\/apt-mirrors.txt$/d" "$build_dir/configure-apt.sh"
+
+  # This script runs before configure-apt.sh enables Assume-Yes.
+  gnu_sed -i 's/^apt-get install /apt-get install -y /; s/^apt-get dist-upgrade$/apt-get dist-upgrade -y/' "$build_dir/install-ms-repos.sh"
+
+  # Direct sources need retries, without upstream's mirror-failover tuning.
+  gnu_sed -i 's/apt_retries=[0-9]*/apt_retries=5/; s/apt_timeout=[0-9]*/apt_timeout=20/' "$build_dir/configure-apt.sh"
+
+  # Validate the AWS APT configuration instead of Azure mirror-list behavior.
+  cp patches/ubuntu/tests/Apt.Tests.ps1 "$tests_dir/"
 
   ## Custom files
   mkdir -p $custom_dir
