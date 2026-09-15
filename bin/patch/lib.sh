@@ -60,6 +60,9 @@ patch_ubuntu() {
   # Direct sources need retries, without upstream's mirror-failover tuning.
   gnu_sed -i 's/apt_retries=[0-9]*/apt_retries=5/; s/apt_timeout=[0-9]*/apt_timeout=20/' "$build_dir/configure-apt.sh"
 
+  # Validate the AWS APT configuration instead of Azure mirror-list behavior.
+  cp patches/ubuntu/tests/Apt.Tests.ps1 "$tests_dir/"
+
   ## Custom files
   mkdir -p $custom_dir
   cp -r patches/ubuntu/files $custom_dir/

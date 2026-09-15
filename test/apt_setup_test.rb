@@ -10,6 +10,8 @@ class AptSetupTest < Minitest::Test
     Dir.mktmpdir do |dir|
       build = "#{dir}/images/ubuntu/scripts/build"
       FileUtils.mkdir_p(build)
+      tests = "#{dir}/images/ubuntu/scripts/tests"
+      FileUtils.mkdir_p(tests)
       FileUtils.cp(Dir["#{__dir__}/fixtures/apt/*.sh"], build)
       %w[install-google-chrome install-aws-tools install-php configure-environment].each do |name|
         File.write("#{build}/#{name}.sh", "")
@@ -22,6 +24,7 @@ class AptSetupTest < Minitest::Test
         patch_ubuntu '#{dir}'
       SH
       assert status.success?, output
+      assert_equal File.read("#{ROOT}/patches/ubuntu/tests/Apt.Tests.ps1"), File.read("#{tests}/Apt.Tests.ps1")
       apt = "#{dir}/apt"
       FileUtils.mkdir_p("#{apt}/apt.conf.d")
       File.write("#{apt}/sources.list", "deb https://archive.ubuntu.com/ubuntu jammy main\n")
