@@ -177,6 +177,8 @@ patch_ubuntu() {
   # Keep its default mount settings instead of upstream's new ext4 tuning.
   if [ "$DIST" = "ubuntu22" ]; then
     gnu_sed -i '/^# Relax root filesystem durability/,/^update-grub$/d' "$build_dir/configure-environment.sh"
+    gnu_sed -i '/^Describe "Root filesystem performance options" {/,/^}/d' "$tests_dir/System.Tests.ps1"
+    cat patches/ubuntu/tests/RootFilesystem.Tests.ps1 >> "$tests_dir/System.Tests.ps1"
   fi
 }
 

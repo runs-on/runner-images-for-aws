@@ -14,6 +14,7 @@ class AptSetupTest < Minitest::Test
         tests = "#{dir}/images/ubuntu/scripts/tests"
         FileUtils.mkdir_p(tests)
         File.write("#{tests}/Java.Tests.ps1", "")
+        FileUtils.cp("#{__dir__}/fixtures/apt/System.Tests.ps1", tests)
         FileUtils.mkdir_p("#{dir}/images/ubuntu/toolsets")
         File.write("#{dir}/images/ubuntu/toolsets/toolset-2204.json", "{}")
         FileUtils.cp(Dir["#{__dir__}/fixtures/apt/*.sh"], build)
@@ -33,6 +34,10 @@ class AptSetupTest < Minitest::Test
         if dist == "ubuntu22"
           refute_includes environment, "rootflags="
           refute_includes environment, "99-runner-performance.cfg"
+          system_tests = File.read("#{tests}/System.Tests.ps1")
+          refute_includes system_tests, 'Describe "Root filesystem performance options"'
+          assert_includes system_tests, 'Should -Contain "data=ordered"'
+          assert_includes system_tests, 'Describe "Dpkg options"'
         else
           assert_includes environment, "rootflags=nobarrier,data=writeback,journal_async_commit,commit=30"
         end

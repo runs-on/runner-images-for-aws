@@ -6,6 +6,6 @@ Only trailing whitespace is normalized. Keep the fixtures otherwise unchanged so
 upstream scripts that caused the failure. System commands are stubbed, and APT
 configuration is redirected into a temporary directory.
 
-`configure-dpkg.sh` and `configure-environment.sh` match upstream revision
+`configure-dpkg.sh`, `configure-environment.sh`, and `System.Tests.ps1` match upstream revision
 `dff7cf5f1d89bdac4336cd261875e553582fe769`. They cover the native ARM ICU
 download and Ubuntu 22's ext4 mount flags on EBS.
