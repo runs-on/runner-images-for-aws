@@ -7,7 +7,7 @@ class AptSetupTest < Minitest::Test
   ROOT = File.expand_path("..", __dir__)
 
   def test_patch_runs_apt_setup_without_a_mirror_file_or_prompts
-    %w[x64 arm64].each do |arch|
+    %w[ubuntu22 ubuntu24 ubuntu26].product(%w[x64 arm64]).each do |dist, arch|
       Dir.mktmpdir do |dir|
         build = "#{dir}/images/ubuntu/scripts/build"
         FileUtils.mkdir_p(build)
@@ -17,18 +17,26 @@ class AptSetupTest < Minitest::Test
         FileUtils.mkdir_p("#{dir}/images/ubuntu/toolsets")
         File.write("#{dir}/images/ubuntu/toolsets/toolset-2204.json", "{}")
         FileUtils.cp(Dir["#{__dir__}/fixtures/apt/*.sh"], build)
-        %w[install-google-chrome install-aws-tools install-php configure-environment install-java-tools].each do |name|
+        %w[install-google-chrome install-aws-tools install-php install-java-tools].each do |name|
           File.write("#{build}/#{name}.sh", "")
         end
         output, status = Open3.capture2e("bash", "-c", <<~SH, chdir: ROOT)
           set -e
-          DIST=ubuntu22 ARCH=#{arch} TOOLSET_FILE=toolset-2204.json
+          DIST=#{dist} ARCH=#{arch} TOOLSET_FILE=toolset-2204.json
           source bin/patch/lib.sh
           yq() { :; }
           patch_ubuntu '#{dir}'
         SH
         assert status.success?, output
         assert_equal File.read("#{ROOT}/patches/ubuntu/tests/Apt.Tests.ps1"), File.read("#{tests}/Apt.Tests.ps1")
+        environment = File.read("#{build}/configure-environment.sh")
+        if dist == "ubuntu22"
+          refute_includes environment, "rootflags="
+          refute_includes environment, "99-runner-performance.cfg"
+        else
+          assert_includes environment, "rootflags=nobarrier,data=writeback,journal_async_commit,commit=30"
+        end
+        assert_includes environment, '# Create symlink for tests running'
         icu = File.read("#{build}/configure-dpkg.sh")
         assert_includes icu, "libicu70_70.1-2_#{arch == 'arm64' ? 'arm64' : 'amd64'}.deb"
         if arch == "arm64"

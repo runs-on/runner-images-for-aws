@@ -173,6 +173,11 @@ patch_ubuntu() {
   gnu_sed -i 's/apt-get install --no-install-recommends/\/usr\/bin\/apt-get -qq install --no-install-recommends/g' $build_dir/install-php.sh
 
   gnu_sed -i 's|mkdir $AGENT_TOOLSDIRECTORY|mkdir -p $AGENT_TOOLSDIRECTORY|' $build_dir/configure-environment.sh
+  # Ubuntu 22's kernel aborts EBS filesystems with discard and data=writeback.
+  # Keep its default mount settings instead of upstream's new ext4 tuning.
+  if [ "$DIST" = "ubuntu22" ]; then
+    gnu_sed -i '/^# Relax root filesystem durability/,/^update-grub$/d' "$build_dir/configure-environment.sh"
+  fi
 }
 
 build_rolaunch() {
