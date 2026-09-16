@@ -28,11 +28,17 @@ log "installing nested virtualization packages"
 target_bash <<'EOF'
 set -euo pipefail
 
+case "$(uname -m)" in
+  x86_64) qemu_package=qemu-system-x86 ;;
+  aarch64) qemu_package=qemu-system-arm ;;
+  *) echo "Unsupported QEMU architecture" >&2; exit 1 ;;
+esac
+
 apt-get install -y \
   bridge-utils \
   libvirt-clients \
   libvirt-daemon-system \
-  qemu-kvm \
+  "$qemu_package" \
   virtinst
 
 usermod -aG kvm runner || true

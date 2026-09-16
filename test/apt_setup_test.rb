@@ -7,51 +7,63 @@ class AptSetupTest < Minitest::Test
   ROOT = File.expand_path("..", __dir__)
 
   def test_patch_runs_apt_setup_without_a_mirror_file_or_prompts
-    Dir.mktmpdir do |dir|
-      build = "#{dir}/images/ubuntu/scripts/build"
-      FileUtils.mkdir_p(build)
-      tests = "#{dir}/images/ubuntu/scripts/tests"
-      FileUtils.mkdir_p(tests)
-      FileUtils.cp(Dir["#{__dir__}/fixtures/apt/*.sh"], build)
-      %w[install-google-chrome install-aws-tools install-php configure-environment].each do |name|
-        File.write("#{build}/#{name}.sh", "")
+    %w[x64 arm64].each do |arch|
+      Dir.mktmpdir do |dir|
+        build = "#{dir}/images/ubuntu/scripts/build"
+        FileUtils.mkdir_p(build)
+        tests = "#{dir}/images/ubuntu/scripts/tests"
+        FileUtils.mkdir_p(tests)
+        File.write("#{tests}/Java.Tests.ps1", "")
+        FileUtils.mkdir_p("#{dir}/images/ubuntu/toolsets")
+        File.write("#{dir}/images/ubuntu/toolsets/toolset-2204.json", "{}")
+        FileUtils.cp(Dir["#{__dir__}/fixtures/apt/*.sh"], build)
+        %w[install-google-chrome install-aws-tools install-php configure-environment install-java-tools].each do |name|
+          File.write("#{build}/#{name}.sh", "")
+        end
+        output, status = Open3.capture2e("bash", "-c", <<~SH, chdir: ROOT)
+          set -e
+          DIST=ubuntu22 ARCH=#{arch} TOOLSET_FILE=toolset-2204.json
+          source bin/patch/lib.sh
+          yq() { :; }
+          patch_ubuntu '#{dir}'
+        SH
+        assert status.success?, output
+        assert_equal File.read("#{ROOT}/patches/ubuntu/tests/Apt.Tests.ps1"), File.read("#{tests}/Apt.Tests.ps1")
+        icu = File.read("#{build}/configure-dpkg.sh")
+        assert_includes icu, "libicu70_70.1-2_#{arch == 'arm64' ? 'arm64' : 'amd64'}.deb"
+        if arch == "arm64"
+          assert_includes icu, "https://ports.ubuntu.com/ubuntu-ports/pool/main/i/icu/"
+          assert_includes icu, "14ebf6ca091cdbda96aa15821eb02a72dc2156d5bcfa820e7cb9dad5e528f31452d9bdbd806c0cbd49b4d3a4d8dedc28ae52053727810e0ad74fd31bcf9b623c"
+          refute_includes icu, "libicu70_70.1-2_amd64.deb"
+        end
+        apt = "#{dir}/apt"
+        FileUtils.mkdir_p("#{apt}/apt.conf.d")
+        File.write("#{apt}/sources.list", "deb https://archive.ubuntu.com/ubuntu jammy main\n")
+        File.write("#{dir}/os.sh", <<~SH)
+          is_ubuntu22() { return 0; }
+          is_ubuntu22_arm64() { return 1; }
+          is_ubuntu24_arm64() { return 1; }
+          systemctl() { :; }
+          curl() { :; }
+          apt-get() { echo "APT $*"; }
+        SH
+        script = File.read("#{build}/configure-apt.sh").gsub("/etc/apt", apt)
+        output, status = Open3.capture2e({"HELPER_SCRIPTS" => dir}, "bash", "-e", "-c", script)
+        assert status.success?, output
+        assert_includes output, "APT upgrade -y"
+        assert_includes File.read("#{apt}/apt.conf.d/80-retries"), 'Acquire::Retries "5";'
+        assert_includes File.read("#{apt}/apt.conf.d/80-retries"), 'Acquire::http::Timeout "20";'
+        script = File.read("#{build}/install-ms-repos.sh")
+        output, status = Open3.capture2e("bash", "-e", "-c", <<~SH + script)
+          wget() { :; }; dpkg() { :; }; lsb_release() { echo 22.04; }
+          apt-get() {
+            case "$1" in
+              install|dist-upgrade) [ "$2" = -y ] || return 100 ;;
+            esac
+          }
+        SH
+        assert status.success?, output
       end
-      output, status = Open3.capture2e("bash", "-c", <<~SH, chdir: ROOT)
-        set -e
-        DIST=ubuntu22 ARCH=x64 TOOLSET_FILE=toolset-2204.json
-        source bin/patch/lib.sh
-        yq() { :; }
-        patch_ubuntu '#{dir}'
-      SH
-      assert status.success?, output
-      assert_equal File.read("#{ROOT}/patches/ubuntu/tests/Apt.Tests.ps1"), File.read("#{tests}/Apt.Tests.ps1")
-      apt = "#{dir}/apt"
-      FileUtils.mkdir_p("#{apt}/apt.conf.d")
-      File.write("#{apt}/sources.list", "deb https://archive.ubuntu.com/ubuntu jammy main\n")
-      File.write("#{dir}/os.sh", <<~SH)
-        is_ubuntu22() { return 0; }
-        is_ubuntu22_arm64() { return 1; }
-        is_ubuntu24_arm64() { return 1; }
-        systemctl() { :; }
-        curl() { :; }
-        apt-get() { echo "APT $*"; }
-      SH
-      script = File.read("#{build}/configure-apt.sh").gsub("/etc/apt", apt)
-      output, status = Open3.capture2e({"HELPER_SCRIPTS" => dir}, "bash", "-e", "-c", script)
-      assert status.success?, output
-      assert_includes output, "APT upgrade -y"
-      assert_includes File.read("#{apt}/apt.conf.d/80-retries"), 'Acquire::Retries "5";'
-      assert_includes File.read("#{apt}/apt.conf.d/80-retries"), 'Acquire::http::Timeout "20";'
-      script = File.read("#{build}/install-ms-repos.sh")
-      output, status = Open3.capture2e("bash", "-e", "-c", <<~SH + script)
-        wget() { :; }; dpkg() { :; }; lsb_release() { echo 22.04; }
-        apt-get() {
-          case "$1" in
-            install|dist-upgrade) [ "$2" = -y ] || return 100 ;;
-          esac
-        }
-      SH
-      assert status.success?, output
     end
   end
 
