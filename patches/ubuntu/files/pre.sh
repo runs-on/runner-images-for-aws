@@ -1,6 +1,9 @@
 #!/bin/bash
 set -exo pipefail
 
+# Let first-boot APT configuration finish before replacing its sources.
+cloud-init status --wait
+
 # install RunsOn bootstrap binaries - IMPORTANT: only delete old ones when RunsOn stack versions that use them are deprecated
 for BOOTSTRAP_VERSION in v0.1.12 v0.1.9; do
   BOOTSTRAP_BIN=/usr/local/bin/runs-on-bootstrap-${BOOTSTRAP_VERSION}
@@ -26,11 +29,10 @@ fi
 rewrite_apt_source() {
   local f="$1"
   if [ -f "$f" ]; then
-    sed -i \
-      -e "s|https\?://[^/]*\.ec2\.archive\.ubuntu\.com/ubuntu/|${apt_primary_mirror}|g" \
-      -e "s|https\?://[^/]*\.ec2\.archive\.ubuntu\.com/ubuntu-ports/|${apt_primary_mirror}|g" \
-      -e "s|https\?://security\.ubuntu\.com/ubuntu/|${apt_security_mirror}|g" \
-      -e "s|https\?://[^/]*\.ec2\.archive\.ubuntu\.com/|${apt_primary_mirror}|g" \
+    sed -i -E \
+      -e "s#https?://[^/]*\.ec2\.(archive|ports)\.ubuntu\.com/(ubuntu|ubuntu-ports)/?#${apt_primary_mirror}#g" \
+      -e "s#https?://security\.ubuntu\.com/ubuntu/?#${apt_security_mirror}#g" \
+      -e "s#https?://ports\.ubuntu\.com/ubuntu-ports/?#${apt_primary_mirror}#g" \
       "$f"
   fi
 }

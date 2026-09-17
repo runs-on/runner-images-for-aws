@@ -89,6 +89,12 @@ patch_ubuntu() {
 
   ## arm64: rewrite arch references in upstream build scripts and toolsets
   if [ "$ARCH" = "arm64" ]; then
+    # Ubuntu 24 needs the native Jammy ICU package, with its published checksum.
+    gnu_sed -i \
+      -e 's|https://archive.ubuntu.com/ubuntu/pool/main/i/icu/|https://ports.ubuntu.com/ubuntu-ports/pool/main/i/icu/|g' \
+      -e 's|libicu70_70.1-2_amd64.deb|libicu70_70.1-2_arm64.deb|g' \
+      -e 's|a6315482d93606e375c272718d2458870b95e4ed4b672ea8640cf7bc2d2c2f41aea13b798b1e417e1ffc472a90c6aad150d3d293aa9bddec48e39106e4042807|14ebf6ca091cdbda96aa15821eb02a72dc2156d5bcfa820e7cb9dad5e528f31452d9bdbd806c0cbd49b4d3a4d8dedc28ae52053727810e0ad74fd31bcf9b623c|' \
+      "$build_dir/configure-dpkg.sh"
     gnu_sed -i 's|awscli-exe-linux-x86_64.zip|awscli-exe-linux-aarch64.zip|g' $build_dir/*.sh
     gnu_sed -i 's|aws-sam-cli-linux-x86_64.zip|aws-sam-cli-linux-arm64.zip|g' $build_dir/*.sh
     # typo on purpose, matches Linux and linux
@@ -167,6 +173,13 @@ patch_ubuntu() {
   gnu_sed -i 's/apt-get install --no-install-recommends/\/usr\/bin\/apt-get -qq install --no-install-recommends/g' $build_dir/install-php.sh
 
   gnu_sed -i 's|mkdir $AGENT_TOOLSDIRECTORY|mkdir -p $AGENT_TOOLSDIRECTORY|' $build_dir/configure-environment.sh
+  # Ubuntu 22's kernel aborts EBS filesystems with discard and data=writeback.
+  # Keep its default mount settings instead of upstream's new ext4 tuning.
+  if [ "$DIST" = "ubuntu22" ]; then
+    gnu_sed -i '/^# Relax root filesystem durability/,/^update-grub$/d' "$build_dir/configure-environment.sh"
+    gnu_sed -i '/^Describe "Root filesystem performance options" {/,/^}/d' "$tests_dir/System.Tests.ps1"
+    cat patches/ubuntu/tests/RootFilesystem.Tests.ps1 >> "$tests_dir/System.Tests.ps1"
+  fi
 }
 
 build_rolaunch() {

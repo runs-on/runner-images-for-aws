@@ -20,8 +20,14 @@ apt-get install -y ncdu
 # add fio for warming up the runner
 apt-get install -y fio
 
+case "$(uname -m)" in
+  x86_64) qemu_package=qemu-system-x86 ;;
+  aarch64) qemu_package=qemu-system-arm ;;
+  *) echo "Unsupported QEMU architecture" >&2; exit 1 ;;
+esac
+
 # add kvm virt, only available on metal instances
-apt-get install -y qemu-kvm libvirt-daemon-system libvirt-clients bridge-utils virtinst
+apt-get install -y "$qemu_package" libvirt-daemon-system libvirt-clients bridge-utils virtinst
 modprobe kvm
 usermod -aG kvm runner
 
