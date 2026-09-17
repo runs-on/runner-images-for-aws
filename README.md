@@ -54,6 +54,13 @@ Those are the full Ubuntu images with the [StepSecurity](https://www.stepsecurit
 * `ubuntu26-stepsecurity-x64`
 * `ubuntu26-stepsecurity-arm64`
 
+### GPU + StepSecurity
+
+Those combine the Ubuntu 24 GPU images with the StepSecurity integration:
+
+* `ubuntu24-gpu-stepsecurity-x64`
+* `ubuntu24-gpu-stepsecurity-arm64`
+
 ## Supported regions
 
 - North Virginia (`us-east-1`)
