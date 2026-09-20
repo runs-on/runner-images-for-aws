@@ -235,6 +235,13 @@ jobs:
         with:
           show_env: true
           metrics: memory,cpu
+      - name: Check StepSecurity installation
+        if: ${{ contains(inputs.image_id, '-stepsecurity-') }}
+        run: |
+          test -x /home/agent/agent
+          sudo systemctl cat agent.service
+          test -x /runs-on/pre.custom.sh
+          test -x /runs-on/post.custom.sh
       - name: Disk
         run: |
           sudo df -ah
@@ -469,7 +476,7 @@ jobs:
               cuda_container=nvidia/cuda:12.9.1-base-ubuntu22.04
               expect_open_driver=false
               ;;
-            ubuntu24-gpu-x64|ubuntu24-gpu-arm64)
+            ubuntu24-gpu-x64|ubuntu24-gpu-arm64|ubuntu24-gpu-stepsecurity-x64|ubuntu24-gpu-stepsecurity-arm64)
               expected_cuda_release=13.0
               cuda_container=nvidia/cuda:13.0.2-base-ubuntu24.04
               expect_open_driver=true
