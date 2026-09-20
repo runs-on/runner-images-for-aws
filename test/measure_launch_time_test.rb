@@ -162,6 +162,13 @@ class MeasureLaunchTimeTest < Minitest::Test
     assert_includes stderr, "--measure-runs must be greater than zero"
   end
 
+  def test_cli_defaults_to_200_mibps_provisioned_initialization
+    source = File.read(HELPER_PATH)
+
+    assert_includes source, "'--root-initialization-rate'"
+    assert_match(/--root-initialization-rate.*default: 200/, source)
+  end
+
   def test_read_rolaunch_ready_seconds_retries_until_done_timing_exists
     attempts = 0
     capture = lambda do |*_command, timeout_seconds:|

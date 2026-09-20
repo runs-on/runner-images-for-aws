@@ -69,7 +69,7 @@ variable "region" {
 }
 
 variable "ami_regions" {
-  type    = list(string)
+  type = list(string)
 }
 
 variable "source_ami_owner" {
@@ -93,6 +93,11 @@ variable "volume_size" {
   default = 30
 }
 
+variable "volume_throughput" {
+  type    = number
+  default = 400
+}
+
 variable "volume_type" {
   type    = string
   default = "gp3"
@@ -101,6 +106,31 @@ variable "volume_type" {
 variable "instance_type" {
   type    = string
   default = "m8i.4xlarge"
+}
+
+variable "publish_publicly" {
+  type    = bool
+  default = true
+}
+
+variable "capture_wpr_boot_trace" {
+  type    = bool
+  default = false
+}
+
+variable "server_core_feasibility" {
+  type    = bool
+  default = false
+}
+
+variable "hypervisor_launch_type" {
+  type    = string
+  default = "Auto"
+
+  validation {
+    condition     = contains(["Auto", "Off"], var.hypervisor_launch_type)
+    error_message = "Hypervisor launch type must be Auto or Off. Off is diagnostic-only and must never be published."
+  }
 }
 
 source "amazon-ebs" "build_ebs" {
@@ -114,24 +144,24 @@ source "amazon-ebs" "build_ebs" {
   ami_description                           = "${var.ami_description}"
   ami_virtualization_type                   = "hvm"
   # make AMIs publicly accessible
-  ami_groups                                = ["all"]
-  ebs_optimized                             = true
-  enable_nested_virtualization              = true
+  ami_groups                   = var.publish_publicly ? ["all"] : []
+  ebs_optimized                = true
+  enable_nested_virtualization = true
   # spot_instance_types                       = ["c6a.metal", "m6a.metal", "c6i.metal", "m6i.metal", "c7i.metal-24xl", "m7i.metal-24xl"]
   # spot_instance_types                       = ["c6a.xlarge", "m6a.xlarge", "c6i.xlarge", "m6i.xlarge", "c7i.xlarge", "m7i.xlarge"]
   # spot_price                                = "auto"
-  instance_type                             = var.instance_type
-  region                                    = "${var.region}"
-  subnet_id                                 = "${var.subnet_id}"
-  iam_instance_profile                      = "SSMInstanceProfile"
-  associate_public_ip_address               = "true"
-  force_deregister                          = "true"
-  force_delete_snapshot                     = "true"
+  instance_type               = var.instance_type
+  region                      = "${var.region}"
+  subnet_id                   = "${var.subnet_id}"
+  iam_instance_profile        = "SSMInstanceProfile"
+  associate_public_ip_address = "true"
+  force_deregister            = "true"
+  force_delete_snapshot       = "true"
 
-  communicator                           = "winrm"
-  winrm_insecure                         = "true"
-  winrm_use_ssl                          = "true"
-  winrm_username                         = "Administrator"
+  communicator   = "winrm"
+  winrm_insecure = "true"
+  winrm_use_ssl  = "true"
+  winrm_username = "Administrator"
 
   # https://learn.microsoft.com/en-us/windows/win32/winrm/installation-and-configuration-for-windows-remote-management
   user_data = <<EOF
@@ -173,29 +203,31 @@ EOF
   ami_regions = "${var.ami_regions}"
 
   // make underlying snapshot public
-  snapshot_groups = ["all"]
+  snapshot_groups = var.publish_publicly ? ["all"] : []
 
   launch_block_device_mappings {
-    device_name = "/dev/sda1"
-    volume_type = "${var.volume_type}"
-    volume_size = "${var.volume_size}"
+    device_name           = "/dev/sda1"
+    volume_type           = "${var.volume_type}"
+    volume_size           = "${var.volume_size}"
+    throughput            = var.volume_throughput
     delete_on_termination = "true"
-    encrypted = "false"
+    encrypted             = "false"
   }
 
   run_tags = {
-    creator     = "RunsOn"
-    contact     = "ops@runs-on.com"
+    ami_name = var.ami_name
+    creator  = "RunsOn"
+    contact  = "ops@runs-on.com"
   }
 
   tags = {
-    creator     = "RunsOn"
-    contact     = "ops@runs-on.com"
+    creator = "RunsOn"
+    contact = "ops@runs-on.com"
   }
 
   snapshot_tags = {
-    creator     = "RunsOn"
-    contact     = "ops@runs-on.com"
+    creator = "RunsOn"
+    contact = "ops@runs-on.com"
   }
 
   source_ami_filter {
@@ -222,6 +254,12 @@ build {
     ]
   }
 
+  provisioner "powershell" {
+    inline = [
+      "if ([System.Convert]::ToBoolean('${var.server_core_feasibility}')) { $capability = Add-WindowsCapability -Online -Name 'ServerCore.AppCompatibility~~~~0.0.1.0'; if ($capability.State -ne 'Installed') { throw 'App Compatibility FOD installation failed' } }"
+    ]
+  }
+
   # provisioner "file" {
   #   destination = "${var.image_folder}\\"
   #   sources     = [
@@ -238,7 +276,7 @@ build {
 
   provisioner "file" {
     destination = "${var.image_folder}\\scripts\\"
-    sources     = [
+    sources = [
       "${path.root}/../scripts/docs-gen",
       "${path.root}/../scripts/helpers",
       "${path.root}/../scripts/tests"
@@ -248,6 +286,18 @@ build {
   provisioner "file" {
     destination = "${var.image_folder}\\"
     source      = "${path.root}/../toolsets"
+  }
+
+  provisioner "file" {
+    source      = "${path.root}/../files/runs-on-launch.zip"
+    destination = "C:\\Windows\\Temp\\runs-on-launch.zip"
+  }
+
+  provisioner "powershell" {
+    inline = [
+      "Expand-Archive -Path 'C:\\Windows\\Temp\\runs-on-launch.zip' -DestinationPath 'C:\\Windows\\Temp' -Force",
+      "Remove-Item 'C:\\Windows\\Temp\\runs-on-launch.zip' -Force"
+    ]
   }
 
   # provisioner "file" {
@@ -283,7 +333,7 @@ build {
     inline = ["if (-not ((net localgroup Administrators) -contains '${var.install_user}')) { exit 1 }"]
   }
 
-provisioner "powershell" {
+  provisioner "powershell" {
     elevated_password = "${var.install_password}"
     elevated_user     = "${var.install_user}"
     inline            = ["bcdedit.exe /set TESTSIGNING ON"]
@@ -292,7 +342,7 @@ provisioner "powershell" {
   provisioner "powershell" {
     environment_vars = ["IMAGE_VERSION=${var.image_version}", "IMAGE_OS=${var.image_os}", "AGENT_TOOLSDIRECTORY=${var.agent_tools_directory}", "IMAGEDATA_FILE=${var.imagedata_file}", "IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
     execution_policy = "unrestricted"
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/Configure-WindowsDefender.ps1",
       "${path.root}/../scripts/build/Configure-PowerShell.ps1",
       "${path.root}/../scripts/build/Install-PowerShellModules.ps1",
@@ -318,14 +368,15 @@ provisioner "powershell" {
 
   provisioner "powershell" {
     environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/Install-Docker.ps1",
       "${path.root}/../scripts/build/Install-DockerWinCred.ps1",
       "${path.root}/../scripts/build/Install-DockerCompose.ps1",
       "${path.root}/../scripts/build/Install-PowershellCore.ps1",
       "${path.root}/../scripts/build/Install-WebPlatformInstaller.ps1",
       "${path.root}/../scripts/build/Install-Runner.ps1",
-      "${path.root}/../scripts/build/Install-RunsOnBootstrap.ps1"
+      "${path.root}/../scripts/build/Install-RunsOnBootstrap.ps1",
+      "${path.root}/../scripts/build/Install-RunsOnLaunch.ps1"
     ]
   }
 
@@ -337,10 +388,10 @@ provisioner "powershell" {
     elevated_password = "${var.install_password}"
     elevated_user     = "${var.install_user}"
     environment_vars  = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts           = [
+    scripts = [
       "${path.root}/../scripts/build/Install-VisualStudio.ps1"
     ]
-    valid_exit_codes  = [0, 3010]
+    valid_exit_codes = [0, 3010]
   }
 
   provisioner "windows-restart" {
@@ -351,7 +402,7 @@ provisioner "powershell" {
   provisioner "powershell" {
     pause_before     = "2m0s"
     environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/Install-Wix.ps1"
     ]
   }
@@ -364,7 +415,7 @@ provisioner "powershell" {
   provisioner "powershell" {
     pause_before     = "2m0s"
     environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/Install-VSExtensions.ps1",
       "${path.root}/../scripts/build/Install-AzureCli.ps1",
       # "${path.root}/../scripts/build/Install-AzureDevOpsCli.ps1",
@@ -375,7 +426,7 @@ provisioner "powershell" {
 
   provisioner "powershell" {
     environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/Install-ActionsCache.ps1",
       # "${path.root}/../scripts/build/Install-Ruby.ps1",
       # "${path.root}/../scripts/build/Install-PyPy.ps1",
@@ -423,7 +474,7 @@ provisioner "powershell" {
     elevated_password = "${var.install_password}"
     elevated_user     = "${var.install_user}"
     environment_vars  = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts           = [
+    scripts = [
       "${path.root}/../scripts/build/Install-PostgreSQL.ps1",
       # "${path.root}/../scripts/build/Install-WindowsUpdates.ps1", # failing for KB5007651
       "${path.root}/../scripts/build/Configure-DynamicPort.ps1",
@@ -443,7 +494,7 @@ provisioner "powershell" {
   provisioner "powershell" {
     pause_before     = "2m0s"
     environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts          = [
+    scripts = [
       # "${path.root}/../scripts/build/Install-WindowsUpdatesAfterReboot.ps1",
       "${path.root}/../scripts/build/Invoke-Cleanup.ps1",
       # "${path.root}/../scripts/tests/RunAll-Tests.ps1"
@@ -481,13 +532,20 @@ provisioner "powershell" {
 
   provisioner "powershell" {
     environment_vars = ["INSTALL_USER=${var.install_user}"]
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/Install-NativeImages.ps1",
       "${path.root}/../scripts/build/Configure-System.ps1",
       "${path.root}/../scripts/build/Configure-User.ps1",
       # "${path.root}/../scripts/build/Post-Build-Validation.ps1"
     ]
-    skip_clean       = true
+    skip_clean = true
+  }
+
+  provisioner "powershell" {
+    environment_vars = ["SERVER_CORE_FEASIBILITY=${var.server_core_feasibility}"]
+    scripts = [
+      "${path.root}/../scripts/build/Test-ServerCoreFeasibility.ps1"
+    ]
   }
 
   # added: disable page file (1GiB)
@@ -503,8 +561,32 @@ provisioner "powershell" {
   }
 
   provisioner "powershell" {
+    environment_vars = ["CAPTURE_WPR_BOOT_TRACE=${var.capture_wpr_boot_trace}"]
+    scripts = [
+      "${path.root}/../scripts/build/Configure-WindowsBootDiagnostics.ps1"
+    ]
+  }
+
+  provisioner "powershell" {
+    inline = [
+      "if ('${var.hypervisor_launch_type}' -eq 'Off' -and '${var.publish_publicly}' -eq 'true') { throw 'hypervisorlaunchtype=Off is diagnostic-only and cannot be published' }",
+      "& bcdedit.exe /set '{current}' hypervisorlaunchtype '${lower(var.hypervisor_launch_type)}'",
+      "if ($LASTEXITCODE -ne 0) { throw \"bcdedit failed with exit code $LASTEXITCODE\" }"
+    ]
+  }
+
+  provisioner "file" {
+    source      = "${path.root}/../files/ec2launch-agent-config.yml"
+    destination = "C:\\Windows\\Temp\\ec2launch-agent-config.yml"
+  }
+
+  provisioner "powershell" {
     inline = [
       "Write-Host 'Preparing the final AMI service state...'",
+      "Set-Service -Name RunsOnLaunch -StartupType Automatic",
+      "Stop-Service -Name RunsOnLaunch -Force -ErrorAction SilentlyContinue",
+      "Set-Service -Name AmazonSSMAgent -StartupType Manual",
+      "Stop-Service -Name AmazonSSMAgent -Force -ErrorAction SilentlyContinue",
       "Write-Host 'Disabling WinRM in the published AMI...'",
       "Set-Service -Name WinRM -StartupType Disabled",
       "Write-Host 'Scheduling WinRM shutdown so Packer does not need to reconnect after final capture starts...'",
@@ -514,6 +596,10 @@ provisioner "powershell" {
       "if ($OSVersion.Major -eq 10 -and $OSVersion.Build -ge 20348) {",
       "    # Windows Server 2022+ (build number 20348 or higher) - uses EC2Launch v2",
       "    Write-Host 'Windows Server 2022+ detected, using EC2Launch v2'",
+      "    Copy-Item 'C:\\Windows\\Temp\\ec2launch-agent-config.yml' 'C:\\ProgramData\\Amazon\\EC2Launch\\config\\agent-config.yml' -Force",
+      "    & \"C:\\Program Files\\Amazon\\EC2Launch\\EC2Launch.exe\" validate",
+      "    if ($LASTEXITCODE -ne 0) { throw \"EC2Launch configuration validation failed with exit code $LASTEXITCODE\" }",
+      "    Remove-Item 'C:\\Windows\\Temp\\ec2launch-agent-config.yml' -Force",
       "    & \"C:\\Program Files\\Amazon\\EC2Launch\\EC2Launch.exe\" reset",
       "} else {",
       "    # Older Windows versions - uses EC2Launch v1",
