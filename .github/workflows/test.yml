@@ -334,6 +334,22 @@ jobs:
             echo "MD5 hash mismatch"
             exit 1
           fi
+      # If a runner release breaks the agent's Runner.Worker patch, actions/cache
+      # falls back to GitHub's cache service and the steps above still pass.
+      # Require Magic Cache to have stored and served this key.
+      - name: Check Magic Cache served actions/cache
+        if: contains(inputs.extras, 's3-cache')
+        env:
+          CACHE_KEY: github-${{ github.run_id }}-actions-cache-${{ env.FILENAME }}
+        run: |
+          set -euo pipefail
+          : "${ACTIONS_CACHE_URL:?ACTIONS_CACHE_URL is not set}"
+          diagnostics="$(curl -fsS "${ACTIONS_CACHE_URL%/}/_runs-on/diagnostics")"
+          for operation in write read; do
+            count="$(jq --arg op "$operation" --arg key "$CACHE_KEY" '[.objects[] | select(.operation == $op and .key == $key)] | length' <<<"$diagnostics")"
+            echo "Magic Cache ${operation} events for ${CACHE_KEY}: ${count}"
+            test "$count" -gt 0
+          done
 
       - name: Save to cache (runs-on/cache)
         uses: runs-on/cache/save@a5f51d6f3fece787d03b7b4e981c82538a0654ed # v4
