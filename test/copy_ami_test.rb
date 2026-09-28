@@ -42,6 +42,10 @@ class FakeEc2Client
   def copy_image(**params)
     @last_copy_params = params
     @copied_names << params.fetch(:name)
+    if (image = @images_by_id[@copy_image_id])
+      image_tags = params.fetch(:tag_specifications, []).find { |spec| spec[:resource_type] == 'image' }
+      image.tags = image_tags.fetch(:tags).map { |tag| FakeTag.new(tag[:key], tag[:value]) } if image_tags
+    end
     FakeCopyImageResponse.new(@copy_image_id)
   end
 
@@ -326,5 +330,40 @@ class CopyAmiTest < Minitest::Test
       [FakeBlockDeviceMapping.new(FakeEbs.new("snap-#{image_id}"))],
       tags
     )
+  end
+end
+
+class CopyAmiPublicationTest < Minitest::Test
+  def test_copying_production_to_another_region_starts_a_new_publication_clock
+    source = FakeImage.new('ami-source', 'runs-on-v2.2-ubuntu24-full-x64-123', 'available', true,
+      '2026-08-01T00:00:00Z', [], [FakeTag.new(AmiRetention::PUBLISHED_AT_TAG, '2026-08-01T00:00:00Z'), FakeTag.new('creator', 'RunsOn')])
+    target = FakeImage.new('ami-target', source.name, 'pending', false, Time.now.utc.iso8601,
+      [FakeBlockDeviceMapping.new(FakeEbs.new('snap-target'))], [])
+    client = FakeEc2Client.new(images_by_id: { target.image_id => target }, copy_image_id: target.image_id)
+    before = Time.now.utc - 1
+    result = CopyAmi.process_region(source_ami_id: source.image_id, target_name: source.name,
+      region: 'eu-west-1', wait_options: CopyAmi::DEFAULT_WAIT_OPTIONS,
+      copy_tags: CopyAmi.portable_tags(source), ec2: client, out: StringIO.new)
+    assert result[:success]
+    publication = client.tagged_resources.flat_map { |request| request[:tags] }.find { |tag| tag[:key] == AmiRetention::PUBLISHED_AT_TAG }
+    refute_nil publication, 'The destination must record its own publication time'
+    assert_operator Time.iso8601(publication[:value]), :>=, before
+    refute client.last_copy_params[:tag_specifications].flat_map { |spec| spec[:tags] }.any? { |tag| tag[:key] == AmiRetention::PUBLISHED_AT_TAG }
+    target.tags << FakeTag.new(publication[:key], publication[:value])
+    predecessor = FakeImage.new('ami-older', source.name.sub('123', '122'), 'available', true,
+      '2026-07-01T00:00:00Z', [], [FakeTag.new(AmiRetention::PUBLISHED_AT_TAG, '2026-07-01T00:00:00Z')])
+    refute AmiRetention.plan([predecessor, target], production: true, now: Time.now.utc).any? { |row| row[:delete] }
+  end
+
+  def test_publication_timestamp_is_recorded_once
+    image = FakeImage.new('ami-ready', 'runs-on-v2.2-ubuntu24-full-x64-123', 'available', true, nil, [], [])
+    client = FakeEc2Client.new
+    CopyAmi.record_publication(client, image)
+    tag = client.tagged_resources.first.fetch(:tags).first
+    assert_equal AmiRetention::PUBLISHED_AT_TAG, tag[:key]
+    assert Time.iso8601(tag[:value])
+    image.tags << FakeTag.new(tag[:key], tag[:value])
+    CopyAmi.record_publication(client, image)
+    assert_equal 1, client.tagged_resources.length
   end
 end

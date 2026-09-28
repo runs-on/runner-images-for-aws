@@ -117,3 +117,12 @@ dist/efs-utils/amazon-efs-utils-*_arm64.deb:
 	rm -f dist/efs-utils/*_arm64.deb
 	mkdir -p dist/efs-utils
 	./scripts/efs-utils.sh ubuntu:22.04 arm64;
+
+.PHONY: ami-recycle-bin-deploy
+ami-recycle-bin-deploy:
+	@for region in $$(ruby -ryaml -e 'puts YAML.load_file("config.yml").fetch("regions")'); do \
+		aws cloudformation deploy --region "$$region" \
+			--stack-name runs-on-ami-recycle-bin \
+			--template-file cloudformation/ami-recycle-bin.yml \
+			--no-fail-on-empty-changeset || exit 1; \
+	done
