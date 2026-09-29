@@ -47,6 +47,9 @@ patch_ubuntu() {
   cp patches/ubuntu/build/install-runner-package.sh "$build_dir/"
   # add runs-on/action@v2 to action archive cache
   cp patches/ubuntu/build/install-actions-cache.sh "$build_dir/"
+  # pull and pin RunsOn's patched BuildKit for runs-on/action's buildkit-image output
+  cp patches/ubuntu/build/install-runs-on-buildkit.sh "$build_dir/"
+  cp patches/ubuntu/tests/RunsOnBuildKit.Tests.ps1 "$tests_dir/"
 
   # Preserve apt failures instead of letting the lock-retry wrapper hide them.
   cp patches/ubuntu/build/configure-apt-mock.sh "$build_dir/"

@@ -17,6 +17,7 @@ class UbuntuTemplateTest < Minitest::Test
   ENVIRONMENT_FINALIZER = File.expand_path("../patches/ubuntu/files/finalize-runner-environment.sh", __dir__)
   DESCENDANT_ROLAUNCH_SCRIPT = File.expand_path("../patches/ubuntu/files/finalize-rolaunch-descendant.sh", __dir__)
   GPU_INSTALL_SCRIPT = File.expand_path("../patches/ubuntu/build/install-gpu.sh", __dir__)
+  RUNS_ON_BUILDKIT_SCRIPT = File.expand_path("../patches/ubuntu/build/install-runs-on-buildkit.sh", __dir__)
   MINIMAL_BASE_SCRIPT = File.expand_path("../patches/ubuntu/files/bootstrap-minimal-base.sh", __dir__)
   PATCH_LIB = File.expand_path("../bin/patch/lib.sh", __dir__)
   PRE_SCRIPT = File.expand_path("../patches/ubuntu/files/pre.sh", __dir__)
@@ -25,6 +26,24 @@ class UbuntuTemplateTest < Minitest::Test
   STEPSECURITY_MATRIX_WORKFLOW = File.expand_path("../.github/workflows/matrix-stepsecurity.yml", __dir__)
   README = File.expand_path("../README.md", __dir__)
   REPRODUCTIONS_WORKFLOW = File.expand_path("../.github/workflows/reproductions.yml", __dir__)
+
+  def test_full_templates_pin_runs_on_buildkit_after_docker
+    [FULL_X64_TEMPLATE, FULL_ARM64_TEMPLATE].each do |template|
+      content = File.read(template)
+      docker = content.index("scripts/build/install-docker.sh")
+      buildkit = content.index("scripts/build/install-runs-on-buildkit.sh")
+
+      refute_nil buildkit, "#{File.basename(template)} does not pin RunsOn BuildKit"
+      assert_operator buildkit, :>, docker, "#{File.basename(template)} pulls RunsOn BuildKit before Docker is installed"
+    end
+  end
+
+  def test_runs_on_buildkit_is_pinned_by_digest
+    assert_match(
+      %r{^BUILDKIT_IMAGE="public\.ecr\.aws/c5h5o9k1/runs-on/buildkit:v\d+\.\d+\.\d+-runs-on\.\d+@sha256:[0-9a-f]{64}"$},
+      File.read(RUNS_ON_BUILDKIT_SCRIPT)
+    )
+  end
 
   def test_configure_image_data_gets_helper_scripts_env
     offenders = Dir[File.join(TEMPLATE_DIR, "*.pkr.hcl")].filter_map do |template|
