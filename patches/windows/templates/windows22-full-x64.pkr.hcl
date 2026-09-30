@@ -69,7 +69,7 @@ variable "region" {
 }
 
 variable "ami_regions" {
-  type    = list(string)
+  type = list(string)
 }
 
 variable "source_ami_owner" {
@@ -91,6 +91,11 @@ variable "subnet_id" {
 variable "volume_size" {
   type    = number
   default = 30
+}
+
+variable "volume_throughput" {
+  type    = number
+  default = 400
 }
 
 variable "volume_type" {
@@ -115,20 +120,20 @@ source "amazon-ebs" "build_ebs" {
   ami_description                           = "${var.ami_description}"
   ami_virtualization_type                   = "hvm"
   # make AMIs publicly accessible
-  ami_groups                                = ["all"]
-  ebs_optimized                             = true
+  ami_groups    = ["all"]
+  ebs_optimized = true
   # spot_instance_types                       = ["c6a.metal", "m6a.metal", "c6i.metal", "m6i.metal", "c7i.metal-24xl", "m7i.metal-24xl"]
-  instance_type                             = var.instance_type
-  region                                    = "${var.region}"
-  subnet_id                                 = "${var.subnet_id}"
-  associate_public_ip_address               = "true"
-  force_deregister                          = "true"
-  force_delete_snapshot                     = "true"
+  instance_type               = var.instance_type
+  region                      = "${var.region}"
+  subnet_id                   = "${var.subnet_id}"
+  associate_public_ip_address = "true"
+  force_deregister            = "true"
+  force_delete_snapshot       = "true"
 
-  communicator                           = "winrm"
-  winrm_insecure                         = "true"
-  winrm_use_ssl                          = "true"
-  winrm_username                         = "Administrator"
+  communicator   = "winrm"
+  winrm_insecure = "true"
+  winrm_use_ssl  = "true"
+  winrm_username = "Administrator"
 
   # https://learn.microsoft.com/en-us/windows/win32/winrm/installation-and-configuration-for-windows-remote-management
   user_data = <<EOF
@@ -180,26 +185,27 @@ EOF
   snapshot_groups = ["all"]
 
   launch_block_device_mappings {
-    device_name = "/dev/sda1"
-    volume_type = "${var.volume_type}"
-    volume_size = "${var.volume_size}"
+    device_name           = "/dev/sda1"
+    volume_type           = "${var.volume_type}"
+    volume_size           = "${var.volume_size}"
+    throughput            = var.volume_throughput
     delete_on_termination = "true"
-    encrypted = "false"
+    encrypted             = "false"
   }
 
   run_tags = {
-    creator     = "RunsOn"
-    contact     = "ops@runs-on.com"
+    creator = "RunsOn"
+    contact = "ops@runs-on.com"
   }
 
   tags = {
-    creator     = "RunsOn"
-    contact     = "ops@runs-on.com"
+    creator = "RunsOn"
+    contact = "ops@runs-on.com"
   }
 
   snapshot_tags = {
-    creator     = "RunsOn"
-    contact     = "ops@runs-on.com"
+    creator = "RunsOn"
+    contact = "ops@runs-on.com"
   }
 
   source_ami_filter {
@@ -242,7 +248,7 @@ build {
 
   provisioner "file" {
     destination = "${var.image_folder}\\scripts\\"
-    sources     = [
+    sources = [
       "${path.root}/../scripts/docs-gen",
       "${path.root}/../scripts/helpers",
       "${path.root}/../scripts/tests"
@@ -277,7 +283,7 @@ build {
   provisioner "powershell" {
     inline = [
       "net user ${var.install_user} ${var.install_password} /add /passwordchg:no /passwordreq:yes /active:yes /Y",
-      "net localgroup Administrators ${var.install_user} /add", 
+      "net localgroup Administrators ${var.install_user} /add",
     ]
   }
 
@@ -294,7 +300,7 @@ build {
   provisioner "powershell" {
     environment_vars = ["IMAGE_VERSION=${var.image_version}", "IMAGE_OS=${var.image_os}", "AGENT_TOOLSDIRECTORY=${var.agent_tools_directory}", "IMAGEDATA_FILE=${var.imagedata_file}", "IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
     execution_policy = "unrestricted"
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/Configure-WindowsDefender.ps1",
       "${path.root}/../scripts/build/Configure-PowerShell.ps1",
       "${path.root}/../scripts/build/Install-PowerShellModules.ps1",
@@ -321,7 +327,7 @@ build {
 
   provisioner "powershell" {
     environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/Install-Docker.ps1",
       "${path.root}/../scripts/build/Install-DockerWinCred.ps1",
       "${path.root}/../scripts/build/Install-DockerCompose.ps1",
@@ -355,7 +361,7 @@ build {
   provisioner "powershell" {
     pause_before     = "2m0s"
     environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/Install-Wix.ps1",
       # "${path.root}/../scripts/build/Install-WDK.ps1",
       # "${path.root}/../scripts/build/Install-VSExtensions.ps1",
@@ -384,7 +390,7 @@ build {
 
   provisioner "powershell" {
     environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/Install-ActionsCache.ps1",
       # "${path.root}/../scripts/build/Install-Ruby.ps1",
       # "${path.root}/../scripts/build/Install-PyPy.ps1",
@@ -438,7 +444,7 @@ build {
     elevated_password = "${var.install_password}"
     elevated_user     = "${var.install_user}"
     environment_vars  = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts           = [
+    scripts = [
       "${path.root}/../scripts/build/Install-WindowsUpdates.ps1",
       "${path.root}/../scripts/build/Configure-DynamicPort.ps1",
       "${path.root}/../scripts/build/Configure-GDIProcessHandleQuota.ps1",
@@ -457,7 +463,7 @@ build {
   provisioner "powershell" {
     pause_before     = "2m0s"
     environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts          = [
+    scripts = [
       # "${path.root}/../scripts/build/Install-WindowsUpdatesAfterReboot.ps1",
       "${path.root}/../scripts/build/Invoke-Cleanup.ps1",
       # "${path.root}/../scripts/tests/RunAll-Tests.ps1"
@@ -495,12 +501,12 @@ build {
 
   provisioner "powershell" {
     environment_vars = ["INSTALL_USER=${var.install_user}"]
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/Install-NativeImages.ps1",
       "${path.root}/../scripts/build/Configure-System.ps1",
       "${path.root}/../scripts/build/Configure-User.ps1"
     ]
-    skip_clean       = true
+    skip_clean = true
   }
 
   # added: disable page file (1GiB)

@@ -17,11 +17,15 @@ release_dir="$RELEASE_DIR"
 build_dir="$release_dir/images/windows/scripts/build"
 tests_dir="$release_dir/images/windows/scripts/tests"
 toolsets_dir="$release_dir/images/windows/toolsets"
+files_dir="$release_dir/images/windows/files"
 TOOLSET_PATH="$toolsets_dir/toolset-2025.json"
 
 # restore patched build scripts
 cp patches/windows/build/Install-Runner.ps1 "$release_dir/images/windows/scripts/build/"
 cp patches/windows/build/Install-RunsOnBootstrap.ps1 "$release_dir/images/windows/scripts/build/"
+cp patches/windows/build/Install-RunsOnLaunch.ps1 "$release_dir/images/windows/scripts/build/"
+cp patches/windows/build/Configure-WindowsBootDiagnostics.ps1 "$release_dir/images/windows/scripts/build/"
+cp patches/windows/build/Test-ServerCoreFeasibility.ps1 "$release_dir/images/windows/scripts/build/"
 cp patches/windows/build/Install-NativeImages.ps1 "$release_dir/images/windows/scripts/build/"
 cp patches/windows/build/Install-VisualStudio.ps1 "$release_dir/images/windows/scripts/build/"
 cp patches/windows/build/Install-GPU.ps1 "$release_dir/images/windows/scripts/build/"
@@ -31,14 +35,27 @@ for file in patches/windows/files/patch-*.ps1; do
     base_name=$(basename "$file" | sed 's/^patch-//')
     target_file="$build_dir/$base_name"
     if [ -f "$target_file" ]; then
-      echo "Appending $file to $target_file"
-      cat "$file" >> "$target_file"
+      patch_marker=$(gnu_sed -n '/[^[:space:]]/{p;q;}' "$file")
+      if grep -Fqx "$patch_marker" "$target_file"; then
+        echo "Skipping already applied patch $file"
+      else
+        echo "Appending $file to $target_file"
+        cat "$file" >> "$target_file"
+      fi
     else
       echo "Error: Target file $target_file not found for patch $file"
       exit 1
     fi
   fi
 done
+
+mkdir -p "$files_dir"
+files_dir=$(cd "$files_dir" && pwd)
+cp patches/windows/files/ec2launch-agent-config.yml "$files_dir/"
+GOCACHE="${GOCACHE:-/tmp/runs-on-launch-gocache}" CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go -C tools/runs-on-launch build -trimpath -ldflags="-s -w" -o "$files_dir/runs-on-launch.exe" .
+rm -f "$files_dir/runs-on-launch.zip"
+zip -j -9 "$files_dir/runs-on-launch.zip" "$files_dir/runs-on-launch.exe"
+rm -f "$files_dir/runs-on-launch.exe"
 
 gnu_sed -i "s|Resize-Partition.*|# removed: Resize-Partition|" $build_dir/Configure-BaseImage.ps1
 gnu_sed -i 's/$outputLines\[0\].*/$outputLines | Where-Object { $_ -match "openjdk version" } | Select-Object -First 1 | Should -Match $outputPattern/' $tests_dir/Java.Tests.ps1
@@ -94,6 +111,9 @@ yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .default |= (parent | .ve
 
 # only keep latest dotnet version
 yq -oj -i 'eval(.dotnet | .versions |= [.[-1]])' $TOOLSET_PATH
+
+# Use a deterministic PostgreSQL installer URL instead of scraping the tag page.
+yq -oj -i 'eval(.postgresql.version = "17.10.1")' $TOOLSET_PATH
 
 # keep AzureSignTool available for Windows signing workflows (issue #19)
 yq -oj -i 'eval(.dotnet.tools += [{"name":"AzureSignTool","test":"AzureSignTool --version","getversion":"AzureSignTool --version"}] | .dotnet.tools |= unique_by(.name))' $TOOLSET_PATH

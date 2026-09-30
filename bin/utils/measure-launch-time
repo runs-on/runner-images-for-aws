@@ -26,7 +26,7 @@ usage = Slop::Options.new do |opts|
   opts.integer '--ssh-timeout', 'Max seconds to wait for SSH login', default: 600
   opts.string '--output-json', 'Write the complete benchmark result to this path'
   opts.integer '--root-iops', 'Override root gp3 IOPS'
-  opts.integer '--root-initialization-rate', 'Provisioned snapshot initialization rate in MiB/s (100-300)'
+  opts.integer '--root-initialization-rate', 'Provisioned snapshot initialization rate in MiB/s (100-300)', default: 200
   opts.integer '--root-throughput', 'Override root gp3 throughput in MiB/s'
   opts.integer '--root-volume-size', 'Override root volume size in GiB'
   opts.integer '--warm-runs', 'Warm-up launches before measurement', default: 3

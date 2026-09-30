@@ -1,0 +1,12 @@
+version: "1.0"
+config:
+  - stage: preReady
+    tasks:
+      - task: activateWindows
+        inputs:
+          activation:
+            type: amazon
+      - task: setAdminAccount
+        inputs:
+          password:
+            type: random
