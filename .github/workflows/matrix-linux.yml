@@ -43,8 +43,8 @@ jobs:
           UBUNTU22_FULL_ARM64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu22_full_arm64 }}
           UBUNTU24_FULL_X64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu24_full_x64 }}
           UBUNTU24_FULL_ARM64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu24_full_arm64 }}
-          UBUNTU26_FULL_X64: ${{ github.event_name == 'workflow_dispatch' && inputs.ubuntu26_full_x64 }}
-          UBUNTU26_FULL_ARM64: ${{ github.event_name == 'workflow_dispatch' && inputs.ubuntu26_full_arm64 }}
+          UBUNTU26_FULL_X64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu26_full_x64 }}
+          UBUNTU26_FULL_ARM64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu26_full_arm64 }}
         run: |
           images=()
           [ "$UBUNTU22_FULL_X64" = "true" ] && images+=("ubuntu22-full-x64")

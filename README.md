@@ -17,7 +17,7 @@ Those images are very close to 1-1 compatible with official GitHub Actions runne
 * `ubuntu26-full-x64`
 * `ubuntu26-full-arm64`
 
-Ubuntu 26 images are not yet part of the scheduled builds and are built on demand. See the notes below for Ubuntu 26 specifics.
+See the notes below for Ubuntu 26 specifics.
 
 Minimal images only ship the GitHub Actions runner and Docker, for the fastest boot times:
 

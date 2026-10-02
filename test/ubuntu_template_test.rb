@@ -22,6 +22,7 @@ class UbuntuTemplateTest < Minitest::Test
   PRE_SCRIPT = File.expand_path("../patches/ubuntu/files/pre.sh", __dir__)
   TEST_WORKFLOW = File.expand_path("../.github/workflows/test.yml", __dir__)
   GPU_MATRIX_WORKFLOW = File.expand_path("../.github/workflows/matrix-gpu.yml", __dir__)
+  LINUX_MATRIX_WORKFLOW = File.expand_path("../.github/workflows/matrix-linux.yml", __dir__)
   STEPSECURITY_MATRIX_WORKFLOW = File.expand_path("../.github/workflows/matrix-stepsecurity.yml", __dir__)
   README = File.expand_path("../README.md", __dir__)
   REPRODUCTIONS_WORKFLOW = File.expand_path("../.github/workflows/reproductions.yml", __dir__)
@@ -143,6 +144,26 @@ class UbuntuTemplateTest < Minitest::Test
       )
       assert_includes workflow, %(images+=("ubuntu26-stepsecurity-#{architecture}"))
       assert_includes readme, "`ubuntu26-stepsecurity-#{architecture}`"
+    end
+  end
+
+  def test_ubuntu26_images_are_selected_by_scheduled_and_chained_runs
+    # A `default: true` checkbox only applies to workflow_dispatch; schedule and
+    # workflow_run events must opt in through the selection env expression.
+    {
+      LINUX_MATRIX_WORKFLOW => "full",
+      STEPSECURITY_MATRIX_WORKFLOW => "stepsecurity"
+    }.each do |path, variant|
+      workflow = File.read(path)
+
+      %w[x64 arm64].each do |architecture|
+        input = "ubuntu26_#{variant}_#{architecture}"
+        assert_includes(
+          workflow,
+          "#{input.upcase}: ${{ github.event_name != 'workflow_dispatch' || inputs.#{input} }}",
+          path
+        )
+      end
     end
   end
 
