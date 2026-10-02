@@ -300,6 +300,7 @@ build {
       "ro-run-script-in-target ${var.installer_script_folder}/configure-environment.sh",
       "ro-run-script-in-target ${var.installer_script_folder}/configure-apt-mock.sh",
       "ro-run-script-in-target ${var.installer_script_folder}/configure-apt.sh",
+      "ro-run-script-in-target ${var.installer_script_folder}/configure-dpkg-eatmydata.sh",
       "ro-run-script-in-target ${var.installer_script_folder}/configure-limits.sh"
     ]
   }
