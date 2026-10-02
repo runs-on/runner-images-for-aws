@@ -40,6 +40,12 @@ Describe "Apt acquire configuration" {
         (Get-CommandResult "apt-config dump APT::Acquire::Retries").Output | Should -BeNullOrEmpty
     }
 
+    It "Apt keeps its default HTTP pipelining" {
+        "/etc/apt/apt.conf.d/99bad_proxy" | Should -Not -Exist
+        (Get-CommandResult "apt-config dump Acquire::http::Pipeline-Depth").Output | Should -BeNullOrEmpty
+        (Get-CommandResult "apt-config dump Acquire::https::Pipeline-Depth").Output | Should -BeNullOrEmpty
+    }
+
     It "Apt sources use the official Ubuntu archive directly" {
         $sourcesFile = if (Test-IsUbuntu22) { "/etc/apt/sources.list" } else { "/etc/apt/sources.list.d/ubuntu.sources" }
         $aptSources = Get-Content $sourcesFile -Raw
@@ -48,5 +54,16 @@ Describe "Apt acquire configuration" {
         $aptSources | Should -Match ([regex]::Escape($expectedArchive))
         $aptSources | Should -Not -Match "mirror\+file:"
         $aptSources | Should -Not -Match "\.ec2\.archive\.ubuntu\.com"
+    }
+}
+
+Describe "Dpkg under eatmydata" {
+    It "Apt runs dpkg through the eatmydata wrapper" {
+        (Get-CommandResult "apt-config dump Dir::Bin::dpkg").Output | Should -BeExactly 'Dir::Bin::dpkg "/usr/local/sbin/dpkg-eatmydata";'
+    }
+
+    It "The wrapper runs dpkg" {
+        $expected = (Get-CommandResult "dpkg --print-architecture").Output
+        (Get-CommandResult "/usr/local/sbin/dpkg-eatmydata --print-architecture").Output | Should -BeExactly $expected
     }
 }

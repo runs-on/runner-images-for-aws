@@ -506,14 +506,6 @@ cat > "$TARGET_ROOT_MOUNT/etc/apt/apt.conf.d/99-phased-updates" <<'EOF'
 APT::Get::Always-Include-Phased-Updates "true";
 EOF
 
-cat > "$TARGET_ROOT_MOUNT/etc/apt/apt.conf.d/99bad_proxy" <<'EOF'
-Acquire::http::Pipeline-Depth 0;
-Acquire::http::No-Cache true;
-Acquire::https::Pipeline-Depth 0;
-Acquire::https::No-Cache true;
-Acquire::BrokenProxy true;
-EOF
-
 cat > "$TARGET_ROOT_MOUNT/etc/modprobe.d/runs-on-minimal-blacklist.conf" <<'EOF'
 # Legacy parallel-port stack is not useful on EC2 runner images.
 blacklist ppdev
