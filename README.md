@@ -83,6 +83,7 @@ For instance, for the `ubuntu22-full-x64` image, search for:
 ## Notes
 
 * SSH daemon is disabled by default, so be sure to enable it in a user-data script if needed.
+* Full images, and the GPU and StepSecurity images built on them, pre-pull RunsOn's patched BuildKit and pin it by digest in `RUNS_ON_BUILDKIT_IMAGE`. `runs-on/action` exposes it as its `buildkit-image` output for `docker/setup-buildx-action`. Renovate bumps the pin in `patches/ubuntu/build/install-runs-on-buildkit.sh` when [runs-on/buildkit](https://github.com/runs-on/buildkit) publishes a release. Minimal images don't set it, so the action falls back to the `buildx-stable-1` tag there.
 * For full images, the new rolaunch boot path applies only to Ubuntu 26, including its GPU and StepSecurity descendants. Ubuntu 22 and 24 full images keep their existing cloud-init user-data path.
 * Fresh Ubuntu 26 x64 UEFI launches use a one-shot direct kernel boot. GRUB stays first for reboots and legacy fallback. Ubuntu 26 arm64 stays on GRUB. Secure Boot is outside this fast-path contract and falls back through shim and GRUB.
 * On those Ubuntu 26 images, user data must be a raw, uncompressed shebang shell script. Rolaunch does not process cloud-config, multipart MIME, or compressed payloads and requires a reachable EC2 instance metadata endpoint.

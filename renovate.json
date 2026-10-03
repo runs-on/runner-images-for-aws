@@ -2,5 +2,16 @@
   "extends": [
     "config:recommended",
     "helpers:pinGitHubActionDigests"
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "RunsOn BuildKit image pinned in the Ubuntu runner images",
+      "managerFilePatterns": ["/^patches/ubuntu/build/install-runs-on-buildkit\\.sh$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+) versioning=(?<versioning>\\S+)\\nBUILDKIT_IMAGE=\"\\S+?:(?<currentValue>v[^@\"]+)@(?<currentDigest>sha256:[0-9a-f]{64})\""
+      ],
+      "autoReplaceStringTemplate": "# renovate: datasource={{{datasource}}} depName={{{depName}}} versioning={{{versioning}}}\nBUILDKIT_IMAGE=\"{{{depName}}}:{{{newValue}}}@{{{newDigest}}}\""
+    }
   ]
 }
