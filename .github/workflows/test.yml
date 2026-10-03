@@ -74,6 +74,34 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      # runs-on/action registers the results backend with Magic Cache, so this
+      # round trip runs before it: on s3-cache runs the agent must find the
+      # backend in the runner's Worker log by itself.
+      - name: Generate artifact before runs-on/action
+        if: contains(inputs.extras, 's3-cache')
+        shell: pwsh
+        run: |
+          New-Item -Path "early-artifact" -ItemType Directory -Force | Out-Null
+          "hello world" | Out-File -FilePath "early-artifact/world.txt"
+      - name: Upload artifact before runs-on/action
+        if: contains(inputs.extras, 's3-cache')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: early-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
+          path: early-artifact/world.txt
+      - name: Download artifact before runs-on/action
+        if: contains(inputs.extras, 's3-cache')
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: early-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
+          path: early-artifact-downloaded
+      - name: Compare artifact before runs-on/action
+        if: contains(inputs.extras, 's3-cache')
+        shell: pwsh
+        run: |
+          if ((Get-FileHash early-artifact/world.txt).Hash -ne (Get-FileHash early-artifact-downloaded/world.txt).Hash) {
+            throw "Downloaded artifact differs from the uploaded file"
+          }
       - uses: runs-on/action@v2 # keep pinned on tag as we need to make sure latest version passes tests
         with:
           show_env: true
@@ -231,6 +259,27 @@ jobs:
           fi
       - name: Systemctl status
         run: sudo systemctl status
+      # runs-on/action registers the results backend with Magic Cache, so this
+      # round trip runs before it: on s3-cache runs the agent must find the
+      # backend in the runner's Worker log by itself.
+      - name: Generate artifact before runs-on/action
+        if: contains(inputs.extras, 's3-cache')
+        run: mkdir -p early-artifact && echo hello > early-artifact/world.txt
+      - name: Upload artifact before runs-on/action
+        if: contains(inputs.extras, 's3-cache')
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: early-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
+          path: early-artifact/world.txt
+      - name: Download artifact before runs-on/action
+        if: contains(inputs.extras, 's3-cache')
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: early-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
+          path: early-artifact-downloaded
+      - name: Compare artifact before runs-on/action
+        if: contains(inputs.extras, 's3-cache')
+        run: cmp early-artifact/world.txt early-artifact-downloaded/world.txt
       - uses: runs-on/action@v2 # keep pinned on tag as we need to make sure latest version passes tests
         with:
           show_env: true
