@@ -14,13 +14,19 @@ class AptSetupTest < Minitest::Test
         tests = "#{dir}/images/ubuntu/scripts/tests"
         FileUtils.mkdir_p(tests)
         File.write("#{tests}/Java.Tests.ps1", "")
+        File.write("#{tests}/Browsers.Tests.ps1", "Describe \"Chrome\" -Skip:(Test-IsArm64) {\n")
         FileUtils.cp("#{__dir__}/fixtures/apt/System.Tests.ps1", tests)
         FileUtils.mkdir_p("#{dir}/images/ubuntu/toolsets")
         File.write("#{dir}/images/ubuntu/toolsets/toolset-2204.json", "{}")
         FileUtils.cp(Dir["#{__dir__}/fixtures/apt/*.sh"], build)
-        %w[install-google-chrome install-aws-tools install-php install-java-tools].each do |name|
+        %w[install-aws-tools install-php install-java-tools].each do |name|
           File.write("#{build}/#{name}.sh", "")
         end
+        File.write("#{build}/install-google-chrome.sh", <<~'CHROME')
+          CHROME_DEB_URL="https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb"
+          CHROME_PLATFORM="linux64"
+          CHROMEDRIVER_DIR="/usr/local/share/chromedriver-linux64"
+        CHROME
         output, status = Open3.capture2e("bash", "-c", <<~SH, chdir: ROOT)
           set -e
           DIST=#{dist} ARCH=#{arch} TOOLSET_FILE=toolset-2204.json
@@ -30,6 +36,18 @@ class AptSetupTest < Minitest::Test
         SH
         assert status.success?, output
         assert_equal File.read("#{ROOT}/patches/ubuntu/tests/Apt.Tests.ps1"), File.read("#{tests}/Apt.Tests.ps1")
+        chrome = File.read("#{build}/install-google-chrome.sh")
+        browsers_tests = File.read("#{tests}/Browsers.Tests.ps1")
+        if arch == "arm64"
+          assert_includes chrome, "google-chrome-stable_current_arm64.deb"
+          assert_includes chrome, 'CHROME_PLATFORM="linux-arm64"'
+          assert_includes chrome, "/usr/local/share/chromedriver-linux-arm64"
+          assert_includes browsers_tests, 'Describe "Chrome" {'
+        else
+          assert_includes chrome, "google-chrome-stable_current_amd64.deb"
+          assert_includes chrome, 'CHROME_PLATFORM="linux64"'
+          assert_includes browsers_tests, 'Describe "Chrome" -Skip:(Test-IsArm64) {'
+        end
         environment = File.read("#{build}/configure-environment.sh")
         if dist == "ubuntu22"
           refute_includes environment, "rootflags="
