@@ -20,6 +20,8 @@ class UbuntuTemplateTest < Minitest::Test
   MINIMAL_BASE_SCRIPT = File.expand_path("../patches/ubuntu/files/bootstrap-minimal-base.sh", __dir__)
   PATCH_LIB = File.expand_path("../bin/patch/lib.sh", __dir__)
   PRE_SCRIPT = File.expand_path("../patches/ubuntu/files/pre.sh", __dir__)
+  RUNNER_USER_SCRIPT = File.expand_path("../patches/ubuntu/files/runner-user.sh", __dir__)
+  AFTER_REBOOT_SCRIPT = File.expand_path("../patches/ubuntu/files/after-reboot.sh", __dir__)
   TEST_WORKFLOW = File.expand_path("../.github/workflows/test.yml", __dir__)
   GPU_MATRIX_WORKFLOW = File.expand_path("../.github/workflows/matrix-gpu.yml", __dir__)
   LINUX_MATRIX_WORKFLOW = File.expand_path("../.github/workflows/matrix-linux.yml", __dir__)
@@ -50,6 +52,37 @@ class UbuntuTemplateTest < Minitest::Test
     end
 
     assert_empty offenders
+  end
+
+  def test_full_images_keep_initrdless_boot
+    runner_user = File.read(RUNNER_USER_SCRIPT)
+    after_reboot = File.read(AFTER_REBOOT_SCRIPT)
+
+    refute_match(/systemctl disable [^\n]*grub-initrd-fallback\.service/, runner_user)
+    refute_match(/systemctl disable [^\n]*grub-common\.service/, runner_user)
+    assert_includes after_reboot, "for unit in grub-common.service grub-initrd-fallback.service; do"
+    assert_includes after_reboot, "for variable in initrdfail initrdless_boot_fallback_triggered recordfail prev_entry; do"
+    assert_includes after_reboot, 'grub-editenv /boot/grub/grubenv unset "${variable}"'
+  end
+
+  def test_full_images_drop_the_microcode_initrd
+    after_reboot = File.read(AFTER_REBOOT_SCRIPT)
+
+    assert_includes after_reboot, "for package in microcode-initrd intel-microcode amd64-microcode; do"
+    assert_includes after_reboot, "rm -f /boot/microcode.cpio"
+    assert_operator after_reboot.index("update-grub"), :>, after_reboot.index("rm -f /boot/microcode.cpio")
+  end
+
+  def test_full_images_skip_the_dhcpcd_start_delay
+    assert_includes File.read(AFTER_REBOOT_SCRIPT), "echo nodelay >> /etc/dhcpcd.conf"
+  end
+
+  def test_full_images_use_a_volatile_journal
+    runner_user = File.read(RUNNER_USER_SCRIPT)
+
+    assert_includes runner_user, %(echo "Storage=volatile" >> /etc/systemd/journald.conf)
+    refute_includes runner_user, "Storage=Volatile"
+    assert_includes File.read(AFTER_REBOOT_SCRIPT), "find /var/log/journal -mindepth 1 -delete"
   end
 
   def test_full_images_configure_official_cdn_apt_mirrors
