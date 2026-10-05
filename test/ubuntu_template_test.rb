@@ -65,14 +65,6 @@ class UbuntuTemplateTest < Minitest::Test
     assert_includes after_reboot, 'grub-editenv /boot/grub/grubenv unset "${variable}"'
   end
 
-  def test_full_images_drop_the_microcode_initrd
-    after_reboot = File.read(AFTER_REBOOT_SCRIPT)
-
-    assert_includes after_reboot, "for package in microcode-initrd intel-microcode amd64-microcode; do"
-    assert_includes after_reboot, "rm -f /boot/microcode.cpio"
-    assert_operator after_reboot.index("update-grub"), :>, after_reboot.index("rm -f /boot/microcode.cpio")
-  end
-
   def test_full_images_skip_the_dhcpcd_start_delay
     assert_includes File.read(AFTER_REBOOT_SCRIPT), "echo nodelay >> /etc/dhcpcd.conf"
   end

@@ -13,24 +13,6 @@ for package in packagekit packagekit-tools; do
 done
 test ! -e /etc/apt/apt.conf.d/20packagekit
 
-# EC2 guests cannot load CPU microcode, yet GRUB reads the 15 MB microcode.cpio
-# from cold EBS on every boot (measured 0.3-0.5 s before the kernel starts).
-microcode_packages=()
-for package in microcode-initrd intel-microcode amd64-microcode; do
-  if dpkg-query -W -f='${db:Status-Status}' "$package" 2>/dev/null | grep -qx installed; then
-    microcode_packages+=("$package")
-  fi
-done
-if [ "${#microcode_packages[@]}" -gt 0 ]; then
-  DEBIAN_FRONTEND=noninteractive apt-get purge -y "${microcode_packages[@]}"
-fi
-rm -f /boot/microcode.cpio
-update-grub
-if grep -q "microcode.cpio" /boot/grub/grub.cfg; then
-  echo "GRUB still loads a microcode initrd" >&2
-  exit 1
-fi
-
 # cloud-init's init-local stage runs dhcpcd for a throwaway lease to reach IMDS.
 # Skip its randomised start delay (measured 0.2-2.0 s on EC2).
 if [ -f /etc/dhcpcd.conf ] && ! grep -qx nodelay /etc/dhcpcd.conf; then
