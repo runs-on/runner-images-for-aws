@@ -167,6 +167,17 @@ patch_ubuntu() {
   # might need to add symlinks if causing issues, but let's see
   gnu_sed -i 's/apt-get install "\$chrome_deb_path" -f/\/usr\/bin\/apt-get -qq install "\$chrome_deb_path" -f/' $build_dir/install-google-chrome.sh
   gnu_sed -i 's|# Download and unpack Chromium|invoke_tests "Browsers" "Chrome" \&\& exit 0|' $build_dir/install-google-chrome.sh
+  # Google ships Chrome and Chrome for Testing chromedriver for Linux arm64; upstream
+  # still hardcodes amd64 and skips the Chrome tests on arm64.
+  # https://github.com/runs-on/runner-images-for-aws/issues/89
+  if [ "$ARCH" = "arm64" ]; then
+    gnu_sed -i \
+      -e 's|google-chrome-stable_current_amd64.deb|google-chrome-stable_current_arm64.deb|' \
+      -e 's|CHROME_PLATFORM="linux64"|CHROME_PLATFORM="linux-arm64"|' \
+      -e 's|chromedriver-linux64|chromedriver-linux-arm64|' \
+      $build_dir/install-google-chrome.sh
+    gnu_sed -i 's|Describe "Chrome" -Skip:(Test-IsArm64) {|Describe "Chrome" {|' $tests_dir/Browsers.Tests.ps1
+  fi
 
   gnu_sed -i 's/unzip "$aws_sam_cli_archive_path" -d \/tmp/unzip -qq "$aws_sam_cli_archive_path" -d \/tmp/' $build_dir/install-aws-tools.sh
 
