@@ -29,4 +29,6 @@ jobs:
         with:
           body_path: release-body.md
           tag_name: ${{ inputs.release_name }}
+          # Release jobs can wait days for approval; tag the built commit, not main at publish time.
+          target_commitish: ${{ github.sha }}
           make_latest: true
