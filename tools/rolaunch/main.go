@@ -368,11 +368,11 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 	if err := waitAllTasks(applyTasks...); err != nil {
 		return err
 	}
-	prefetchedBootstrap, err := prefetchTask.wait()
-	if err != nil {
-		return err
-	}
-	if prefetchedBootstrap {
+	// The prefetch only saves the user data bootstrap from downloading the
+	// agent itself, so its failure must not keep the user data from running.
+	if prefetchedBootstrap, err := prefetchTask.wait(); err != nil {
+		log.Printf("warning: failed to prefetch RunsOn agent, userdata will download it: %v", err)
+	} else if prefetchedBootstrap {
 		recorder.add("rolaunch.agent-prefetched")
 	}
 	recorder.add("rolaunch.bootstrap-ready")

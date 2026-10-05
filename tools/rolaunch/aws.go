@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -29,7 +30,15 @@ const (
 	imdsLocalHostnamePath      = "local-hostname"
 	runsOnInstanceConfigPath   = "/runs-on/instance-config.json"
 	runsOnRunnerConfigPath     = "/runs-on/config.json"
+	agentPrefetchRetryBudget   = 45 * time.Second
 )
+
+type retryBackoff struct {
+	initial time.Duration
+	max     time.Duration
+}
+
+var agentPrefetchBackoff = retryBackoff{initial: 250 * time.Millisecond, max: 2 * time.Second}
 
 type awsState struct {
 	mu             sync.Mutex
@@ -239,7 +248,11 @@ func (s *awsState) prefetchMatchingBootstrap(ctx context.Context, cfg config, re
 		return true, err
 	}
 
-	if err := downloadS3ObjectToFile(ctx, s3Client, spec.S3Bucket, spec.S3Key, spec.DownloadedBinPath); err != nil {
+	// A few seconds into boot, DNS or the first connections to S3 can still
+	// fail. User data waits for this download, so retries are bounded.
+	ctx, cancel := context.WithTimeout(ctx, agentPrefetchRetryBudget)
+	defer cancel()
+	if err := downloadS3ObjectToFileWithRetry(ctx, s3Client, spec.S3Bucket, spec.S3Key, spec.DownloadedBinPath, agentPrefetchBackoff); err != nil {
 		return true, err
 	}
 	if err := installBootstrapWrapper(spec.BootstrapPath, spec.DownloadedBinPath); err != nil {
@@ -510,6 +523,44 @@ func downloadS3ObjectToFile(ctx context.Context, client s3ObjectGetter, bucket s
 		return fmt.Errorf("rename temp download file for %s: %w", destPath, err)
 	}
 	return nil
+}
+
+// downloadS3ObjectToFileWithRetry retries until ctx ends, unless S3 answers
+// with a status that a retry will not change, such as 403 or 404.
+func downloadS3ObjectToFileWithRetry(ctx context.Context, client s3ObjectGetter, bucket string, key string, destPath string, backoff retryBackoff) error {
+	delay := backoff.initial
+	for attempt := 1; ; attempt++ {
+		err := downloadS3ObjectToFile(ctx, client, bucket, key, destPath)
+		if err == nil || !isRetryableS3Error(err) {
+			return err
+		}
+		if ctx.Err() != nil {
+			return fmt.Errorf("%w (gave up after %d attempts)", err, attempt)
+		}
+		log.Printf("warning: attempt %d failed, retrying in %s: %v", attempt, delay, err)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%w (gave up after %d attempts)", err, attempt)
+		case <-time.After(delay):
+		}
+		delay = min(2*delay, backoff.max)
+	}
+}
+
+// isRetryableS3Error treats every failure to get an answer from S3 (DNS,
+// connect, TLS, a dropped body) as transient. The SDK reports those as status
+// 0. Once S3 answers, only 408, 429 and 5xx are worth retrying.
+func isRetryableS3Error(err error) bool {
+	var responseErr *smithyhttp.ResponseError
+	if !errors.As(err, &responseErr) {
+		return true
+	}
+	switch status := responseErr.HTTPStatusCode(); {
+	case status == 0, status == http.StatusRequestTimeout, status == http.StatusTooManyRequests, status >= 500:
+		return true
+	default:
+		return false
+	}
 }
 
 func isS3NotFound(err error) bool {

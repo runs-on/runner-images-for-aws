@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,8 +13,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	aws "github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/retry"
 	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	smithyhttp "github.com/aws/smithy-go/transport/http"
@@ -310,6 +314,124 @@ EOF
 	if _, err := os.Stat(runnerPath); !os.IsNotExist(err) {
 		t.Fatalf("expected runner config to remain absent, stat err=%v", err)
 	}
+}
+
+func TestDownloadS3ObjectToFileWithRetryRetriesUntilS3Answers(t *testing.T) {
+	t.Parallel()
+
+	client, transport := newScriptedS3Client(
+		scriptedS3Response{err: &net.DNSError{
+			Err:         "server misbehaving",
+			Name:        "bucket.s3.us-east-1.amazonaws.com",
+			Server:      "127.0.0.53:53",
+			IsTemporary: true,
+		}},
+		scriptedS3Response{err: errors.New("net/http: TLS handshake timeout")},
+		scriptedS3Response{status: http.StatusServiceUnavailable, body: "<Error><Code>SlowDown</Code></Error>"},
+		scriptedS3Response{status: http.StatusOK, body: "agent"},
+	)
+	destPath := filepath.Join(t.TempDir(), "agent-linux-x86_64")
+
+	if err := downloadS3ObjectToFileWithRetry(context.Background(), client, "bucket", "agents/agent-linux-x86_64", destPath, testRetryBackoff); err != nil {
+		t.Fatalf("downloadS3ObjectToFileWithRetry returned error: %v", err)
+	}
+	if got := transport.requestCount(); got != 4 {
+		t.Fatalf("unexpected request count %d", got)
+	}
+	raw, err := os.ReadFile(destPath)
+	if err != nil {
+		t.Fatalf("read downloaded agent: %v", err)
+	}
+	if got := string(raw); got != "agent" {
+		t.Fatalf("unexpected downloaded agent contents %q", got)
+	}
+}
+
+func TestDownloadS3ObjectToFileWithRetryStopsOnFinalS3Answer(t *testing.T) {
+	t.Parallel()
+
+	for _, status := range []int{http.StatusForbidden, http.StatusNotFound} {
+		client, transport := newScriptedS3Client(
+			scriptedS3Response{status: status, body: "<Error><Code>Denied</Code></Error>"},
+			scriptedS3Response{status: http.StatusOK, body: "agent"},
+		)
+
+		err := downloadS3ObjectToFileWithRetry(context.Background(), client, "bucket", "agents/agent-linux-x86_64", filepath.Join(t.TempDir(), "agent"), testRetryBackoff)
+		if err == nil {
+			t.Fatalf("expected status %d to fail the download", status)
+		}
+		if got := transport.requestCount(); got != 1 {
+			t.Fatalf("status %d: unexpected request count %d", status, got)
+		}
+	}
+}
+
+func TestDownloadS3ObjectToFileWithRetryGivesUpWhenContextEnds(t *testing.T) {
+	t.Parallel()
+
+	client, transport := newScriptedS3Client(scriptedS3Response{err: errors.New("dial tcp 52.216.0.1:443: i/o timeout")})
+	destPath := filepath.Join(t.TempDir(), "agent")
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := downloadS3ObjectToFileWithRetry(ctx, client, "bucket", "agents/agent-linux-x86_64", destPath, testRetryBackoff)
+	if err == nil || !strings.Contains(err.Error(), "(gave up after ") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := transport.requestCount(); got < 2 {
+		t.Fatalf("expected retries before giving up, got %d requests", got)
+	}
+	if _, err := os.Stat(destPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no downloaded file, stat err=%v", err)
+	}
+}
+
+var testRetryBackoff = retryBackoff{initial: time.Millisecond, max: 4 * time.Millisecond}
+
+type scriptedS3Response struct {
+	status int
+	body   string
+	err    error
+}
+
+// scriptedS3Transport serves its responses in order and repeats the last one.
+// The real S3 client wraps them the same way it wraps network failures.
+type scriptedS3Transport struct {
+	mu        sync.Mutex
+	responses []scriptedS3Response
+	requests  int
+}
+
+func newScriptedS3Client(responses ...scriptedS3Response) (*s3.Client, *scriptedS3Transport) {
+	transport := &scriptedS3Transport{responses: responses}
+	client := s3.New(s3.Options{
+		Region:      "us-east-1",
+		Credentials: aws.AnonymousCredentials{},
+		HTTPClient:  &http.Client{Transport: transport},
+		Retryer:     retry.AddWithMaxAttempts(retry.NewStandard(), 1),
+	})
+	return client, transport
+}
+
+func (s *scriptedS3Transport) RoundTrip(request *http.Request) (*http.Response, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.requests++
+	response := s.responses[0]
+	if len(s.responses) > 1 {
+		s.responses = s.responses[1:]
+	}
+	if response.err != nil {
+		return nil, response.err
+	}
+	return fakeHTTPResponse(request, response.status, "", response.body), nil
+}
+
+func (s *scriptedS3Transport) requestCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.requests
 }
 
 type fakeS3ObjectGetter struct {
