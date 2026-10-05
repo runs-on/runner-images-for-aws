@@ -117,6 +117,18 @@ class UbuntuTemplateTest < Minitest::Test
     refute_match(/\.ec2\.(archive|ports)\.ubuntu\.com/, arm64)
   end
 
+  def test_full_and_minimal_images_run_dpkg_under_eatmydata_once_apt_is_configured
+    %w[ubuntu-full-x64 ubuntu-full-arm64 ubuntu24-minimal-x64 ubuntu24-minimal-arm64].each do |name|
+      template = File.read(File.join(TEMPLATE_DIR, "#{name}.pkr.hcl"))
+      configure_apt = template.index("configure-apt.sh")
+      eatmydata = template.index("configure-dpkg-eatmydata.sh")
+
+      refute_nil eatmydata, name
+      assert_operator eatmydata, :>, configure_apt, name
+    end
+    refute_includes File.read(MINIMAL_BASE_SCRIPT), "Pipeline-Depth"
+  end
+
   def test_only_ubuntu26_full_images_use_400_mibps_gp3_throughput
     configured = CONFIG.fetch("images").filter_map do |image|
       id = image.fetch("id")

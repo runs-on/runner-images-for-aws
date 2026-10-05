@@ -84,6 +84,7 @@ class AptSetupTest < Minitest::Test
         assert_includes output, "APT upgrade -y"
         assert_includes File.read("#{apt}/apt.conf.d/80-retries"), 'Acquire::Retries "5";'
         assert_includes File.read("#{apt}/apt.conf.d/80-retries"), 'Acquire::http::Timeout "20";'
+        refute File.exist?("#{apt}/apt.conf.d/99bad_proxy"), "apt must keep its default HTTP pipelining"
         script = File.read("#{build}/install-ms-repos.sh")
         output, status = Open3.capture2e("bash", "-e", "-c", <<~SH + script)
           wget() { :; }; dpkg() { :; }; lsb_release() { echo 22.04; }
@@ -95,6 +96,24 @@ class AptSetupTest < Minitest::Test
         SH
         assert status.success?, output
       end
+    end
+  end
+
+  def test_apt_runs_dpkg_through_eatmydata_with_its_arguments
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(%W[#{dir}/apt.conf.d #{dir}/sbin])
+      File.write("#{dir}/eatmydata", "#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
+      FileUtils.chmod(0755, "#{dir}/eatmydata")
+      script = File.read("#{ROOT}/patches/ubuntu/build/configure-dpkg-eatmydata.sh")
+        .gsub("/etc/apt", dir).gsub("/usr/local/sbin", "#{dir}/sbin").gsub("/usr/bin/eatmydata", "#{dir}/eatmydata")
+      output, status = Open3.capture2e("bash", "-c", %(apt-get() { echo "APT $*"; }\n) + script)
+      assert status.success?, output
+      assert_includes output, "APT install -y --no-install-recommends eatmydata"
+
+      dpkg = File.read("#{dir}/apt.conf.d/10dpkg-eatmydata")[/^Dir::Bin::dpkg "(.+)";$/, 1]
+      output, status = Open3.capture2e(dpkg, "--unpack", "a b.deb")
+      assert status.success?, output
+      assert_equal "/usr/bin/dpkg\n--unpack\na b.deb\n", output
     end
   end
 

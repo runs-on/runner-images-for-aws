@@ -50,12 +50,19 @@ patch_ubuntu() {
 
   # Preserve apt failures instead of letting the lock-retry wrapper hide them.
   cp patches/ubuntu/build/configure-apt-mock.sh "$build_dir/"
+  # Run dpkg under eatmydata when apt installs packages.
+  cp patches/ubuntu/build/configure-dpkg-eatmydata.sh "$build_dir/"
 
   # AWS uses direct Ubuntu sources, without Azure's mirror-list file.
   gnu_sed -i "/^echo 'APT mirrors'$/d; /^cat \/etc\/apt\/apt-mirrors.txt$/d" "$build_dir/configure-apt.sh"
 
   # This script runs before configure-apt.sh enables Assume-Yes.
   gnu_sed -i 's/^apt-get install /apt-get install -y /; s/^apt-get dist-upgrade$/apt-get dist-upgrade -y/' "$build_dir/install-ms-repos.sh"
+
+  # Upstream disables HTTP pipelining for Azure's proxies. Without it, every
+  # package waits a full round trip to archive.ubuntu.com, which rotates
+  # between sites up to 100 ms away from an AWS region.
+  gnu_sed -i '/^# Fix bad proxy and http headers settings$/,/^EOF$/d' "$build_dir/configure-apt.sh"
 
   # Direct sources need retries, without upstream's mirror-failover tuning.
   gnu_sed -i 's/apt_retries=[0-9]*/apt_retries=5/; s/apt_timeout=[0-9]*/apt_timeout=20/' "$build_dir/configure-apt.sh"
