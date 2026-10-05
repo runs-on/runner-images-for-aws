@@ -53,7 +53,9 @@ test -s /home/runner/run.sh
 # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/set-time.html
 echo 'server 169.254.169.123 prefer iburst minpoll 4 maxpoll 4' >  /etc/chrony/chrony.conf
 
-echo "Storage=Volatile" >> /etc/systemd/journald.conf
+# journald only accepts the lowercase value: "Volatile" is ignored and leaves a
+# persistent journal on the root volume.
+echo "Storage=volatile" >> /etc/systemd/journald.conf
 echo "RuntimeMaxUse=64M" >> /etc/systemd/journald.conf
 
 apt-get purge plymouth update-notifier-common multipath-tools -y
@@ -61,14 +63,16 @@ apt-get purge plymouth update-notifier-common multipath-tools -y
 # speed-up boot
 systemctl disable timers.target
 #  dev-hugepages.mount
-systemctl disable console-setup.service hibinit-agent.service grub-initrd-fallback.service qemu-kvm.service lvm2-monitor.service rsyslog.service ubuntu-advantage.service vgauth.service setvtrgb.service systemd-journal-flush.service
+# grub-common and grub-initrd-fallback stay enabled: they clear the GRUB flags
+# that otherwise pin every later boot to the full initramfs.
+systemctl disable console-setup.service hibinit-agent.service qemu-kvm.service lvm2-monitor.service rsyslog.service ubuntu-advantage.service vgauth.service setvtrgb.service systemd-journal-flush.service
 systemctl disable snapd.seeded.service snapd.autoimport.service snapd.core-fixup.service snapd.recovery-chooser-trigger.service snapd.system-shutdown.service
 # only on ubuntu 22.04
 systemctl disable update-notifier-download.service plymouth-quit.service plymouth-quit-wait.service || true
 systemctl disable libvirt-guests.service libvirtd.service systemd-machined.service || true
 systemctl disable mono-xsp4.service || true
 systemctl disable containerd.service docker.service
-systemctl disable apport.service logrotate.service grub-common.service keyboard-setup.service systemd-update-utmp.service systemd-fsck-root.service systemd-tmpfiles-setup.service apparmor.service e2scrub_reap.service || true
+systemctl disable apport.service logrotate.service keyboard-setup.service systemd-update-utmp.service systemd-fsck-root.service systemd-tmpfiles-setup.service apparmor.service e2scrub_reap.service || true
 systemctl disable ufw.service snapd.service snap.lxd.activate.service snapd.apparmor.service ec2-instance-connect.service snap.amazon-ssm-agent.amazon-ssm-agent.service cron.service || true
 # Disable firmware update services, not needed for one-shot runners
 systemctl disable fwupd.service fwupd-refresh.service || true
