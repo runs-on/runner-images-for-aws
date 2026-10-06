@@ -69,7 +69,12 @@ variable "region" {
 }
 
 variable "ami_regions" {
-  type    = list(string)
+  type = list(string)
+}
+
+variable "publish_publicly" {
+  type    = bool
+  default = true
 }
 
 variable "source_ami_owner" {
@@ -113,25 +118,25 @@ source "amazon-ebs" "build_ebs" {
   ami_name                                  = "${var.ami_name}"
   ami_description                           = "${var.ami_description}"
   ami_virtualization_type                   = "hvm"
-  # make AMIs publicly accessible
-  ami_groups                                = ["all"]
-  ebs_optimized                             = true
-  enable_nested_virtualization              = true
+  # Make AMIs public for release builds; dev accounts can keep them private.
+  ami_groups                   = var.publish_publicly ? ["all"] : []
+  ebs_optimized                = true
+  enable_nested_virtualization = true
   # spot_instance_types                       = ["c6a.metal", "m6a.metal", "c6i.metal", "m6i.metal", "c7i.metal-24xl", "m7i.metal-24xl"]
   # spot_instance_types                       = ["c6a.xlarge", "m6a.xlarge", "c6i.xlarge", "m6i.xlarge", "c7i.xlarge", "m7i.xlarge"]
   # spot_price                                = "auto"
-  instance_type                             = var.instance_type
-  region                                    = "${var.region}"
-  subnet_id                                 = "${var.subnet_id}"
-  iam_instance_profile                      = "SSMInstanceProfile"
-  associate_public_ip_address               = "true"
-  force_deregister                          = "true"
-  force_delete_snapshot                     = "true"
+  instance_type               = var.instance_type
+  region                      = "${var.region}"
+  subnet_id                   = "${var.subnet_id}"
+  iam_instance_profile        = "SSMInstanceProfile"
+  associate_public_ip_address = "true"
+  force_deregister            = "true"
+  force_delete_snapshot       = "true"
 
-  communicator                           = "winrm"
-  winrm_insecure                         = "true"
-  winrm_use_ssl                          = "true"
-  winrm_username                         = "Administrator"
+  communicator   = "winrm"
+  winrm_insecure = "true"
+  winrm_use_ssl  = "true"
+  winrm_username = "Administrator"
 
   # https://learn.microsoft.com/en-us/windows/win32/winrm/installation-and-configuration-for-windows-remote-management
   user_data = <<EOF
@@ -172,30 +177,30 @@ EOF
 
   ami_regions = "${var.ami_regions}"
 
-  // make underlying snapshot public
-  snapshot_groups = ["all"]
+  // Keep the snapshot visibility aligned with the AMI.
+  snapshot_groups = var.publish_publicly ? ["all"] : []
 
   launch_block_device_mappings {
-    device_name = "/dev/sda1"
-    volume_type = "${var.volume_type}"
-    volume_size = "${var.volume_size}"
+    device_name           = "/dev/sda1"
+    volume_type           = "${var.volume_type}"
+    volume_size           = "${var.volume_size}"
     delete_on_termination = "true"
-    encrypted = "false"
+    encrypted             = "false"
   }
 
   run_tags = {
-    creator     = "RunsOn"
-    contact     = "ops@runs-on.com"
+    creator = "RunsOn"
+    contact = "ops@runs-on.com"
   }
 
   tags = {
-    creator     = "RunsOn"
-    contact     = "ops@runs-on.com"
+    creator = "RunsOn"
+    contact = "ops@runs-on.com"
   }
 
   snapshot_tags = {
-    creator     = "RunsOn"
-    contact     = "ops@runs-on.com"
+    creator = "RunsOn"
+    contact = "ops@runs-on.com"
   }
 
   source_ami_filter {
@@ -238,7 +243,7 @@ build {
 
   provisioner "file" {
     destination = "${var.image_folder}\\scripts\\"
-    sources     = [
+    sources = [
       "${path.root}/../scripts/docs-gen",
       "${path.root}/../scripts/helpers",
       "${path.root}/../scripts/tests"
@@ -283,7 +288,7 @@ build {
     inline = ["if (-not ((net localgroup Administrators) -contains '${var.install_user}')) { exit 1 }"]
   }
 
-provisioner "powershell" {
+  provisioner "powershell" {
     elevated_password = "${var.install_password}"
     elevated_user     = "${var.install_user}"
     inline            = ["bcdedit.exe /set TESTSIGNING ON"]
@@ -292,7 +297,7 @@ provisioner "powershell" {
   provisioner "powershell" {
     environment_vars = ["IMAGE_VERSION=${var.image_version}", "IMAGE_OS=${var.image_os}", "AGENT_TOOLSDIRECTORY=${var.agent_tools_directory}", "IMAGEDATA_FILE=${var.imagedata_file}", "IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
     execution_policy = "unrestricted"
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/Configure-WindowsDefender.ps1",
       "${path.root}/../scripts/build/Configure-PowerShell.ps1",
       "${path.root}/../scripts/build/Install-PowerShellModules.ps1",
@@ -318,7 +323,7 @@ provisioner "powershell" {
 
   provisioner "powershell" {
     environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/Install-Docker.ps1",
       "${path.root}/../scripts/build/Install-DockerWinCred.ps1",
       "${path.root}/../scripts/build/Install-DockerCompose.ps1",
@@ -338,10 +343,10 @@ provisioner "powershell" {
     elevated_password = "${var.install_password}"
     elevated_user     = "${var.install_user}"
     environment_vars  = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts           = [
+    scripts = [
       "${path.root}/../scripts/build/Install-VisualStudio.ps1"
     ]
-    valid_exit_codes  = [0, 3010]
+    valid_exit_codes = [0, 3010]
   }
 
   provisioner "windows-restart" {
@@ -352,7 +357,7 @@ provisioner "powershell" {
   provisioner "powershell" {
     pause_before     = "2m0s"
     environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/Install-Wix.ps1"
     ]
   }
@@ -365,7 +370,7 @@ provisioner "powershell" {
   provisioner "powershell" {
     pause_before     = "2m0s"
     environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/Install-VSExtensions.ps1",
       "${path.root}/../scripts/build/Install-AzureCli.ps1",
       # "${path.root}/../scripts/build/Install-AzureDevOpsCli.ps1",
@@ -376,7 +381,7 @@ provisioner "powershell" {
 
   provisioner "powershell" {
     environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/Install-ActionsCache.ps1",
       # "${path.root}/../scripts/build/Install-Ruby.ps1",
       # "${path.root}/../scripts/build/Install-PyPy.ps1",
@@ -424,7 +429,7 @@ provisioner "powershell" {
     elevated_password = "${var.install_password}"
     elevated_user     = "${var.install_user}"
     environment_vars  = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts           = [
+    scripts = [
       "${path.root}/../scripts/build/Install-PostgreSQL.ps1",
       # "${path.root}/../scripts/build/Install-WindowsUpdates.ps1", # failing for KB5007651
       "${path.root}/../scripts/build/Configure-DynamicPort.ps1",
@@ -444,7 +449,7 @@ provisioner "powershell" {
   provisioner "powershell" {
     pause_before     = "2m0s"
     environment_vars = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
-    scripts          = [
+    scripts = [
       # "${path.root}/../scripts/build/Install-WindowsUpdatesAfterReboot.ps1",
       "${path.root}/../scripts/build/Invoke-Cleanup.ps1",
       # "${path.root}/../scripts/tests/RunAll-Tests.ps1"
@@ -482,13 +487,13 @@ provisioner "powershell" {
 
   provisioner "powershell" {
     environment_vars = ["INSTALL_USER=${var.install_user}"]
-    scripts          = [
+    scripts = [
       "${path.root}/../scripts/build/Install-NativeImages.ps1",
       "${path.root}/../scripts/build/Configure-System.ps1",
       "${path.root}/../scripts/build/Configure-User.ps1",
       # "${path.root}/../scripts/build/Post-Build-Validation.ps1"
     ]
-    skip_clean       = true
+    skip_clean = true
   }
 
   # added: disable page file (1GiB)
