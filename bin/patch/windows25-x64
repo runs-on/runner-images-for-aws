@@ -21,6 +21,7 @@ TOOLSET_PATH="$toolsets_dir/toolset-2025.json"
 
 # restore patched build scripts
 cp patches/windows/build/Install-Runner.ps1 "$release_dir/images/windows/scripts/build/"
+cp patches/windows/build/Install-OtelCli.ps1 "$release_dir/images/windows/scripts/build/"
 cp patches/windows/build/Install-RunsOnBootstrap.ps1 "$release_dir/images/windows/scripts/build/"
 cp patches/windows/build/Install-NativeImages.ps1 "$release_dir/images/windows/scripts/build/"
 cp patches/windows/build/Install-VisualStudio.ps1 "$release_dir/images/windows/scripts/build/"

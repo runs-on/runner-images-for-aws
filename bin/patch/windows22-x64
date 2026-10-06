@@ -21,6 +21,7 @@ TOOLSET_PATH="$toolsets_dir/toolset-2022.json"
 
 # restore runner install script
 cp patches/windows/build/Install-Runner.ps1 "$release_dir/images/windows/scripts/build/"
+cp patches/windows/build/Install-OtelCli.ps1 "$release_dir/images/windows/scripts/build/"
 
 for file in patches/windows/files/patch-*.ps1; do
   if [ -f "$file" ]; then

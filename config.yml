@@ -54,6 +54,7 @@ images:
       - install-sqlpackage.sh
       - install-nodejs.sh
       - install-oras-cli.sh
+      - install-otel-cli.sh
       - install-php.sh
       - install-postgresql.sh
       - install-ruby.sh
@@ -93,6 +94,7 @@ images:
       - install-mysql.sh
       - install-nvm.sh
       - install-nodejs.sh
+      - install-otel-cli.sh
       - install-postgresql.sh
       - install-ruby.sh
       - install-rust.sh
@@ -143,6 +145,7 @@ images:
       - install-mysql.sh
       - install-nodejs.sh
       - install-oras-cli.sh
+      - install-otel-cli.sh
       - install-php.sh
       - install-postgresql.sh
       - install-ruby.sh
@@ -197,6 +200,7 @@ images:
       - install-mysql.sh
       - install-nodejs.sh
       - install-oras-cli.sh
+      - install-otel-cli.sh
       - install-php.sh
       - install-postgresql.sh
       - install-ruby.sh
@@ -240,6 +244,7 @@ images:
       - install-mysql.sh
       - install-nodejs.sh
       - install-oras-cli.sh
+      - install-otel-cli.sh
       - install-php.sh
       - install-postgresql.sh
       - install-ruby.sh
@@ -278,6 +283,7 @@ images:
       - install-mysql.sh
       - install-nodejs.sh
       - install-oras-cli.sh
+      - install-otel-cli.sh
       - install-php.sh
       - install-postgresql.sh
       - install-ruby.sh
