@@ -72,6 +72,11 @@ variable "ami_regions" {
   type    = list(string)
 }
 
+variable "publish_publicly" {
+  type    = bool
+  default = true
+}
+
 variable "source_ami_owner" {
   type    = string
   default = "801119661308"
@@ -113,8 +118,8 @@ source "amazon-ebs" "build_ebs" {
   ami_name                                  = "${var.ami_name}"
   ami_description                           = "${var.ami_description}"
   ami_virtualization_type                   = "hvm"
-  # make AMIs publicly accessible
-  ami_groups                                = ["all"]
+  # Make AMIs public for release builds; dev accounts can keep them private.
+  ami_groups                                = var.publish_publicly ? ["all"] : []
   ebs_optimized                             = true
   enable_nested_virtualization              = true
   # spot_instance_types                       = ["c6a.metal", "m6a.metal", "c6i.metal", "m6i.metal", "c7i.metal-24xl", "m7i.metal-24xl"]
@@ -172,8 +177,8 @@ EOF
 
   ami_regions = "${var.ami_regions}"
 
-  // make underlying snapshot public
-  snapshot_groups = ["all"]
+  // Keep the snapshot visibility aligned with the AMI.
+  snapshot_groups = var.publish_publicly ? ["all"] : []
 
   launch_block_device_mappings {
     device_name = "/dev/sda1"

@@ -15,7 +15,8 @@ New-Item -Path $targetDir -ItemType Directory -Force | Out-Null
 $archivePath = Invoke-DownloadWithRetry `
     -Url "https://github.com/equinix-labs/otel-cli/releases/download/v$otelCliVersion/otel-cli_${otelCliVersion}_windows_amd64.zip"
 Test-FileChecksum $archivePath -ExpectedSHA256Sum $otelCliSha256
-Expand-7ZipArchive -Path $archivePath -DestinationPath $targetDir
+# 7-Zip is not installed yet at this point of the build.
+Expand-Archive -Path $archivePath -DestinationPath $targetDir -Force
 Add-MachinePathItem $targetDir
 
 # With no OTLP endpoint, otel-cli only runs the command.
