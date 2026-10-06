@@ -679,6 +679,61 @@ func TestRunPersistsTimingsForPrefetchedBootstrap(t *testing.T) {
 	})
 }
 
+func TestRunExecutesUserDataWhenAgentPrefetchFails(t *testing.T) {
+	var logs bytes.Buffer
+	originalWriter := log.Writer()
+	originalFlags := log.Flags()
+	log.SetOutput(&logs)
+	log.SetFlags(0)
+	defer func() {
+		log.SetOutput(originalWriter)
+		log.SetFlags(originalFlags)
+	}()
+
+	for _, mode := range []launchMode{launchModeMinimal, launchModeFull} {
+		t.Run(string(mode), func(t *testing.T) {
+			cfg := testConfig(t.TempDir())
+			cfg.mode = mode
+			ops := testLauncherOps()
+			executed := make(chan struct{})
+			markedDone := make(chan struct{})
+			ops.fetchUserData = func(context.Context, config) ([]byte, error) {
+				return []byte("#!/bin/sh\necho ok\n"), nil
+			}
+			ops.prefetchMatchingBootstrap = func(context.Context, config, string, []byte) (bool, error) {
+				return true, fmt.Errorf("download s3://bucket/agents/agent-linux-x86_64: lookup bucket.s3.us-east-1.amazonaws.com on 127.0.0.53:53: server misbehaving")
+			}
+			ops.executeUserData = func(context.Context, config) error {
+				close(executed)
+				return nil
+			}
+			ops.markDone = func(string, string) error {
+				close(markedDone)
+				return nil
+			}
+
+			if err := runWithOps(context.Background(), cfg, ops); err != nil {
+				t.Fatalf("runWithOps returned error: %v", err)
+			}
+			waitForSignal(t, executed, "userdata execution")
+			waitForSignal(t, markedDone, "done marker")
+
+			steps := mustLoadSteps(t, cfg.timingsPath)
+			assertStepsPresent(t, steps, []string{
+				"rolaunch.bootstrap-ready",
+				"rolaunch.userdata-started",
+				"rolaunch.userdata-finished",
+				"rolaunch.done",
+			})
+			assertStepAbsent(t, steps, "rolaunch.agent-prefetched")
+		})
+	}
+
+	if !strings.Contains(logs.String(), "warning: failed to prefetch RunsOn agent, userdata will download it: download s3://bucket/agents/agent-linux-x86_64") {
+		t.Fatalf("expected prefetch warning, got %q", logs.String())
+	}
+}
+
 func TestRunPersistsStartedTimingImmediately(t *testing.T) {
 	t.Parallel()
 

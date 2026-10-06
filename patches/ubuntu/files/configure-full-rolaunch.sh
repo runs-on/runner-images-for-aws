@@ -44,11 +44,15 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y linux-aws
 
 install -D -m 0755 "${ROLAUNCH_SOURCE}" /usr/bin/rolaunch
 
+# A runner whose launcher failed never starts its agent. Power it off so that
+# InstanceInitiatedShutdownBehavior=terminate retires it within seconds instead
+# of leaving it to idle until housekeeping.
 cat > /etc/systemd/system/rolaunch.service <<'EOF'
 [Unit]
 Description=ROLaunch
 Wants=systemd-networkd.service systemd-resolved.service
 After=systemd-networkd.service systemd-resolved.service
+FailureAction=poweroff
 
 [Service]
 Type=oneshot

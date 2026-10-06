@@ -422,4 +422,11 @@ class UbuntuTemplateTest < Minitest::Test
     assert_includes File.read(FULL_ROLAUNCH_SCRIPT), "TimeoutStartSec=infinity"
     refute_includes File.read(MINIMAL_BASE_SCRIPT), "TimeoutStartSec=infinity"
   end
+
+  def test_full_rolaunch_powers_off_when_it_fails
+    unit = File.read(FULL_ROLAUNCH_SCRIPT)[/cat > \/etc\/systemd\/system\/rolaunch\.service <<'EOF'\n(.*?)\nEOF\n/m, 1]
+
+    assert_match(/\[Unit\]\n(?:[^\[\n].*\n)*FailureAction=poweroff\n/, "#{unit}\n")
+    assert_includes File.read(README), "powers the instance off"
+  end
 end
