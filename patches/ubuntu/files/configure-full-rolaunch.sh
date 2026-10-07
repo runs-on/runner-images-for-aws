@@ -57,7 +57,7 @@ FailureAction=poweroff
 [Service]
 Type=oneshot
 TimeoutStartSec=infinity
-ExecStart=/usr/bin/rolaunch --mode=full
+ExecStart=/usr/bin/rolaunch --mode=full --timeout=60s
 RemainAfterExit=yes
 StandardOutput=journal+console
 StandardError=journal+console

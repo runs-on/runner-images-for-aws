@@ -1,0 +1,127 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"reflect"
+	"testing"
+	"time"
+)
+
+func TestReadNetworkLinksReportsKernelAndNetworkdState(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	sysClassNet := filepath.Join(root, "sys", "class", "net")
+	networkdLinks := filepath.Join(root, "run", "systemd", "netif", "links")
+	writeTestFile(t, filepath.Join(sysClassNet, "lo", "ifindex"), "1\n")
+	writeTestFile(t, filepath.Join(sysClassNet, "enp39s0", "ifindex"), "2\n")
+	writeTestFile(t, filepath.Join(sysClassNet, "enp39s0", "operstate"), "down\n")
+	writeTestFile(t, filepath.Join(sysClassNet, "enp39s0", "carrier"), "1\n")
+	driverDir := filepath.Join(root, "sys", "bus", "pci", "drivers", "ena")
+	if err := os.MkdirAll(driverDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(sysClassNet, "enp39s0", "device"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(driverDir, filepath.Join(sysClassNet, "enp39s0", "device", "driver")); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(networkdLinks, "2"), "# This is private data.\nADMIN_STATE=failed\nOPER_STATE=off\n")
+
+	links := readNetworkLinks(sysClassNet, networkdLinks)
+
+	want := []networkLink{{
+		Name:          "enp39s0",
+		Index:         "2",
+		Driver:        "ena",
+		OperState:     "down",
+		Carrier:       "1",
+		NetworkdAdmin: "failed",
+		NetworkdOper:  "off",
+	}}
+	if !reflect.DeepEqual(links, want) {
+		t.Fatalf("unexpected links: got %+v, want %+v", links, want)
+	}
+	if got := describeNetworkLinks(links); got != "enp39s0(ifindex=2 driver=ena operstate=down carrier=1 networkd=failed/off)" {
+		t.Fatalf("unexpected description %q", got)
+	}
+}
+
+func TestReadNetworkLinksWithoutInterfaces(t *testing.T) {
+	t.Parallel()
+
+	links := readNetworkLinks(filepath.Join(t.TempDir(), "missing"), t.TempDir())
+	if len(links) != 0 {
+		t.Fatalf("expected no links, got %+v", links)
+	}
+	if got := describeNetworkLinks(links); got != "no network interfaces" {
+		t.Fatalf("unexpected description %q", got)
+	}
+}
+
+func TestNetworkRecoveryCommand(t *testing.T) {
+	t.Parallel()
+
+	got := networkRecoveryCommand([]networkLink{{Name: "enp39s0"}})
+	if want := []string{"networkctl", "reconfigure", "enp39s0"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected command with links: %v", got)
+	}
+
+	got = networkRecoveryCommand(nil)
+	want := []string{"udevadm", "trigger", "--action=add", "--subsystem-match=pci", "--attr-match=class=0x020000"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected command without links: %v", got)
+	}
+}
+
+func TestNetworkWatchdogLogsAndRecoversOnSchedule(t *testing.T) {
+	t.Parallel()
+
+	reads := 0
+	var commands [][]string
+	watchdog := &networkWatchdog{
+		readLinks: func() []networkLink {
+			reads++
+			return []networkLink{{Name: "enp39s0"}}
+		},
+		runCommand: func(_ context.Context, command []string) error {
+			commands = append(commands, command)
+			return errors.New("ignored")
+		},
+		logEvery:     10 * time.Second,
+		recoverAfter: 15 * time.Second,
+		recoverEvery: 30 * time.Second,
+	}
+
+	start := time.Unix(0, 0)
+	errUnreachable := errors.New("network is unreachable")
+	for elapsed := time.Duration(0); elapsed <= 50*time.Second; elapsed += 50 * time.Millisecond {
+		watchdog.observe(context.Background(), start.Add(elapsed), errUnreachable)
+	}
+
+	// Logs at 10s, 20s, 30s, 40s, 50s; recoveries at 15s and 45s.
+	if reads != 7 {
+		t.Fatalf("expected 7 link reads, got %d", reads)
+	}
+	want := [][]string{
+		{"networkctl", "reconfigure", "enp39s0"},
+		{"networkctl", "reconfigure", "enp39s0"},
+	}
+	if !reflect.DeepEqual(commands, want) {
+		t.Fatalf("unexpected recovery commands: %v", commands)
+	}
+}
+
+func writeTestFile(t *testing.T, path, body string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}

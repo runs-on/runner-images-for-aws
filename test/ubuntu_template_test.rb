@@ -383,7 +383,7 @@ class UbuntuTemplateTest < Minitest::Test
     assert_includes content, "netplan-configure.service"
     assert_match(/systemctl mask .*cloud-init-main\.service/m, content)
     refute_match(/Wants=.*cloud-init/, content)
-    assert_includes content, "ExecStart=/usr/bin/rolaunch --mode=full"
+    assert_includes content, "ExecStart=/usr/bin/rolaunch --mode=full --timeout=60s"
     refute_includes content, "Before=network-online.target"
     assert_includes content, "systemd-networkd-wait-online.service"
     assert_match(/systemctl mask .*systemd-networkd-wait-online\.service/m, content)
