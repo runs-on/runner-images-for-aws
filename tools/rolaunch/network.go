@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -18,6 +20,9 @@ const (
 	defaultNetworkLogInterval  = 10 * time.Second
 	defaultNetworkRecoverAfter = 15 * time.Second
 	defaultNetworkRecoverEvery = 30 * time.Second
+	// Recovery runs inside the readiness loop, so a command stuck on D-Bus early
+	// in boot must not hold up IMDS polling for long.
+	defaultNetworkRecoverTimeout = 5 * time.Second
 	// PCI class code of an Ethernet controller, which is what ENA reports.
 	pciEthernetControllerClass = "0x020000"
 )
@@ -141,8 +146,17 @@ func networkRecoveryCommand(links []networkLink) []string {
 	return command
 }
 
+// isNetworkUnreachable reports whether an IMDS attempt failed because the
+// instance has no route to it, the only failure network recovery can help with.
+// Recovery restarts DHCP, so any other error must leave a working link alone.
+func isNetworkUnreachable(err error) bool {
+	return errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH)
+}
+
 func runNetworkRecoveryCommand(ctx context.Context, command []string) error {
-	output, err := exec.CommandContext(ctx, command[0], command[1:]...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, command[0], command[1:]...)
+	cmd.WaitDelay = time.Second
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("%s: %w: %s", strings.Join(command, " "), err, strings.TrimSpace(string(output)))
 	}
@@ -153,11 +167,12 @@ func runNetworkRecoveryCommand(ctx context.Context, command []string) error {
 // every interface periodically, so a boot that never reaches IMDS shows why,
 // and asks the system to configure the network again when it stays down.
 type networkWatchdog struct {
-	readLinks    func() []networkLink
-	runCommand   func(context.Context, []string) error
-	logEvery     time.Duration
-	recoverAfter time.Duration
-	recoverEvery time.Duration
+	readLinks      func() []networkLink
+	runCommand     func(context.Context, []string) error
+	logEvery       time.Duration
+	recoverAfter   time.Duration
+	recoverEvery   time.Duration
+	recoverTimeout time.Duration
 
 	started     time.Time
 	lastLog     time.Time
@@ -169,10 +184,11 @@ func newNetworkWatchdog() *networkWatchdog {
 		readLinks: func() []networkLink {
 			return readNetworkLinks(defaultSysClassNetPath, defaultNetworkdLinksPath)
 		},
-		runCommand:   runNetworkRecoveryCommand,
-		logEvery:     defaultNetworkLogInterval,
-		recoverAfter: defaultNetworkRecoverAfter,
-		recoverEvery: defaultNetworkRecoverEvery,
+		runCommand:     runNetworkRecoveryCommand,
+		logEvery:       defaultNetworkLogInterval,
+		recoverAfter:   defaultNetworkRecoverAfter,
+		recoverEvery:   defaultNetworkRecoverEvery,
+		recoverTimeout: defaultNetworkRecoverTimeout,
 	}
 }
 
@@ -186,7 +202,8 @@ func (w *networkWatchdog) observe(ctx context.Context, now time.Time, err error)
 
 	waited := now.Sub(w.started)
 	logDue := now.Sub(w.lastLog) >= w.logEvery
-	recoverDue := waited >= w.recoverAfter &&
+	recoverDue := isNetworkUnreachable(err) &&
+		waited >= w.recoverAfter &&
 		(w.lastRecover.IsZero() || now.Sub(w.lastRecover) >= w.recoverEvery)
 	if !logDue && !recoverDue {
 		return
@@ -201,8 +218,10 @@ func (w *networkWatchdog) observe(ctx context.Context, now time.Time, err error)
 		w.lastRecover = now
 		command := networkRecoveryCommand(links)
 		log.Printf("attempting network recovery: %s", strings.Join(command, " "))
-		if err := w.runCommand(ctx, command); err != nil {
+		commandCtx, cancel := context.WithTimeout(ctx, w.recoverTimeout)
+		if err := w.runCommand(commandCtx, command); err != nil {
 			log.Printf("network recovery failed: %v", err)
 		}
+		cancel()
 	}
 }
