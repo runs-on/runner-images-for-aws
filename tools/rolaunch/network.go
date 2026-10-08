@@ -23,6 +23,7 @@ const (
 	// Recovery runs inside the readiness loop, so a command stuck on D-Bus early
 	// in boot must not hold up IMDS polling for long.
 	defaultNetworkRecoverTimeout = 5 * time.Second
+	networkRecoverReserve        = time.Second
 	// PCI class code of an Ethernet controller, which is what ENA reports.
 	pciEthernetControllerClass = "0x020000"
 )
@@ -128,22 +129,33 @@ func describeNetworkLinks(links []networkLink) string {
 	return strings.Join(parts, ", ")
 }
 
-// networkRecoveryCommand picks how to nudge a boot that has no route to IMDS.
-// With interfaces present, networkd is asked to configure them again, which
-// recovers a link it gave up on. Without any, the Ethernet PCI devices are
-// re-announced so udev loads the driver and creates the interface.
-func networkRecoveryCommand(links []networkLink) []string {
+// networkRecoveryCommands picks how to nudge a boot that has no route to IMDS.
+// networkd only configures a link once udev has announced it, and reconfigure
+// is a no-op until then, so links networkd has not taken up yet get their udev
+// add event replayed instead. Links it did take up are configured again, which
+// recovers one it gave up on. Without any interface, the Ethernet PCI devices
+// are re-announced so udev loads the driver and creates the interface.
+func networkRecoveryCommands(links []networkLink) [][]string {
 	if len(links) == 0 {
-		return []string{
+		return [][]string{{
 			"udevadm", "trigger", "--action=add",
 			"--subsystem-match=pci", "--attr-match=class=" + pciEthernetControllerClass,
+		}}
+	}
+	var commands [][]string
+	reconfigure := []string{"networkctl", "reconfigure"}
+	for _, link := range links {
+		switch link.NetworkdAdmin {
+		case "", "pending", "initialized":
+			commands = append(commands, []string{"udevadm", "trigger", "--action=add", "/sys/class/net/" + link.Name})
+		default:
+			reconfigure = append(reconfigure, link.Name)
 		}
 	}
-	command := []string{"networkctl", "reconfigure"}
-	for _, link := range links {
-		command = append(command, link.Name)
+	if len(reconfigure) > 2 {
+		commands = append(commands, reconfigure)
 	}
-	return command
+	return commands
 }
 
 // isNetworkUnreachable reports whether an IMDS attempt failed because the
@@ -216,12 +228,19 @@ func (w *networkWatchdog) observe(ctx context.Context, now time.Time, err error)
 	}
 	if recoverDue {
 		w.lastRecover = now
-		command := networkRecoveryCommand(links)
-		log.Printf("attempting network recovery: %s", strings.Join(command, " "))
-		commandCtx, cancel := context.WithTimeout(ctx, w.recoverTimeout)
-		if err := w.runCommand(commandCtx, command); err != nil {
-			log.Printf("network recovery failed: %v", err)
+		for _, command := range networkRecoveryCommands(links) {
+			// Leave the readiness loop time to try IMDS again over a link the
+			// command may just have restored.
+			if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < w.recoverTimeout+networkRecoverReserve {
+				log.Printf("skipping network recovery, too close to the readiness deadline: %s", strings.Join(command, " "))
+				continue
+			}
+			log.Printf("attempting network recovery: %s", strings.Join(command, " "))
+			commandCtx, cancel := context.WithTimeout(ctx, w.recoverTimeout)
+			if err := w.runCommand(commandCtx, command); err != nil {
+				log.Printf("network recovery failed: %v", err)
+			}
+			cancel()
 		}
-		cancel()
 	}
 }

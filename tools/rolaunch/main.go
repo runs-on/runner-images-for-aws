@@ -36,6 +36,7 @@ const (
 	defaultRunnerUser         = "runner"
 	defaultReadinessTimeout   = 3 * time.Minute
 	defaultReadinessInterval  = 50 * time.Millisecond
+	defaultRootResizeTimeout  = 3 * time.Minute
 	enableRunnerWarmup        = false
 )
 
@@ -592,10 +593,14 @@ func resolverConfigHasEC2Resolver(raw []byte) bool {
 	return false
 }
 
+// The resize gets its own budget instead of the readiness deadline, which can
+// be short enough (--timeout) to kill growpart or resize2fs on a slow volume.
 func startRootFilesystemResize(ctx context.Context) <-chan rootResizeResult {
 	done := make(chan rootResizeResult, 1)
 	go func() {
-		changed, err := maybeResizeRootFilesystem(ctx)
+		resizeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), defaultRootResizeTimeout)
+		defer cancel()
+		changed, err := maybeResizeRootFilesystem(resizeCtx)
 		done <- rootResizeResult{changed: changed, err: err}
 		close(done)
 	}()

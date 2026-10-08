@@ -70,18 +70,36 @@ func TestReadNetworkLinksWithoutInterfaces(t *testing.T) {
 	}
 }
 
-func TestNetworkRecoveryCommand(t *testing.T) {
+func TestNetworkRecoveryCommands(t *testing.T) {
 	t.Parallel()
 
-	got := networkRecoveryCommand([]networkLink{{Name: "enp39s0"}})
-	if want := []string{"networkctl", "reconfigure", "enp39s0"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("unexpected command with links: %v", got)
+	got := networkRecoveryCommands([]networkLink{
+		{Name: "enp39s0", NetworkdAdmin: "failed"},
+		{Name: "enp40s0", NetworkdAdmin: "configured"},
+	})
+	want := [][]string{{"networkctl", "reconfigure", "enp39s0", "enp40s0"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected commands for links networkd manages: %v", got)
 	}
 
-	got = networkRecoveryCommand(nil)
-	want := []string{"udevadm", "trigger", "--action=add", "--subsystem-match=pci", "--attr-match=class=0x020000"}
+	got = networkRecoveryCommands([]networkLink{
+		{Name: "enp39s0", NetworkdAdmin: "pending"},
+		{Name: "enp40s0", NetworkdAdmin: "configuring"},
+		{Name: "enp41s0"},
+	})
+	want = [][]string{
+		{"udevadm", "trigger", "--action=add", "/sys/class/net/enp39s0"},
+		{"udevadm", "trigger", "--action=add", "/sys/class/net/enp41s0"},
+		{"networkctl", "reconfigure", "enp40s0"},
+	}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("unexpected command without links: %v", got)
+		t.Fatalf("unexpected commands for links udev has not announced: %v", got)
+	}
+
+	got = networkRecoveryCommands(nil)
+	want = [][]string{{"udevadm", "trigger", "--action=add", "--subsystem-match=pci", "--attr-match=class=0x020000"}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("unexpected commands without links: %v", got)
 	}
 }
 
@@ -93,15 +111,19 @@ func TestNetworkWatchdogLogsAndRecoversOnSchedule(t *testing.T) {
 	watchdog := &networkWatchdog{
 		readLinks: func() []networkLink {
 			reads++
-			return []networkLink{{Name: "enp39s0"}}
+			return []networkLink{{Name: "enp39s0", NetworkdAdmin: "configured"}}
 		},
-		runCommand: func(_ context.Context, command []string) error {
+		runCommand: func(ctx context.Context, command []string) error {
+			if ctx.Err() != nil {
+				t.Errorf("recovery command started with a dead context: %v", ctx.Err())
+			}
 			commands = append(commands, command)
 			return errors.New("ignored")
 		},
-		logEvery:     10 * time.Second,
-		recoverAfter: 15 * time.Second,
-		recoverEvery: 30 * time.Second,
+		logEvery:       10 * time.Second,
+		recoverAfter:   15 * time.Second,
+		recoverEvery:   30 * time.Second,
+		recoverTimeout: 5 * time.Second,
 	}
 
 	start := time.Unix(0, 0)
@@ -147,10 +169,17 @@ func TestNetworkWatchdogLeavesLinksAloneOnOtherIMDSErrors(t *testing.T) {
 func TestNetworkWatchdogBoundsAStuckRecoveryCommand(t *testing.T) {
 	t.Parallel()
 
+	ran := false
+	var commandErr error
 	watchdog := &networkWatchdog{
-		readLinks: func() []networkLink { return []networkLink{{Name: "enp39s0"}} },
+		readLinks: func() []networkLink { return []networkLink{{Name: "enp39s0", NetworkdAdmin: "failed"}} },
 		runCommand: func(ctx context.Context, _ []string) error {
-			return runNetworkRecoveryCommand(ctx, []string{"sleep", "30"})
+			ran = true
+			if ctx.Err() != nil {
+				t.Errorf("recovery command started with a dead context: %v", ctx.Err())
+			}
+			commandErr = runNetworkRecoveryCommand(ctx, []string{"sleep", "30"})
+			return commandErr
 		},
 		logEvery:       time.Hour,
 		recoverAfter:   time.Second,
@@ -163,9 +192,40 @@ func TestNetworkWatchdogBoundsAStuckRecoveryCommand(t *testing.T) {
 	watchdog.observe(context.Background(), start, errUnreachable)
 	began := time.Now()
 	watchdog.observe(context.Background(), start.Add(2*time.Second), errUnreachable)
-	if elapsed := time.Since(began); elapsed > 3*time.Second {
+	elapsed := time.Since(began)
+
+	if !ran {
+		t.Fatal("recovery did not run")
+	}
+	if commandErr == nil {
+		t.Fatal("stuck recovery command was not stopped")
+	}
+	if elapsed > 3*time.Second {
 		t.Fatalf("stuck recovery command held the readiness loop for %s", elapsed)
 	}
+}
+
+func TestNetworkWatchdogSkipsRecoveryNearTheDeadline(t *testing.T) {
+	t.Parallel()
+
+	watchdog := &networkWatchdog{
+		readLinks: func() []networkLink { return []networkLink{{Name: "enp39s0", NetworkdAdmin: "failed"}} },
+		runCommand: func(context.Context, []string) error {
+			t.Fatal("recovery must leave time for another IMDS attempt")
+			return nil
+		},
+		logEvery:       time.Hour,
+		recoverAfter:   time.Second,
+		recoverEvery:   time.Hour,
+		recoverTimeout: 5 * time.Second,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	start := time.Unix(0, 0)
+	errUnreachable := fmt.Errorf("dial: %w", syscall.ENETUNREACH)
+	watchdog.observe(ctx, start, errUnreachable)
+	watchdog.observe(ctx, start.Add(2*time.Second), errUnreachable)
 }
 
 // The SDK must keep the dial errno reachable through its error wrapping, or
