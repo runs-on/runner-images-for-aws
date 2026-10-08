@@ -213,3 +213,17 @@ jobs:
         shell: pwsh
         run: |
           systeminfo
+
+  journal-access-ubuntu24-full-x64:
+    name: runner reads the volatile journal on ubuntu24-full-x64
+    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-full-x64
+    steps:
+      - name: Read the journal as the runner user
+        run: |
+          set -euo pipefail
+          id
+          ls -la /run/log/journal/*/ || true
+          id -nG | tr ' ' '\n' | grep -qx systemd-journal
+          logger -t runs-on-journal-check "hello from $(id -un)"
+          sleep 1
+          journalctl -t runs-on-journal-check --no-pager | grep -q "hello from runner"
