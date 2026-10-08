@@ -70,6 +70,9 @@ else
 fi
 
 usermod -aG sudo runner
+# The journal is volatile, so journald keeps no per-user files the runner could
+# read; grant the journal groups instead, as on GitHub-hosted runners.
+usermod -aG adm,systemd-journal runner
 grep -qxF '%sudo   ALL=(ALL:ALL) NOPASSWD:ALL' /etc/sudoers || echo '%sudo   ALL=(ALL:ALL) NOPASSWD:ALL' >> /etc/sudoers
 grep -qxF 'Defaults env_keep += "DEBIAN_FRONTEND"' /etc/sudoers || echo 'Defaults env_keep += "DEBIAN_FRONTEND"' >> /etc/sudoers
 

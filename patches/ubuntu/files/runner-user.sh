@@ -57,6 +57,10 @@ echo 'server 169.254.169.123 prefer iburst minpoll 4 maxpoll 4' >  /etc/chrony/c
 # persistent journal on the root volume.
 echo "Storage=volatile" >> /etc/systemd/journald.conf
 echo "RuntimeMaxUse=64M" >> /etc/systemd/journald.conf
+# A volatile journal has no per-user files (journald only splits by UID on
+# persistent storage), so the runner reads /run/log/journal through the
+# journal groups, as on GitHub-hosted runners.
+usermod -aG adm,systemd-journal runner
 
 apt-get purge plymouth update-notifier-common multipath-tools -y
 

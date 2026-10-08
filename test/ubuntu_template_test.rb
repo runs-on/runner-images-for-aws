@@ -77,6 +77,12 @@ class UbuntuTemplateTest < Minitest::Test
     assert_includes File.read(AFTER_REBOOT_SCRIPT), "find /var/log/journal -mindepth 1 -delete"
   end
 
+  def test_runner_can_read_the_volatile_journal
+    assert_includes File.read(RUNNER_USER_SCRIPT), "usermod -aG adm,systemd-journal runner"
+    assert_includes File.read(File.expand_path("../patches/ubuntu/files/runner-finalize-common.sh", __dir__)),
+      "usermod -aG adm,systemd-journal runner"
+  end
+
   def test_full_images_configure_official_cdn_apt_mirrors
     content = File.read(PRE_SCRIPT)
 
