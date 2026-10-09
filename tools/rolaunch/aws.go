@@ -76,6 +76,7 @@ func (s *awsState) waitForReadinessAndFetchIdentity(ctx context.Context, cfg con
 	ticker := time.NewTicker(defaultReadinessInterval)
 	defer ticker.Stop()
 	loggedWaiting := false
+	watchdog := newNetworkWatchdog()
 
 	for {
 		if ctx.Err() != nil {
@@ -90,6 +91,7 @@ func (s *awsState) waitForReadinessAndFetchIdentity(ctx context.Context, cfg con
 			log.Printf("waiting for IMDS instance identity availability: %v", err)
 			loggedWaiting = true
 		}
+		watchdog.observe(ctx, time.Now(), err)
 
 		select {
 		case <-ctx.Done():
