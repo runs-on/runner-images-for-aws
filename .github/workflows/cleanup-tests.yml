@@ -1,0 +1,33 @@
+name: AMI cleanup tests
+on:
+  pull_request:
+    paths:
+      - 'bin/utils/cleanup-amis'
+      - 'bin/copy-ami'
+      - 'lib/ami_*.rb'
+      - 'test/ami_*_test.rb'
+      - 'test/copy_ami_test.rb'
+      - 'cloudformation/ami-recycle-bin.yml'
+      - '.github/workflows/cleanup*.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'bin/utils/cleanup-amis'
+      - 'bin/copy-ami'
+      - 'lib/ami_*.rb'
+      - 'test/ami_*_test.rb'
+      - 'test/copy_ami_test.rb'
+      - 'cloudformation/ami-recycle-bin.yml'
+      - '.github/workflows/cleanup*.yml'
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af # v1
+        with:
+          ruby-version: 3.2.2
+          bundler-cache: true
+      - run: bundle exec ruby -Itest -e 'Dir["test/ami_*_test.rb", "test/copy_ami_test.rb"].sort.each { |file| require_relative file }'

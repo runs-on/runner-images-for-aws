@@ -133,3 +133,65 @@ Amazon Inspector EC2 scanning must be enabled in `us-east-1` for the account. Re
 AMI scanning is opt-in from `config.yml`. Add `inspect: true` to an image entry to scan the latest dev and prod AMIs matching `runs-on-dev-<image_id>-*` and `runs-on-v2.2-<image_id>-*`. Missing `inspect` defaults to `false`. The `inspector_scan` AMI tag is scanner-owned state; do not manage it from Packer templates or `bin/copy-ami`.
 
 The stack template lives in [cloudformation/inspector-ami-scanner.yml](cloudformation/inspector-ami-scanner.yml).
+
+## AMI cleanup
+
+The daily cleanup checks every publication region in `config.yml` for both image
+prefixes. `--region REGION` limits a manual run to one region, including regions
+outside that list. Only AMIs owned by the authenticated account are considered.
+
+- Production: keep the latest available public image in each family. Retire each
+  predecessor ten days after its immediate available public successor was
+  published in that region. Several releases within ten days can remain together.
+- Development: delete every development image created more than seven days ago,
+  including the newest or only version. This also covers copies outside us-east-1
+  in the configured regions. Build preparation uses the same seven-day policy.
+
+Publication writes the `runs-on:published-at` AMI tag after verifying that the
+regional image is available and public. Reruns preserve it. Existing untagged
+public images start their clock when cleanup first observes them; their creation
+date cannot establish when publication completed. The initial apply therefore
+records timestamps and grants existing predecessors a full ten-day window.
+
+Preview both plans before applying:
+
+```sh
+bundle exec bin/utils/cleanup-amis --prod --dry-run --json /tmp/prod-cleanup.json
+bundle exec bin/utils/cleanup-amis --dry-run --json /tmp/dev-cleanup.json
+```
+
+Dry-run never changes AWS resources, even with `--force`. It lists candidates,
+retention reasons, timestamp initialization, and missing recovery protection.
+Without `--dry-run`, the command prompts before applying; `--force` skips the
+prompt. It verifies the entire plan before any deletion. `AMI_PREFIX` can narrow
+the configured production or development prefix, as build preparation does.
+The former `--all` bypass is removed.
+
+### Seven-day recovery
+
+Before enabling deletions, deploy the two Recycle Bin rules in each configured
+region using the intended AWS account:
+
+```sh
+make ami-recycle-bin-deploy
+```
+
+The CloudFormation template `cloudformation/ami-recycle-bin.yml` protects AMIs
+and snapshots tagged `creator=RunsOn`. Wait until the rules are `available`.
+Cleanup refuses deletion when either the AMI or any backing snapshot lacks an
+available seven-day rule. A dry-run reports missing protection without applying
+anything. It never creates rules automatically.
+
+The deployment identity needs CloudFormation deployment permissions and Recycle
+Bin rule management permissions (`rbin:CreateRule`, `rbin:GetRule`,
+`rbin:UpdateRule`, `rbin:DeleteRule`, and tagging permissions). The cleanup identity
+needs `rbin:ListRules`, `rbin:GetRule`, `ec2:DescribeImages`,
+`ec2:DescribeSnapshots`, `ec2:CreateTags`, `ec2:DeregisterImage`, and
+`ec2:DeleteSnapshot`. The AWS CLI must be installed alongside the Ruby bundle.
+
+Snapshots continue to incur storage charges during recovery retention. Restore
+snapshots first, then the AMI, before the seven days expire. An AMI in Recycle Bin
+cannot launch new instances. A restored old image still meets the cleanup age
+policy, so pause automated cleanup before recovering it for extended use.
+
+Old production prefixes and standalone orphan snapshots are outside this policy.
