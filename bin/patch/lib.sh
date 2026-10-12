@@ -149,7 +149,6 @@ patch_ubuntu() {
   yq -oj -i 'eval(.clang | .versions |= [.[-1]])' $TOOLSET_PATH
   yq -oj -i 'eval(.clang | .default_version |= (parent | .versions[-1]))' $TOOLSET_PATH
   # only keep latest dotnet version
-  yq -oj -i 'eval(.dotnet | .aptPackages |= [.[-1]])' $TOOLSET_PATH
   yq -oj -i 'eval(.dotnet | .versions |= [.[-1]])' $TOOLSET_PATH
   # remove PSScriptAnalyzer
   yq -oj -i 'eval(del(.powershellModules[] | select(.name == "PSScriptAnalyzer")))' $TOOLSET_PATH
