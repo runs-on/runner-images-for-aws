@@ -14,6 +14,7 @@ class UbuntuTemplateTest < Minitest::Test
   STEPSECURITY_ARM64_TEMPLATE = File.join(TEMPLATE_DIR, "ubuntu-stepsecurity-arm64.pkr.hcl")
   DESCENDANT_TEMPLATES = [GPU_X64_TEMPLATE, STEPSECURITY_X64_TEMPLATE, STEPSECURITY_ARM64_TEMPLATE].freeze
   FULL_ROLAUNCH_SCRIPT = File.expand_path("../patches/ubuntu/files/configure-full-rolaunch.sh", __dir__)
+  SYN_REROLL_SCRIPT = File.expand_path("../patches/ubuntu/files/configure-syn-reroll.sh", __dir__)
   ENVIRONMENT_FINALIZER = File.expand_path("../patches/ubuntu/files/finalize-runner-environment.sh", __dir__)
   DESCENDANT_ROLAUNCH_SCRIPT = File.expand_path("../patches/ubuntu/files/finalize-rolaunch-descendant.sh", __dir__)
   GPU_INSTALL_SCRIPT = File.expand_path("../patches/ubuntu/build/install-gpu.sh", __dir__)
@@ -343,6 +344,21 @@ class UbuntuTemplateTest < Minitest::Test
       assert_includes template, "ROLAUNCH_SOURCE=${var.installer_script_folder}/rolaunch", path
       refute_includes template, "${var.installer_script_folder}/build/rolaunch", path
     end
+  end
+
+  def test_ubuntu26_full_x64_reroll_loads_before_rolaunch_and_is_flushed_not_deleted
+    template = File.read(FULL_X64_TEMPLATE)
+    script = File.read(SYN_REROLL_SCRIPT)
+
+    assert_operator template.index("configure-syn-reroll.sh"), :<, template.index("configure-full-rolaunch.sh")
+    assert_match(/if \[\[ "\$\{IMAGE_OS\}" != "ubuntu26" \]\]; then.*?exit 0/m, script)
+    assert_includes script, "Before=network-pre.target rolaunch.service"
+    # Deleting the last nat chain unregisters the hook that NATs open connections.
+    assert_includes script, "nft flush chain ip ro_syn post"
+    refute_match(/nft (delete|destroy) table/, script)
+    # runner-user.sh disables timers.target, so the stop timer hangs off multi-user.target.
+    assert_includes File.read(RUNNER_USER_SCRIPT), "systemctl disable timers.target"
+    assert_match(/OnBootSec=120\n.*\n\n.*\n\[Install\]\nWantedBy=multi-user\.target/, script)
   end
 
   def test_full_rolaunch_activation_is_limited_to_ubuntu26
