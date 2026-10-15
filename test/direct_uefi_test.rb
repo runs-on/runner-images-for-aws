@@ -150,9 +150,13 @@ class DirectUefiTest < Minitest::Test
   end
 
   def test_direct_cmdline_requires_portable_root_and_panic_reboot
-    valid = "root=PARTUUID=abc ro console=ttyS0 panic=-1"
+    valid = "root=PARTUUID=abc ro console=ttyS0 panic=-1 i8042.nokbd i8042.noaux i8042.nopnp"
     _stdout, stderr, status = run_function("validate_direct_cmdline #{Shellwords.escape(valid)}")
     assert status.success?, stderr
+
+    _stdout, stderr, status = run_function("validate_direct_cmdline 'root=PARTUUID=abc ro panic=-1 i8042.nokbd i8042.noaux'")
+    refute status.success?
+    assert_includes stderr, "still probes PS/2 devices: no i8042.nopnp"
 
     _stdout, stderr, status = run_function("validate_direct_cmdline 'root=LABEL=cloudimg-rootfs panic=-1'")
     refute status.success?
@@ -242,6 +246,7 @@ class DirectUefiTest < Minitest::Test
     assert_includes workflow, "expected-cmdline"
     assert_includes workflow, "root=PARTUUID="
     assert_includes workflow, "panic=-1"
+    assert_includes workflow, "i8042.nokbd i8042.noaux i8042.nopnp"
     assert_includes workflow, "direct-kernel.sha256"
     assert_includes workflow, "kernel-source-format"
     assert_includes workflow, 'test "$kernel_format" = raw'
