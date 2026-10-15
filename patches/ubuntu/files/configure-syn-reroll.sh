@@ -3,8 +3,11 @@
 set -euo pipefail
 
 IMAGE_OS="${IMAGE_OS:-}"
+# Minimal images install into the target root their build mounts, full
+# images into the builder itself. Full images get it from Ubuntu 26 on.
+root="${TARGET_ROOT_MOUNT:-/}"
 
-if [[ "${IMAGE_OS}" != "ubuntu26" ]]; then
+if [[ "${root}" == "/" && "${IMAGE_OS}" != "ubuntu26" ]]; then
   echo "[configure-syn-reroll] skipped for ${IMAGE_OS}"
   exit 0
 fi
@@ -27,15 +30,25 @@ fi
 # opened before keep their NAT binding, and deleting the last nat chain would
 # unregister the hook that applies it.
 
-echo "[configure-syn-reroll] installing the early-boot SYN re-roll for GitHub and AWS"
+echo "[configure-syn-reroll] installing the early-boot SYN re-roll for GitHub and AWS into ${root}"
 
-if ! command -v nft >/dev/null; then
-  apt-get update
-  DEBIAN_FRONTEND=noninteractive apt-get install -y nftables
+in_root() {
+  if [[ "${root}" == "/" ]]; then
+    "$@"
+  else
+    chroot "${root}" /usr/bin/env DEBIAN_FRONTEND=noninteractive "$@"
+  fi
+}
+
+if ! in_root sh -c 'command -v nft' >/dev/null; then
+  in_root apt-get update
+  in_root env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends nftables
 fi
-systemctl disable nftables.service 2>/dev/null || true
+systemctl --root="${root}" disable nftables.service 2>/dev/null || true
 
-install -d -m 0755 /etc/runs-on
+# The address set is generated here, on the build host: minimal targets have
+# no python3.
+install -d -m 0755 "${root}/etc/runs-on"
 fetch() {
   curl -fsSL --retry 5 --retry-all-errors --max-time 60 "$1"
 }
@@ -45,7 +58,7 @@ fetch https://api.github.com/meta > "${github_meta}"
 fetch https://ip-ranges.amazonaws.com/ip-ranges.json > "${aws_ranges}"
 
 # Addresses published at build time. A newer address is simply not re-rolled.
-python3 - "${github_meta}" "${aws_ranges}" > /etc/runs-on/syn-reroll.nft <<'PY'
+python3 - "${github_meta}" "${aws_ranges}" > "${root}/etc/runs-on/syn-reroll.nft" <<'PY'
 import ipaddress, json, sys
 from datetime import datetime, timezone
 
@@ -83,10 +96,11 @@ print("  }")
 print("}")
 PY
 rm -f "${github_meta}" "${aws_ranges}"
-nft -c -f /etc/runs-on/syn-reroll.nft
-head -3 /etc/runs-on/syn-reroll.nft
+in_root nft -c -f /etc/runs-on/syn-reroll.nft
+head -3 "${root}/etc/runs-on/syn-reroll.nft"
 
-cat > /etc/systemd/system/runs-on-syn-reroll.service <<'EOF'
+# The sysctls are written to /proc/sys: minimal targets may not have procps.
+cat > "${root}/etc/systemd/system/runs-on-syn-reroll.service" <<'EOF'
 [Unit]
 Description=Retry stalled SYNs to GitHub and AWS on a new source port during early boot
 DefaultDependencies=no
@@ -100,13 +114,13 @@ RemainAfterExit=yes
 ExecStart=/usr/sbin/nft -f /etc/runs-on/syn-reroll.nft
 # Conntrack marks some packets of fast transfers out of window. Those skip
 # NAT and draw a reset, so let conntrack accept them for NAT'd connections.
-ExecStartPost=/usr/sbin/sysctl -q -w net.ipv4.tcp_syn_linear_timeouts=10 net.netfilter.nf_conntrack_tcp_be_liberal=1
+ExecStartPost=/bin/sh -c 'echo 10 > /proc/sys/net/ipv4/tcp_syn_linear_timeouts && echo 1 > /proc/sys/net/netfilter/nf_conntrack_tcp_be_liberal'
 
 [Install]
 WantedBy=sysinit.target
 EOF
 
-cat > /etc/systemd/system/runs-on-syn-reroll-stop.service <<'EOF'
+cat > "${root}/etc/systemd/system/runs-on-syn-reroll-stop.service" <<'EOF'
 [Unit]
 Description=Stop retrying stalled SYNs on a new source port
 After=runs-on-syn-reroll.service
@@ -114,10 +128,10 @@ After=runs-on-syn-reroll.service
 [Service]
 Type=oneshot
 ExecStart=/usr/sbin/nft flush chain ip ro_syn post
-ExecStartPost=/usr/sbin/sysctl -q -w net.ipv4.tcp_syn_linear_timeouts=4
+ExecStartPost=/bin/sh -c 'echo 4 > /proc/sys/net/ipv4/tcp_syn_linear_timeouts'
 EOF
 
-cat > /etc/systemd/system/runs-on-syn-reroll-stop.timer <<'EOF'
+cat > "${root}/etc/systemd/system/runs-on-syn-reroll-stop.timer" <<'EOF'
 [Unit]
 Description=Stop retrying stalled SYNs on a new source port two minutes after boot
 
@@ -125,11 +139,16 @@ Description=Stop retrying stalled SYNs on a new source port two minutes after bo
 OnBootSec=120
 AccuracySec=1s
 
-# runner-user.sh disables timers.target: start with the runner's target.
+# runner-user.sh and runner-finalize-units.sh disable timers.target: start
+# with the runner's target.
 [Install]
 WantedBy=multi-user.target
 EOF
 
-systemctl daemon-reload
-systemctl enable runs-on-syn-reroll.service runs-on-syn-reroll-stop.timer
-systemd-analyze verify runs-on-syn-reroll.service runs-on-syn-reroll-stop.service runs-on-syn-reroll-stop.timer
+if [[ "${root}" == "/" ]]; then
+  systemctl daemon-reload
+  systemctl enable runs-on-syn-reroll.service runs-on-syn-reroll-stop.timer
+  systemd-analyze verify runs-on-syn-reroll.service runs-on-syn-reroll-stop.service runs-on-syn-reroll-stop.timer
+else
+  systemctl --root="${root}" enable runs-on-syn-reroll.service runs-on-syn-reroll-stop.timer
+fi

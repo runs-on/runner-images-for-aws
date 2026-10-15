@@ -332,6 +332,15 @@ build {
 
   provisioner "shell" {
     environment_vars = [
+      "IMAGE_OS=${var.image_os}",
+      "TARGET_ROOT_MOUNT=/mnt/minimal-root"
+    ]
+    execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    script          = "${path.root}/../custom/files/configure-syn-reroll.sh"
+  }
+
+  provisioner "shell" {
+    environment_vars = [
       "IMAGE_FOLDER=${var.image_folder}",
       "DEBIAN_FRONTEND=noninteractive",
       "TARGET_ROOT_MOUNT=/mnt/minimal-root"

@@ -346,19 +346,45 @@ class UbuntuTemplateTest < Minitest::Test
     end
   end
 
-  def test_ubuntu26_full_x64_reroll_loads_before_rolaunch_and_is_flushed_not_deleted
-    template = File.read(FULL_X64_TEMPLATE)
+  def test_reroll_loads_before_rolaunch_and_is_flushed_not_deleted
     script = File.read(SYN_REROLL_SCRIPT)
 
-    assert_operator template.index("configure-syn-reroll.sh"), :<, template.index("configure-full-rolaunch.sh")
-    assert_match(/if \[\[ "\$\{IMAGE_OS\}" != "ubuntu26" \]\]; then.*?exit 0/m, script)
+    [FULL_X64_TEMPLATE, FULL_ARM64_TEMPLATE].each do |path|
+      template = File.read(path)
+      assert_operator template.index("configure-syn-reroll.sh"), :<, template.index("configure-full-rolaunch.sh"), path
+    end
+    # Full images build in place and get it from Ubuntu 26 on; minimal images
+    # pass the root they build into.
+    assert_match(/if \[\[ "\$\{root\}" == "\/" && "\$\{IMAGE_OS\}" != "ubuntu26" \]\]; then.*?exit 0/m, script)
     assert_includes script, "Before=network-pre.target rolaunch.service"
     # Deleting the last nat chain unregisters the hook that NATs open connections.
     assert_includes script, "nft flush chain ip ro_syn post"
     refute_match(/nft (delete|destroy) table/, script)
-    # runner-user.sh disables timers.target, so the stop timer hangs off multi-user.target.
+    # runner-user.sh and runner-finalize-units.sh disable timers.target, so the
+    # stop timer hangs off multi-user.target.
     assert_includes File.read(RUNNER_USER_SCRIPT), "systemctl disable timers.target"
-    assert_match(/OnBootSec=120\n.*\n\n.*\n\[Install\]\nWantedBy=multi-user\.target/, script)
+    assert_includes File.read(File.expand_path("../patches/ubuntu/files/runner-finalize-units.sh", __dir__)),
+      "disable_target_units timers.target"
+    assert_match(/OnBootSec=120\nAccuracySec=1s\n\n(?:#.*\n)+\[Install\]\nWantedBy=multi-user\.target/, script)
+  end
+
+  def test_minimal_installs_the_reroll_into_its_target_before_the_unit_allowlist
+    script = File.read(SYN_REROLL_SCRIPT)
+
+    %w[ubuntu24-minimal-x64 ubuntu24-minimal-arm64].each do |name|
+      template = File.read(File.join(TEMPLATE_DIR, "#{name}.pkr.hcl"))
+      step = template[/provisioner "shell" \{(?:(?!provisioner).)*configure-syn-reroll\.sh"\s*\}/m]
+      refute_nil step, name
+      assert_includes step, '"TARGET_ROOT_MOUNT=/mnt/minimal-root"', name
+      assert_includes step, '"IMAGE_OS=${var.image_os}"', name
+      assert_operator template.index("minimal-install-target-docker.sh"), :<, template.index("configure-syn-reroll.sh"), name
+      assert_operator template.index("configure-syn-reroll.sh"), :<, template.index("runner-finalize-units.sh"), name
+    end
+    # The minimal target has no python3 or procps: the set is generated on the
+    # build host and the sysctls are written to /proc/sys.
+    assert_includes script, 'in_root nft -c -f /etc/runs-on/syn-reroll.nft'
+    refute_includes script, "sysctl -w"
+    assert_includes script, 'systemctl --root="${root}" enable runs-on-syn-reroll.service runs-on-syn-reroll-stop.timer'
   end
 
   def test_full_rolaunch_activation_is_limited_to_ubuntu26

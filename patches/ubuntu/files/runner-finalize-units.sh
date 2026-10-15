@@ -72,6 +72,8 @@ variant_allowlist_units() {
         docker.socket \
         remote-fs.target \
         rolaunch.service \
+        runs-on-syn-reroll.service \
+        runs-on-syn-reroll-stop.timer \
         serial-getty@ttyS0.service
       ;;
   esac
