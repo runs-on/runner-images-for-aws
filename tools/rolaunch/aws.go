@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 
 	aws "github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/retry"
+	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/feature/ec2/imds"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -342,7 +344,12 @@ func (s *awsState) s3ClientFor(ctx context.Context, cfg config, region string) (
 		return retry.AddWithMaxAttempts(retry.NewStandard(), 1)
 	}
 
-	client := s3.NewFromConfig(awsCfg)
+	resolver := newQuickRetryResolver(dnsQueryTimeout, upstreamNameservers(resolvedUpstreamConfig))
+	client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
+		o.HTTPClient = awshttp.NewBuildableClient().WithDialerOptions(func(d *net.Dialer) {
+			d.Resolver = resolver
+		})
+	})
 	s.mu.Lock()
 	s.s3Clients[region] = client
 	s.mu.Unlock()
