@@ -74,7 +74,8 @@ variant_allowlist_units() {
         rolaunch.service \
         runs-on-syn-reroll.service \
         runs-on-syn-reroll-stop.timer \
-        serial-getty@ttyS0.service
+        serial-getty@ttyS0.service \
+        systemd-networkd.service
       ;;
   esac
 }

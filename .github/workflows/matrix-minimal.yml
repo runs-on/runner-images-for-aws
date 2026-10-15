@@ -11,6 +11,14 @@ on:
         type: boolean
         description: ubuntu24-minimal-arm64
         default: true
+      ubuntu26_minimal_x64:
+        type: boolean
+        description: ubuntu26-minimal-x64
+        default: true
+      ubuntu26_minimal_arm64:
+        type: boolean
+        description: ubuntu26-minimal-arm64
+        default: true
   schedule:
     # Staggered after matrix-linux (08:00 same days) to spread build load.
     - cron: '0 10 2,17 * *'
@@ -26,10 +34,14 @@ jobs:
         env:
           UBUNTU24_MINIMAL_X64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu24_minimal_x64 }}
           UBUNTU24_MINIMAL_ARM64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu24_minimal_arm64 }}
+          UBUNTU26_MINIMAL_X64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu26_minimal_x64 }}
+          UBUNTU26_MINIMAL_ARM64: ${{ github.event_name != 'workflow_dispatch' || inputs.ubuntu26_minimal_arm64 }}
         run: |
           images=()
           [ "$UBUNTU24_MINIMAL_X64" = "true" ] && images+=("ubuntu24-minimal-x64")
           [ "$UBUNTU24_MINIMAL_ARM64" = "true" ] && images+=("ubuntu24-minimal-arm64")
+          [ "$UBUNTU26_MINIMAL_X64" = "true" ] && images+=("ubuntu26-minimal-x64")
+          [ "$UBUNTU26_MINIMAL_ARM64" = "true" ] && images+=("ubuntu26-minimal-arm64")
           if [ "${#images[@]}" -eq 0 ]; then
             echo "No images selected" >&2
             exit 1
@@ -42,7 +54,7 @@ jobs:
     secrets: inherit
     with:
       release_prefix: minimal
-      ami_cleanup_prefix: runs-on-dev-ubuntu24-minimal
+      ami_cleanup_prefix: runs-on-dev-ubuntu*-minimal
 
   build-test-release:
     name: Build/Test/Release ${{ matrix.image_id }}

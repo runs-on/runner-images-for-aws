@@ -7,13 +7,14 @@ export DEBIAN_FRONTEND=noninteractive
 TARGET_VOLUME_SIZE_GB="${TARGET_VOLUME_SIZE_GB:-2}"
 TARGET_ARCH="${TARGET_ARCH:-amd64}"
 UBUNTU_RELEASE="${UBUNTU_RELEASE:-noble}"
+MINIMAL_HOSTNAME="${IMAGE_OS:-ubuntu24}-minimal"
 UBUNTU_MIRROR="${UBUNTU_MIRROR:-http://archive.ubuntu.com/ubuntu}"
 UBUNTU_SECURITY_MIRROR="${UBUNTU_SECURITY_MIRROR:-http://security.ubuntu.com/ubuntu}"
 BOOTSTRAP_APT_TIMEOUT_SECONDS="${BOOTSTRAP_APT_TIMEOUT_SECONDS:-900}"
 DEBOOTSTRAP_TIMEOUT_SECONDS="${DEBOOTSTRAP_TIMEOUT_SECONDS:-1200}"
 CHROOT_APT_TIMEOUT_SECONDS="${CHROOT_APT_TIMEOUT_SECONDS:-900}"
 TARGET_ROOT_MOUNT="${TARGET_ROOT_MOUNT:-/mnt/minimal-root}"
-SPARSE_IMAGE="${SPARSE_IMAGE:-/var/tmp/ubuntu24-minimal-root.img}"
+SPARSE_IMAGE="${SPARSE_IMAGE:-/var/tmp/${MINIMAL_HOSTNAME}-root.img}"
 MINIMAL_TARGET_STATE_FILE="${MINIMAL_TARGET_STATE_FILE:-/var/lib/runs-on/minimal-target/state.env}"
 ROLAUNCH_SOURCE="${ROLAUNCH_SOURCE:-}"
 LOOP_DISK=""
@@ -377,6 +378,14 @@ if [[ "${TARGET_ARCH}" == "arm64" ]]; then
   )
 fi
 
+# Netplan renders networkd config from a generator on noble. On later
+# releases it needs netplan-configure.service at boot, so those images give
+# networkd its own config instead.
+network_packages=()
+if [[ "${UBUNTU_RELEASE}" == "noble" ]]; then
+  network_packages=(netplan.io)
+fi
+
 run_logged_timeout "installing minimal runtime packages" "$CHROOT_APT_TIMEOUT_SECONDS" \
   chroot "$TARGET_ROOT_MOUNT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     linux-image-aws \
@@ -384,10 +393,12 @@ run_logged_timeout "installing minimal runtime packages" "$CHROOT_APT_TIMEOUT_SE
     cloud-guest-utils \
     openssh-server \
     ca-certificates \
+    iproute2 \
     ncdu \
-    netplan.io \
+    "${network_packages[@]}" \
     sudo \
-    systemd-sysv
+    systemd-sysv \
+    udev
 
 run_logged "installing RunsOn bootstrap binaries into target rootfs" \
   bash /tmp/install-runs-on-bootstrap.sh "$TARGET_ROOT_MOUNT"
@@ -417,20 +428,21 @@ cat > "$TARGET_ROOT_MOUNT/etc/fstab" <<EOF
 PARTUUID=$ROOT_PARTUUID / ext4 defaults 0 0
 EOF
 
-cat > "$TARGET_ROOT_MOUNT/etc/hostname" <<'EOF'
-ubuntu24-minimal
+cat > "$TARGET_ROOT_MOUNT/etc/hostname" <<EOF
+$MINIMAL_HOSTNAME
 EOF
 
-cat > "$TARGET_ROOT_MOUNT/etc/hosts" <<'EOF'
+cat > "$TARGET_ROOT_MOUNT/etc/hosts" <<EOF
 127.0.0.1 localhost
-127.0.1.1 ubuntu24-minimal
+127.0.1.1 $MINIMAL_HOSTNAME
 
 ::1 localhost ip6-localhost ip6-loopback
 ff02::1 ip6-allnodes
 ff02::2 ip6-allrouters
 EOF
 
-cat > "$TARGET_ROOT_MOUNT/etc/netplan/10-ec2.yaml" <<'EOF'
+if [[ "${UBUNTU_RELEASE}" == "noble" ]]; then
+  cat > "$TARGET_ROOT_MOUNT/etc/netplan/10-ec2.yaml" <<'EOF'
 network:
   version: 2
   renderer: networkd
@@ -446,6 +458,21 @@ network:
       dhcp4: true
       dhcp6: false
 EOF
+else
+  # The same IPv4 DHCP that netplan renders from the noble config above.
+  install -d -m 0755 "$TARGET_ROOT_MOUNT/etc/systemd/network"
+  cat > "$TARGET_ROOT_MOUNT/etc/systemd/network/10-ec2.network" <<'EOF'
+[Match]
+Name=en* eth*
+
+[Network]
+DHCP=ipv4
+
+[DHCPv4]
+RouteMetric=100
+UseMTU=yes
+EOF
+fi
 
 cat > "$TARGET_ROOT_MOUNT/etc/ssh/sshd_config.d/10-hostkeys.conf" <<'EOF'
 HostKey /etc/ssh/ssh_host_ed25519_key

@@ -113,8 +113,8 @@ class UbuntuTemplateTest < Minitest::Test
   end
 
   def test_minimal_images_use_architecture_appropriate_cdn_apt_mirrors
-    x64 = File.read(File.join(TEMPLATE_DIR, "ubuntu24-minimal-x64.pkr.hcl"))
-    arm64 = File.read(File.join(TEMPLATE_DIR, "ubuntu24-minimal-arm64.pkr.hcl"))
+    x64 = File.read(File.join(TEMPLATE_DIR, "ubuntu-minimal-x64.pkr.hcl"))
+    arm64 = File.read(File.join(TEMPLATE_DIR, "ubuntu-minimal-arm64.pkr.hcl"))
 
     assert_includes x64, "TARGET_UBUNTU_MIRROR=https://archive.ubuntu.com/ubuntu/"
     assert_includes x64, "TARGET_UBUNTU_SECURITY_MIRROR=https://security.ubuntu.com/ubuntu/"
@@ -126,7 +126,7 @@ class UbuntuTemplateTest < Minitest::Test
   end
 
   def test_full_and_minimal_images_run_dpkg_under_eatmydata_once_apt_is_configured
-    %w[ubuntu-full-x64 ubuntu-full-arm64 ubuntu24-minimal-x64 ubuntu24-minimal-arm64].each do |name|
+    %w[ubuntu-full-x64 ubuntu-full-arm64 ubuntu-minimal-x64 ubuntu-minimal-arm64].each do |name|
       template = File.read(File.join(TEMPLATE_DIR, "#{name}.pkr.hcl"))
       configure_apt = template.index("configure-apt.sh")
       eatmydata = template.index("configure-dpkg-eatmydata.sh")
@@ -169,12 +169,14 @@ class UbuntuTemplateTest < Minitest::Test
     end.to_h
 
     assert_equal(
-      %w[ubuntu26-gpu-x64 ubuntu26-stepsecurity-arm64 ubuntu26-stepsecurity-x64],
+      %w[ubuntu26-gpu-x64 ubuntu26-minimal-arm64 ubuntu26-minimal-x64 ubuntu26-stepsecurity-arm64 ubuntu26-stepsecurity-x64],
       configured.keys.sort
     )
     assert_equal "ubuntu-gpu-x64", configured.fetch("ubuntu26-gpu-x64").fetch("template")
     assert_equal "ubuntu-stepsecurity-x64", configured.fetch("ubuntu26-stepsecurity-x64").fetch("template")
     assert_equal "ubuntu-stepsecurity-arm64", configured.fetch("ubuntu26-stepsecurity-arm64").fetch("template")
+    assert_equal "ubuntu-minimal-x64", configured.fetch("ubuntu26-minimal-x64").fetch("template")
+    assert_equal "ubuntu-minimal-arm64", configured.fetch("ubuntu26-minimal-arm64").fetch("template")
     configured.each_value { |image| assert_equal 400, image.fetch("volume_throughput") }
   end
 
@@ -376,7 +378,7 @@ class UbuntuTemplateTest < Minitest::Test
   def test_minimal_installs_the_reroll_into_its_target_before_the_unit_allowlist
     script = File.read(SYN_REROLL_SCRIPT)
 
-    %w[ubuntu24-minimal-x64 ubuntu24-minimal-arm64].each do |name|
+    %w[ubuntu-minimal-x64 ubuntu-minimal-arm64].each do |name|
       template = File.read(File.join(TEMPLATE_DIR, "#{name}.pkr.hcl"))
       step = template[/provisioner "shell" \{(?:(?!provisioner).)*configure-syn-reroll\.sh"\s*\}/m]
       refute_nil step, name

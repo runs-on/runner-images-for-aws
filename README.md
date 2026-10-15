@@ -23,6 +23,8 @@ Minimal images only ship the GitHub Actions runner and Docker, for the fastest b
 
 * `ubuntu24-minimal-x64`
 * `ubuntu24-minimal-arm64`
+* `ubuntu26-minimal-x64`
+* `ubuntu26-minimal-arm64`
 
 ### Windows
 

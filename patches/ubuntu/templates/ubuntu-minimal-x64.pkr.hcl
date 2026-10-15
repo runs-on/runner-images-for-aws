@@ -1,3 +1,6 @@
+// Shared template for ubuntu{24,26}-minimal-x64. bin/build injects
+// toolset_file (derived from the image id) and image_os, which selects the
+// Ubuntu release to debootstrap.
 packer {
   required_plugins {
     amazon = {
@@ -62,8 +65,11 @@ variable "source_ami_owner" {
 }
 
 variable "source_ami_name" {
-  type    = string
-  default = "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"
+  type = string
+}
+
+variable "toolset_file" {
+  type = string
 }
 
 variable "subnet_id" {
@@ -94,6 +100,13 @@ variable "instance_type" {
 variable "installer_script_folder" {
   type    = string
   default = "/imagegeneration/installers"
+}
+
+locals {
+  ubuntu_release = {
+    ubuntu24 = "noble"
+    ubuntu26 = "resolute"
+  }[var.image_os]
 }
 
 source "amazon-ebssurrogate" "build_ebs" {
@@ -231,7 +244,7 @@ build {
 
   provisioner "file" {
     destination = "${var.installer_script_folder}/toolset.json"
-    source      = "${path.root}/../toolsets/toolset-2404.json"
+    source      = "${path.root}/../toolsets/${var.toolset_file}"
   }
 
   provisioner "file" {
@@ -253,7 +266,8 @@ build {
     environment_vars = [
       "TARGET_VOLUME_SIZE_GB=${var.volume_size}",
       "TARGET_ARCH=amd64",
-      "UBUNTU_RELEASE=noble",
+      "UBUNTU_RELEASE=${local.ubuntu_release}",
+      "IMAGE_OS=${var.image_os}",
       "UBUNTU_MIRROR=https://archive.ubuntu.com/ubuntu",
       "UBUNTU_SECURITY_MIRROR=https://security.ubuntu.com/ubuntu",
       "ROLAUNCH_SOURCE=/tmp/rolaunch",
