@@ -240,6 +240,7 @@ jobs:
                 test "$(< /proc/cmdline)" = "$expected_cmdline"
                 [[ " $expected_cmdline " == *' root=PARTUUID='* ]]
                 [[ " $expected_cmdline " == *' panic=-1 '* ]]
+                [[ " $expected_cmdline " == *' i8042.nokbd i8042.noaux i8042.nopnp '* ]]
                 [[ " $(< /proc/cmdline) " != *' BOOT_IMAGE='* ]]
                 [[ " $(< /proc/cmdline) " != *' initrd='* ]]
 
