@@ -19,6 +19,7 @@ class UbuntuTemplateTest < Minitest::Test
   DESCENDANT_ROLAUNCH_SCRIPT = File.expand_path("../patches/ubuntu/files/finalize-rolaunch-descendant.sh", __dir__)
   GPU_INSTALL_SCRIPT = File.expand_path("../patches/ubuntu/build/install-gpu.sh", __dir__)
   MINIMAL_BASE_SCRIPT = File.expand_path("../patches/ubuntu/files/bootstrap-minimal-base.sh", __dir__)
+  RUNNER_FINALIZE_UNITS_SCRIPT = File.expand_path("../patches/ubuntu/files/runner-finalize-units.sh", __dir__)
   PATCH_LIB = File.expand_path("../bin/patch/lib.sh", __dir__)
   PRE_SCRIPT = File.expand_path("../patches/ubuntu/files/pre.sh", __dir__)
   RUNNER_USER_SCRIPT = File.expand_path("../patches/ubuntu/files/runner-user.sh", __dir__)
@@ -464,6 +465,24 @@ class UbuntuTemplateTest < Minitest::Test
     assert_includes test_workflow, "journalctl --unit rolaunch.service"
     assert_includes test_workflow, "/var/lib/rolaunch/timings.json"
     assert_includes test_workflow, "/var/log/cloud-init-output.log"
+  end
+
+  def test_minimal_grub_does_not_wait_after_a_boot_it_never_marked_good
+    script = File.read(MINIMAL_BASE_SCRIPT)
+    grub_defaults = script[/cat > "\$TARGET_ROOT_MOUNT\/etc\/default\/grub" <<'EOF'\n(.*?)\nEOF\n/m, 1]
+
+    # grub-common.service clears recordfail after a good boot; minimal images
+    # disable it, so GRUB must not wait for the recordfail timeout instead.
+    assert_includes grub_defaults, "GRUB_RECORDFAIL_TIMEOUT=0"
+    assert_includes File.read(RUNNER_FINALIZE_UNITS_SCRIPT), "grub-common.service"
+  end
+
+  def test_minimal_grub_skips_the_ps2_probe_like_the_direct_boot
+    direct_arguments = File.read(File.expand_path("../patches/ubuntu/files/prepare-direct-uefi.sh", __dir__))[/^readonly skip_ps2_arguments=\((.*)\)$/, 1].split
+    grub_cmdline = File.read(MINIMAL_BASE_SCRIPT)[/^GRUB_CMDLINE_LINUX_DEFAULT="(.*)"$/, 1].split
+
+    refute_empty direct_arguments
+    assert_empty direct_arguments - grub_cmdline, "minimal GRUB command line lacks PS/2 arguments the direct boot uses"
   end
 
   def test_only_full_rolaunch_removes_the_systemd_start_deadline

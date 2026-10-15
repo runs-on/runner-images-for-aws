@@ -474,6 +474,10 @@ rm -f "$TARGET_ROOT_MOUNT/etc/systemd/system/ldconfig-after-rolaunch.service"
 cat > "$TARGET_ROOT_MOUNT/etc/default/grub" <<'EOF'
 GRUB_DEFAULT=0
 GRUB_TIMEOUT=0
+# Every boot sets recordfail, and grub-common.service, which clears it after
+# a good boot, is disabled on minimal images: without this, every reboot or
+# restart from stopped waits 30 s at the menu.
+GRUB_RECORDFAIL_TIMEOUT=0
 GRUB_DISTRIBUTOR=`( . /etc/os-release; echo ${NAME:-Ubuntu} ) 2>/dev/null || echo Ubuntu`
 GRUB_CMDLINE_LINUX_DEFAULT="console=ttyS0 nvme_core.io_timeout=4294967295 panic=-1 raid=noautodetect i8042.nokbd i8042.noaux i8042.nomux i8042.nopnp"
 GRUB_CMDLINE_LINUX=""
