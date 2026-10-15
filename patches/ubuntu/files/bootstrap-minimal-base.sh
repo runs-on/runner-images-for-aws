@@ -520,7 +520,6 @@ else
   run_logged "installing grub to $LOOP_DISK" chroot_exec "$TARGET_ROOT_MOUNT" grub-install --target=i386-pc "$LOOP_DISK"
 fi
 run_logged "generating grub config" chroot_exec "$TARGET_ROOT_MOUNT" update-grub
-run_logged "rewriting grub root device to partition uuid" sed -E -i "s#root=/dev/loop[0-9]+p[0-9]+#root=PARTUUID=$ROOT_PARTUUID#g" "$TARGET_ROOT_MOUNT/boot/grub/grub.cfg"
 
 write_target_state "$target_disk" "$LOOP_DISK" "$ROOT_PARTUUID"
 install_target_helpers

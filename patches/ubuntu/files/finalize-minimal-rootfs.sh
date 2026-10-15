@@ -48,6 +48,27 @@ prepare_rootfs_for_compaction() {
   compress_target_runner_node_binaries
 }
 
+# update-grub inside the target writes the build host's loop partition as the
+# root device, and later in-target steps rerun it (upstream's
+# configure-environment.sh, kernel upgrades). Pin the root device once every
+# step is done, and refuse an image that would boot from a loop device.
+pin_grub_root_partuuid() {
+  local grub_cfg="${TARGET_ROOT_MOUNT}/boot/grub/grub.cfg"
+
+  if [[ -z "${ROOT_PARTUUID:-}" ]]; then
+    echo "Missing ROOT_PARTUUID in ${MINIMAL_TARGET_STATE_FILE}" >&2
+    exit 1
+  fi
+
+  log "pinning grub root device to PARTUUID=${ROOT_PARTUUID}"
+  sed -E -i "s#root=/dev/loop[0-9]+p[0-9]+#root=PARTUUID=${ROOT_PARTUUID}#g" "${grub_cfg}"
+  if grep -q 'root=/dev/loop' "${grub_cfg}"; then
+    echo "grub.cfg still boots from a loop device:" >&2
+    grep -n 'root=/dev/loop' "${grub_cfg}" >&2
+    exit 1
+  fi
+}
+
 install_host_upx() {
   local upx_url=""
 
@@ -122,6 +143,8 @@ if [[ ! -f "${MINIMAL_TARGET_STATE_FILE}" ]]; then
 fi
 
 source "${MINIMAL_TARGET_STATE_FILE}"
+
+pin_grub_root_partuuid
 
 log "finalizing sparse rootfs image"
 finalize_sparse_rootfs_image \

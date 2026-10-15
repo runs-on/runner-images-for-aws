@@ -32,6 +32,11 @@ variable "image_folder" {
   default = "/imagegeneration"
 }
 
+variable "publish_publicly" {
+  type    = bool
+  default = true
+}
+
 variable "region" {
   type    = string
   default = "${env("AWS_DEFAULT_REGION")}"
@@ -103,7 +108,7 @@ source "amazon-ebssurrogate" "build_ebs" {
   ami_virtualization_type                   = "hvm"
   ami_architecture                          = "arm64"
   # make AMIs publicly accessible
-  ami_groups                  = ["all"]
+  ami_groups                  = var.publish_publicly ? ["all"] : []
   ena_support                 = true
   ebs_optimized               = true
   instance_type               = var.instance_type
@@ -126,7 +131,7 @@ EOF
   ami_regions = var.ami_regions
 
   // make underlying snapshot public
-  snapshot_groups = ["all"]
+  snapshot_groups = var.publish_publicly ? ["all"] : []
 
   launch_block_device_mappings {
     device_name           = "/dev/sdf"
