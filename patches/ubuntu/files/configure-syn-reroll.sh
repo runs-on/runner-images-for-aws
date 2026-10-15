@@ -111,6 +111,9 @@ Wants=network-pre.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# Loading takes about 0.2 s. rolaunch waits for this unit, but not for it
+# to succeed: never let it hang.
+TimeoutStartSec=10s
 ExecStart=/usr/sbin/nft -f /etc/runs-on/syn-reroll.nft
 # Conntrack marks some packets of fast transfers out of window. Those skip
 # NAT and draw a reset, so let conntrack accept them for NAT'd connections.

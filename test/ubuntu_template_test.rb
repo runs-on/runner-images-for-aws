@@ -358,6 +358,10 @@ class UbuntuTemplateTest < Minitest::Test
     # pass the root they build into.
     assert_match(/if \[\[ "\$\{root\}" == "\/" && "\$\{IMAGE_OS\}" != "ubuntu26" \]\]; then.*?exit 0/m, script)
     assert_includes script, "Before=network-pre.target rolaunch.service"
+    # rolaunch is ordered after the unit but doesn't require it, and must not
+    # wait on a hung nft.
+    refute_match(/^(Requires|Requisite|BindsTo)=.*rolaunch/, script)
+    assert_includes script, "TimeoutStartSec=10s"
     # Deleting the last nat chain unregisters the hook that NATs open connections.
     assert_includes script, "nft flush chain ip ro_syn post"
     refute_match(/nft (delete|destroy) table/, script)

@@ -344,7 +344,7 @@ func (s *awsState) s3ClientFor(ctx context.Context, cfg config, region string) (
 		return retry.AddWithMaxAttempts(retry.NewStandard(), 1)
 	}
 
-	resolver := newQuickRetryResolver(dnsQueryTimeout, upstreamNameservers(resolvedUpstreamConfig))
+	resolver := newQuickRetryResolver(dnsQueryTimeout, dnsQuickRetryWindow, upstreamNameservers(resolvedUpstreamConfig))
 	client := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
 		o.HTTPClient = awshttp.NewBuildableClient().WithDialerOptions(func(d *net.Dialer) {
 			d.Resolver = resolver
