@@ -76,6 +76,55 @@ pin_grub_root_partuuid() {
   fi
 }
 
+# Minimal images boot straight into a unified kernel image, skipping GRUB.
+# With no UEFI variables in the AMI, the firmware loads the removable-media
+# path, so the UKI carries the command line GRUB would pass, read from the
+# pinned grub.cfg. GRUB stays installed: x64 instance types without UEFI
+# boot it from the BIOS boot partition.
+build_uki() {
+  local grub_cfg="${TARGET_ROOT_MOUNT}/boot/grub/grub.cfg"
+  local linux_line kernel cmdline stub output
+
+  # The target ships only its own architecture's stub (linuxx64 or
+  # linuxaa64), which also names the removable-media loader. bin/patch
+  # rewrites every architecture literal in this file for arm64.
+  local -a stubs=("${TARGET_ROOT_MOUNT}"/usr/lib/systemd/boot/efi/linux*.efi.stub)
+  [[ "${#stubs[@]}" -eq 1 && -f "${stubs[0]}" ]] || { echo "Expected one systemd-stub, found: ${stubs[*]}" >&2; exit 1; }
+  stub="${stubs[0]}"
+  local efi_arch="${stub##*/linux}"
+  efi_arch="${efi_arch%.efi.stub}"
+  output="${TARGET_ROOT_MOUNT}/boot/efi/EFI/BOOT/BOOT$(tr a-z A-Z <<< "${efi_arch}").EFI"
+
+  linux_line="$(awk '$1 == "linux" { print; exit }' "${grub_cfg}")"
+  kernel="${TARGET_ROOT_MOUNT}$(awk '{ print $2 }' <<< "${linux_line}")"
+  cmdline="$(awk '{ $1 = ""; $2 = ""; sub(/^ +/, ""); print }' <<< "${linux_line}")"
+  [[ -f "${kernel}" ]] || { echo "Missing kernel ${kernel}" >&2; exit 1; }
+  [[ "${cmdline}" == *"root=PARTUUID=${ROOT_PARTUUID}"* ]] || { echo "UKI command line lacks the pinned root: ${cmdline}" >&2; exit 1; }
+
+  # Noble's ukify crashes looking the release up without readelf.
+  local release="${kernel##*/vmlinuz-}"
+
+  # systemd-stub needs a PE kernel; arm64 kernels ship gzip-compressed.
+  if [[ "$(od -An -tx1 -N2 "${kernel}" | tr -d '[:space:]')" == "1f8b" ]]; then
+    zcat "${kernel}" > /tmp/uki-vmlinux
+    kernel=/tmp/uki-vmlinux
+  fi
+
+  log "building ${efi_arch} UKI from ${kernel#"${TARGET_ROOT_MOUNT}"} with: ${cmdline}"
+  DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd-ukify >/dev/null
+  install -d "$(dirname "${output}")"
+  local -a initrd=()
+  [[ -f "${TARGET_ROOT_MOUNT}/boot/microcode.cpio" ]] && initrd=(--initrd "${TARGET_ROOT_MOUNT}/boot/microcode.cpio")
+  ukify build \
+    --linux "${kernel}" \
+    --uname "${release}" \
+    "${initrd[@]}" \
+    --cmdline "${cmdline}" \
+    --stub "${stub}" \
+    --output "${output}"
+  rm -f /tmp/uki-vmlinux
+}
+
 install_host_upx() {
   local upx_url=""
 
@@ -152,6 +201,7 @@ fi
 source "${MINIMAL_TARGET_STATE_FILE}"
 
 pin_grub_root_partuuid
+build_uki
 
 log "finalizing sparse rootfs image"
 finalize_sparse_rootfs_image \

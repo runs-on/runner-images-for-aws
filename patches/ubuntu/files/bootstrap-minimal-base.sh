@@ -304,9 +304,16 @@ if [[ "${TARGET_ARCH}" == "arm64" ]]; then
   run_logged "marking EFI partition on $LOOP_DISK" parted -s "$LOOP_DISK" set 1 esp on
   run_logged "creating root partition on $LOOP_DISK" parted -s -a optimal "$LOOP_DISK" mkpart primary ext4 261MiB 100%
 else
-  run_logged "creating partition table on $LOOP_DISK" parted -s "$LOOP_DISK" mklabel msdos
-  run_logged "creating root partition on $LOOP_DISK" parted -s -a optimal "$LOOP_DISK" mkpart primary ext4 1MiB 100%
-  run_logged "marking partition bootable on $LOOP_DISK" parted -s "$LOOP_DISK" set 1 boot on
+  # UEFI boots the UKI from the EFI partition; the BIOS boot partition keeps
+  # GRUB for instance types that only boot legacy BIOS.
+  efi_partition="${LOOP_DISK}p2"
+  root_partition="${LOOP_DISK}p3"
+  run_logged "creating GPT partition table on $LOOP_DISK" parted -s "$LOOP_DISK" mklabel gpt
+  run_logged "creating BIOS boot partition on $LOOP_DISK" parted -s -a optimal "$LOOP_DISK" mkpart bios 1MiB 2MiB
+  run_logged "marking BIOS boot partition on $LOOP_DISK" parted -s "$LOOP_DISK" set 1 bios_grub on
+  run_logged "creating EFI partition on $LOOP_DISK" parted -s -a optimal "$LOOP_DISK" mkpart ESP fat32 2MiB 66MiB
+  run_logged "marking EFI partition on $LOOP_DISK" parted -s "$LOOP_DISK" set 2 esp on
+  run_logged "creating root partition on $LOOP_DISK" parted -s -a optimal "$LOOP_DISK" mkpart primary ext4 66MiB 100%
 fi
 partprobe "$LOOP_DISK" || true
 udevadm settle
@@ -323,12 +330,12 @@ if [[ -z "$ROOT_PARTUUID" ]]; then
 fi
 
 run_logged "formatting $root_partition as ext4" mkfs.ext4 -F -i 65536 -m 0 -E lazy_itable_init=0,lazy_journal_init=0 -L cloudimg-rootfs "$root_partition"
-if [[ "${TARGET_ARCH}" == "arm64" ]]; then
+if [[ -n "$efi_partition" ]]; then
   run_logged "formatting $efi_partition as EFI system partition" mkfs.vfat -F 32 "$efi_partition"
 fi
 mkdir -p "$TARGET_ROOT_MOUNT"
 run_logged "mounting sparse root filesystem" mount -o discard "$root_partition" "$TARGET_ROOT_MOUNT"
-if [[ "${TARGET_ARCH}" == "arm64" ]]; then
+if [[ -n "$efi_partition" ]]; then
   mkdir -p "$TARGET_ROOT_MOUNT/boot/efi"
   run_logged "mounting EFI system partition" mount "$efi_partition" "$TARGET_ROOT_MOUNT/boot/efi"
 fi
@@ -377,6 +384,8 @@ if [[ "${TARGET_ARCH}" == "arm64" ]]; then
     grub2-common
   )
 fi
+# systemd-stub, for the UKI finalize-minimal-rootfs.sh builds.
+boot_packages+=(systemd-boot-efi)
 
 # Netplan renders networkd config from a generator on noble. On later
 # releases it needs netplan-configure.service at boot, so those images give

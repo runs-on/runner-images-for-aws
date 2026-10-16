@@ -120,6 +120,7 @@ source "amazon-ebssurrogate" "build_ebs" {
   ami_description                           = var.ami_description
   ami_virtualization_type                   = "hvm"
   ami_architecture                          = "x86_64"
+  boot_mode                                 = "uefi-preferred"
   # make AMIs publicly accessible
   ami_groups                  = var.publish_publicly ? ["all"] : []
   ena_support                 = true

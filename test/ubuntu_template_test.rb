@@ -19,6 +19,7 @@ class UbuntuTemplateTest < Minitest::Test
   DESCENDANT_ROLAUNCH_SCRIPT = File.expand_path("../patches/ubuntu/files/finalize-rolaunch-descendant.sh", __dir__)
   GPU_INSTALL_SCRIPT = File.expand_path("../patches/ubuntu/build/install-gpu.sh", __dir__)
   MINIMAL_BASE_SCRIPT = File.expand_path("../patches/ubuntu/files/bootstrap-minimal-base.sh", __dir__)
+  MINIMAL_FINALIZE_SCRIPT = File.expand_path("../patches/ubuntu/files/finalize-minimal-rootfs.sh", __dir__)
   RUNNER_FINALIZE_UNITS_SCRIPT = File.expand_path("../patches/ubuntu/files/runner-finalize-units.sh", __dir__)
   PATCH_LIB = File.expand_path("../bin/patch/lib.sh", __dir__)
   PRE_SCRIPT = File.expand_path("../patches/ubuntu/files/pre.sh", __dir__)
@@ -123,6 +124,17 @@ class UbuntuTemplateTest < Minitest::Test
     assert_includes arm64, "TARGET_UBUNTU_MIRROR=https://ports.ubuntu.com/ubuntu-ports/"
     assert_includes arm64, "TARGET_UBUNTU_SECURITY_MIRROR=https://ports.ubuntu.com/ubuntu-ports/"
     refute_match(/\.ec2\.(archive|ports)\.ubuntu\.com/, arm64)
+  end
+
+  def test_minimal_images_boot_a_uki_built_after_the_root_is_pinned
+    x64 = File.read(File.join(TEMPLATE_DIR, "ubuntu-minimal-x64.pkr.hcl"))
+    finalize = File.read(MINIMAL_FINALIZE_SCRIPT)
+
+    assert_includes x64, 'boot_mode                                 = "uefi-preferred"'
+    assert_operator finalize.index("\nbuild_uki\n"), :>, finalize.index("\npin_grub_root_partuuid\n")
+    assert_operator finalize.index("\nfinalize_sparse_rootfs_image"), :>, finalize.index("\nbuild_uki\n")
+    # bin/patch rewrites amd64 to arm64 in custom scripts for arm64 builds.
+    refute_match(/amd64\)|arm64\)/, finalize[finalize.index("build_uki() {")..])
   end
 
   def test_full_and_minimal_images_run_dpkg_under_eatmydata_once_apt_is_configured
