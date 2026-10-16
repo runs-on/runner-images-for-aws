@@ -503,6 +503,19 @@ class UbuntuTemplateTest < Minitest::Test
     assert_empty direct_arguments - grub_cmdline, "minimal GRUB command line lacks PS/2 arguments the direct boot uses"
   end
 
+  def test_minimal_images_ship_libicu_and_a_writable_dotnet_root
+    script = File.read(File.expand_path("../patches/ubuntu/files/minimal-install-target-tooling.sh", __dir__))
+    releases = CONFIG.fetch("images").map { |image| image.fetch("id") }.grep(/-minimal-/).map { |id| id[/\Aubuntu\d+/] }.uniq
+
+    refute_empty releases
+    releases.each do |release|
+      assert_match(/^  #{release}\) libicu_package=libicu\d+ ;;$/, script, release)
+    end
+    assert_includes script, 'apt-get install -y --no-install-recommends "${libicu_package}"'
+    # actions/setup-dotnet installs there by default, without sudo.
+    assert_includes script, "install -d -m 0777 /usr/share/dotnet"
+  end
+
   def test_only_full_rolaunch_removes_the_systemd_start_deadline
     assert_includes File.read(FULL_ROLAUNCH_SCRIPT), "TimeoutStartSec=infinity"
     refute_includes File.read(MINIMAL_BASE_SCRIPT), "TimeoutStartSec=infinity"

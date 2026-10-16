@@ -14,6 +14,24 @@ if ! command -v netcat >/dev/null 2>&1; then
   ln -sf /usr/bin/nc /usr/bin/netcat
 fi
 
+# The GitHub runner and .NET need libicu (runner's bin/installdependencies.sh);
+# without it the runner, and every .NET step it starts, runs in globalization
+# invariant mode. On 24.04 libxml2 pulls it in, on 26.04 nothing does.
+case "${IMAGE_OS:-}" in
+  ubuntu24) libicu_package=libicu74 ;;
+  ubuntu26) libicu_package=libicu78 ;;
+  *)
+    echo "No libicu package known for IMAGE_OS=${IMAGE_OS:-}" >&2
+    exit 1
+    ;;
+esac
+apt-get install -y --no-install-recommends "${libicu_package}"
+
+# actions/setup-dotnet installs into /usr/share/dotnet by default, as the
+# runner user without sudo. Full images get it from install-dotnetcore-sdk.sh,
+# made writable by configure-system.sh's chmod -R 777 /usr/share.
+install -d -m 0777 /usr/share/dotnet
+
 if ! command -v pwsh >/dev/null 2>&1; then
   cat > /usr/local/bin/invoke_tests <<'EOF'
 #!/bin/bash
