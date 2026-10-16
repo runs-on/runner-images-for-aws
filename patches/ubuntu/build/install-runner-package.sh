@@ -32,7 +32,9 @@ release_url="https://github.com/runs-on/runner/releases/download/${tag}"
 echo "Installing ${archive_name} from runs-on/runner ${tag}"
 archive_path=$(download_with_retry "${release_url}/${archive_name}")
 checksum=$(get_checksum_from_url "${release_url}/SHA256SUMS" "$archive_name" "SHA256")
-use_checksum_comparison "$archive_path" "$checksum"
+# Upstream's use_checksum_comparison needs shasum, which comes with perl and
+# is missing from minimal images; sha256sum is part of coreutils.
+echo "${checksum}  ${archive_path}" | sha256sum --check --strict
 
 mkdir -p /opt/runner-cache
 mv "$archive_path" "/opt/runner-cache/$archive_name"

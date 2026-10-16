@@ -18,7 +18,7 @@ class InstallRunnerPackageTest < Minitest::Test
     }
     download_with_retry() { echo "download $1" >>"$LOG"; echo "/tmp/${1##*/}"; }
     get_checksum_from_url() { echo "checksum $1 $2" >>"$LOG"; echo "c0ffee"; }
-    use_checksum_comparison() { echo "verify $1 $2" >>"$LOG"; }
+    sha256sum() { echo "verify $* $(cat)" >>"$LOG"; }
     mkdir() { :; }
     mv() { echo "install $2" >>"$LOG"; }
   SH
@@ -42,7 +42,7 @@ class InstallRunnerPackageTest < Minitest::Test
     assert_equal <<~LOG, log
       download #{release}/actions-runner-linux-x64-2.338.0.tar.gz
       checksum #{release}/SHA256SUMS actions-runner-linux-x64-2.338.0.tar.gz
-      verify /tmp/actions-runner-linux-x64-2.338.0.tar.gz c0ffee
+      verify --check --strict c0ffee  /tmp/actions-runner-linux-x64-2.338.0.tar.gz
       install /opt/runner-cache/actions-runner-linux-x64-2.338.0.tar.gz
     LOG
   end
