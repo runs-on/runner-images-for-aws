@@ -64,158 +64,57 @@ detach_loop_disk() {
 # Blocks of a new EBS volume that were never written do not read as zeros,
 # so the sparse copy below leaves random bytes wherever it skips an all-zero
 # chunk. Writing every block instead puts the whole image in the snapshot and
-# slows boots by seconds, so record where file data lives while the image is
-# still mounted, and rewrite only the file blocks the copy got wrong.
-record_file_extents() {
-  local mount_dir="$1"
-  local loop_disk="$2"
-  local extents_file="$3"
+# slows boots by seconds. So rewrite only what each partition uses: on ext4,
+# e2image compares the blocks the filesystem uses and writes those that
+# differ. Other partitions (EFI, BIOS boot) and the space around them are
+# small and copied whole.
+copy_image_range() {
+  local sparse_image="$1"
+  local target_disk="$2"
+  local offset="$3"
+  local length="$4"
 
-  python3 - "$mount_dir" "$(basename "$loop_disk")" "$extents_file" <<'PY'
-import errno
-import fcntl
-import os
-import stat
-import struct
-import sys
-
-FS_IOC_FIEMAP = 0xC020660B
-FIEMAP_FLAG_SYNC = 0x1
-FIEMAP_EXTENT_LAST = 0x1
-# Extents whose blocks do not hold the file's bytes as stored on disk.
-SKIP_FLAGS = 0x2 | 0x4 | 0x8 | 0x80 | 0x100 | 0x200 | 0x800
-HEADER = struct.Struct("=QQLLLL")
-EXTENT = struct.Struct("=QQQQQLLLL")
-BATCH = 512
-
-root, loop_name, out_path = sys.argv[1:]
-partitions = {}
-
-
-def partition(dev):
-    """Byte offset and size of a partition of the loop disk, or None."""
-    if dev not in partitions:
-        sys_path = os.path.realpath(f"/sys/dev/block/{os.major(dev)}:{os.minor(dev)}")
-        found = None
-        if f"/{loop_name}/" in sys_path and os.path.exists(f"{sys_path}/start"):
-            with open(f"{sys_path}/start") as start, open(f"{sys_path}/size") as size:
-                found = (int(start.read()) * 512, int(size.read()) * 512)
-        partitions[dev] = found
-    return partitions[dev]
-
-
-def extents(fd):
-    logical = 0
-    while True:
-        request = bytearray(HEADER.size + BATCH * EXTENT.size)
-        HEADER.pack_into(request, 0, logical, (1 << 64) - 1 - logical, FIEMAP_FLAG_SYNC, 0, BATCH, 0)
-        fcntl.ioctl(fd, FS_IOC_FIEMAP, request)
-        mapped = HEADER.unpack_from(request, 0)[3]
-        if mapped == 0:
-            return
-        for index in range(mapped):
-            fe_logical, fe_physical, fe_length, _, _, fe_flags, _, _, _ = EXTENT.unpack_from(
-                request, HEADER.size + index * EXTENT.size
-            )
-            if not fe_flags & SKIP_FLAGS:
-                yield fe_physical, fe_length
-            if fe_flags & FIEMAP_EXTENT_LAST:
-                return
-        logical = fe_logical + fe_length
-
-
-count = 0
-total = 0
-seen = set()
-whole = set()
-with open(out_path, "w") as out:
-    for directory, _, files in os.walk(root):
-        for name in files:
-            path = os.path.join(directory, name)
-            try:
-                info = os.lstat(path)
-            except FileNotFoundError:
-                continue
-            if not stat.S_ISREG(info.st_mode) or info.st_size == 0:
-                continue
-            found = partition(info.st_dev)
-            if found is None or info.st_dev in whole or (info.st_dev, info.st_ino) in seen:
-                continue
-            seen.add((info.st_dev, info.st_ino))
-            start, size = found
-            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
-            try:
-                file_extents = list(extents(fd))
-            except OSError as error:
-                # vfat (the EFI partition) has no FIEMAP, and its FAT and
-                # directories are mostly zeros too: check the whole partition.
-                if error.errno != errno.EOPNOTSUPP:
-                    raise
-                whole.add(info.st_dev)
-                file_extents = [(0, size)]
-            finally:
-                os.close(fd)
-            for physical, length in file_extents:
-                out.write(f"{start + physical} {length}\n")
-                count += 1
-                total += length
-
-print(f"[rootfs-compaction] recorded {count} file extents ({total} bytes)")
-PY
+  [[ "${length}" -gt 0 ]] || return 0
+  dd if="${sparse_image}" of="${target_disk}" bs=1M \
+    iflag=skip_bytes,count_bytes oflag=seek_bytes conv=notrunc,fsync status=none \
+    skip="${offset}" seek="${offset}" count="${length}"
+  blockdev --flushbufs "${target_disk}"
+  cmp -n "${length}" -i "${offset}:${offset}" "${sparse_image}" "${target_disk}"
 }
 
-# Compare every recorded file extent between the image and the target disk.
-# In repair mode, rewrite the 4 KiB blocks that differ; in verify mode, fail
-# if any differ.
-check_file_extents() {
-  local mode="$1"
-  local sparse_image="$2"
-  local target_disk="$3"
-  local extents_file="$4"
+repair_sparse_copy() {
+  local sparse_image="$1"
+  local target_disk="$2"
+  local image_size first_start="" last_end=0 start size offset fstype pending
 
-  python3 - "$mode" "$sparse_image" "$target_disk" "$extents_file" <<'PY'
-import os
-import sys
+  image_size="$(stat -c %s "${sparse_image}")"
+  while read -r start size; do
+    offset=$((start * 512))
+    [[ -n "${first_start}" && "${first_start}" -le "${offset}" ]] || first_start="${offset}"
+    [[ "$((offset + size * 512))" -le "${last_end}" ]] || last_end=$((offset + size * 512))
+    fstype="$(blkid -p -O "${offset}" -s TYPE -o value "${sparse_image}" || true)"
+    if [[ "${fstype}" == "ext4" ]]; then
+      e2image -rac -o "${offset}" -O "${offset}" "${sparse_image}" "${target_disk}"
+      blockdev --flushbufs "${target_disk}"
+      # Block -1 is e2image marking the end of the filesystem, not a block.
+      pending="$(e2image -racn -o "${offset}" -O "${offset}" "${sparse_image}" "${target_disk}" 2>&1 |
+        grep '^Writing block' | grep -c -v ' 18446744073709551615$' || true)"
+      [[ "${pending}" == "0" ]] || { echo "ext4 partition at ${offset} still differs in ${pending} blocks" >&2; exit 1; }
+      rootfs_compaction_log "repaired ext4 partition at ${offset}"
+    else
+      copy_image_range "${sparse_image}" "${target_disk}" "${offset}" "$((size * 512))"
+      rootfs_compaction_log "copied ${fstype:-unformatted} partition at ${offset} whole"
+    fi
+  done < <(sfdisk -d "${sparse_image}" | awk -F'[=,]' '/ : start=/ { print $2 + 0, $4 + 0 }')
+  [[ -n "${first_start}" ]] || { echo "No partitions found in ${sparse_image}" >&2; exit 1; }
 
-BLOCK = 4096
-CHUNK = 1 << 20
-
-mode, image_path, target_path, extents_path = sys.argv[1:]
-image = os.open(image_path, os.O_RDONLY)
-target = os.open(target_path, os.O_RDWR if mode == "repair" else os.O_RDONLY)
-checked = 0
-differing = 0
-
-with open(extents_path) as extents:
-    for line in extents:
-        offset, length = map(int, line.split())
-        end = offset + length
-        while offset < end:
-            size = min(CHUNK, end - offset)
-            expected = os.pread(image, size, offset)
-            actual = os.pread(target, size, offset)
-            if expected != actual:
-                for start in range(0, size, BLOCK):
-                    block = expected[start:start + BLOCK]
-                    if block != actual[start:start + BLOCK]:
-                        differing += 1
-                        if mode == "repair":
-                            os.pwrite(target, block, offset + start)
-            checked += size
-            offset += size
-
-if mode == "repair":
-    os.fsync(target)
-print(f"[rootfs-compaction] {mode}: {checked} bytes of file data checked, {differing} blocks differed")
-if mode == "verify" and differing:
-    sys.exit(1)
-PY
+  copy_image_range "${sparse_image}" "${target_disk}" 0 "${first_start}"
+  copy_image_range "${sparse_image}" "${target_disk}" "${last_end}" "$((image_size - last_end))"
 }
 
 materialize_sparse_image() {
   local sparse_image="$1"
   local target_disk="$2"
-  local extents_file="$3"
   local ddpt_output=""
   local ddpt_summary=""
 
@@ -225,9 +124,7 @@ materialize_sparse_image() {
   if [[ -n "$ddpt_summary" ]]; then
     rootfs_compaction_log "$ddpt_summary"
   fi
-  check_file_extents repair "$sparse_image" "$target_disk" "$extents_file"
-  blockdev --flushbufs "$target_disk"
-  check_file_extents verify "$sparse_image" "$target_disk" "$extents_file"
+  repair_sparse_copy "$sparse_image" "$target_disk"
   udevadm settle
   sync
 }
@@ -254,7 +151,6 @@ finalize_sparse_rootfs_image() {
   fi
 
   trim_rootfs_mount "$mount_dir"
-  record_file_extents "$mount_dir" "$loop_disk" "${sparse_image}.extents"
 
   if [[ -n "$cleanup_handler" ]] && declare -F "$cleanup_handler" >/dev/null 2>&1; then
     "$cleanup_handler" "$mount_dir"
@@ -262,5 +158,5 @@ finalize_sparse_rootfs_image() {
 
   detach_loop_disk "$loop_disk"
   compact_sparse_image "$sparse_image"
-  materialize_sparse_image "$sparse_image" "$target_disk" "${sparse_image}.extents"
+  materialize_sparse_image "$sparse_image" "$target_disk"
 }
