@@ -44,6 +44,27 @@ jobs:
         run: |
           node --version
           npm --version
+      - name: ICU
+        run: ldconfig -p | grep -E 'libicu(uc|i18n)\.so\.'
+      # Installs into the default /usr/share/dotnet, as on the full images.
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          dotnet-version: 8.0.x
+      - name: .NET cultures
+        working-directory: ${{ runner.temp }}
+        env:
+          # Agents before v3.5.1 start the runner in invariant mode on every
+          # image; test what the image provides.
+          DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "0"
+        run: |
+          dotnet new console --output cultures
+          cat > cultures/Program.cs <<'EOF'
+          using System.Globalization;
+          Console.WriteLine(new CultureInfo("tr-TR").TextInfo.ToUpper("i"));
+          EOF
+          upper="$(dotnet run --project cultures)"
+          echo "$upper"
+          test "$upper" = "İ"
 
   release:
     if: ${{ !failure() && !cancelled() }}
