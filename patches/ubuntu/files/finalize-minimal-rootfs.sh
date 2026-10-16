@@ -26,11 +26,18 @@ cleanup_root() {
     "$root/proc" \
     "$root/sys" \
     "$root/run" \
+    "$root/boot/efi" \
     "$root"
   do
     mountpoint -q "$mountpoint" && umount "$mountpoint"
   done
   set -e
+  # Copying the image of a still-mounted filesystem loses whatever it has not
+  # written back yet.
+  if mountpoint -q "$root"; then
+    echo "Failed to unmount ${root}" >&2
+    exit 1
+  fi
 }
 
 prepare_rootfs_for_compaction() {
