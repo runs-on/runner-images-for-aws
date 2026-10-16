@@ -52,6 +52,10 @@ jobs:
           dotnet-version: 8.0.x
       - name: .NET cultures
         working-directory: ${{ runner.temp }}
+        env:
+          # Agents before v3.5.1 start the runner in invariant mode on every
+          # image; test what the image provides.
+          DOTNET_SYSTEM_GLOBALIZATION_INVARIANT: "0"
         run: |
           dotnet new console --output cultures
           cat > cultures/Program.cs <<'EOF'
