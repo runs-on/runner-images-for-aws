@@ -46,6 +46,10 @@ Describe "Apt acquire configuration" {
         (Get-CommandResult "apt-config dump Acquire::https::Pipeline-Depth").Output | Should -BeNullOrEmpty
     }
 
+    It "Apt downloads gzip package indexes" {
+        (Get-CommandResult "apt-config dump Acquire::CompressionTypes::Order").Output | Should -Match 'Acquire::CompressionTypes::Order:: "gz";'
+    }
+
     It "Apt sources use the official Ubuntu archive directly" {
         $sourcesFile = if (Test-IsUbuntu22) { "/etc/apt/sources.list" } else { "/etc/apt/sources.list.d/ubuntu.sources" }
         $aptSources = Get-Content $sourcesFile -Raw

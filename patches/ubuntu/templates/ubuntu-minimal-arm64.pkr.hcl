@@ -320,6 +320,7 @@ build {
       "ro-run-script-in-target ${var.installer_script_folder}/configure-apt-mock.sh",
       "ro-run-script-in-target ${var.installer_script_folder}/configure-apt.sh",
       "ro-run-script-in-target ${var.installer_script_folder}/configure-dpkg-eatmydata.sh",
+      "ro-run-script-in-target ${var.installer_script_folder}/configure-apt-gzip-indexes.sh",
       "ro-run-script-in-target ${var.installer_script_folder}/configure-limits.sh"
     ]
   }
