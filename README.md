@@ -19,10 +19,12 @@ Those images are very close to 1-1 compatible with official GitHub Actions runne
 
 See the notes below for Ubuntu 26 specifics.
 
-Minimal images only ship the GitHub Actions runner and Docker, for the fastest boot times:
+Minimal images only ship the GitHub Actions runner and Docker, for the fastest boot times. On UEFI instances they boot straight into a unified kernel image (UKI), without GRUB; x64 instance types without UEFI still boot through GRUB:
 
 * `ubuntu24-minimal-x64`
 * `ubuntu24-minimal-arm64`
+* `ubuntu26-minimal-x64`
+* `ubuntu26-minimal-arm64`
 
 ### Windows
 

@@ -53,16 +53,17 @@ else
   printf '%s\n' 'DEBIAN_FRONTEND=noninteractive' >> /etc/environment
 fi
 
+codename="$(. /etc/os-release && echo "${VERSION_CODENAME}")"
 cat > /etc/apt/sources.list.d/ubuntu.sources <<APT_SOURCES
 Types: deb
 URIs: ${TARGET_UBUNTU_MIRROR}
-Suites: noble noble-updates noble-backports
+Suites: ${codename} ${codename}-updates ${codename}-backports
 Components: main restricted universe multiverse
 Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
 
 Types: deb
 URIs: ${TARGET_UBUNTU_SECURITY_MIRROR}
-Suites: noble-security
+Suites: ${codename}-security
 Components: main restricted universe multiverse
 Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
 APT_SOURCES
