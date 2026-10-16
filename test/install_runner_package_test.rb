@@ -18,16 +18,18 @@ class InstallRunnerPackageTest < Minitest::Test
     }
     download_with_retry() { echo "download $1" >>"$LOG"; echo "/tmp/${1##*/}"; }
     get_checksum_from_url() { echo "checksum $1 $2" >>"$LOG"; echo "c0ffee"; }
-    sha256sum() { echo "verify $* $(cat)" >>"$LOG"; }
+    sha256sum() { echo "verify $* $(cat)" >>"$LOG"; [ -z "$BAD_CHECKSUM" ]; }
     mkdir() { :; }
     mv() { echo "install $2" >>"$LOG"; }
   SH
 
-  def run_script(fork_tags)
+  # Runs the script as `bash <script>`, as minimal images do, so the shebang's
+  # -e does not apply.
+  def run_script(fork_tags, extra_env = {})
     Dir.mktmpdir do |dir|
       File.write("#{dir}/install.sh", HELPERS)
       File.write("#{dir}/releases.json", fork_tags.map { |tag| { tag_name: tag } }.to_json)
-      env = { "HELPER_SCRIPTS" => dir, "FORK_RELEASES" => "#{dir}/releases.json", "LOG" => "#{dir}/log" }
+      env = { "HELPER_SCRIPTS" => dir, "FORK_RELEASES" => "#{dir}/releases.json", "LOG" => "#{dir}/log" }.merge(extra_env)
       output, status = Open3.capture2e(env, "bash", SCRIPT)
       log = File.exist?("#{dir}/log") ? File.read("#{dir}/log") : ""
       [status, output, log]
@@ -53,5 +55,12 @@ class InstallRunnerPackageTest < Minitest::Test
     refute status.success?
     assert_includes output, "runs-on/runner has not published actions/runner v2.338.0 yet"
     assert_empty log
+  end
+
+  def test_a_checksum_mismatch_stops_the_install
+    status, _output, log = run_script(%w[v2.338.0-runs-on.1], "BAD_CHECKSUM" => "1")
+
+    refute status.success?
+    refute_includes log, "install "
   end
 end

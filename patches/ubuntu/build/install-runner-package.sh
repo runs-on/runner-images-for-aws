@@ -4,6 +4,10 @@
 ##  Desc:  Download and Install runner package
 ################################################################################
 
+# Minimal images run build scripts as `bash <script>`, which ignores the -e in
+# the shebang; a failed download or checksum must stop the build.
+set -e
+
 # Source the helpers for use with the script
 source $HELPER_SCRIPTS/install.sh
 
