@@ -369,6 +369,7 @@ build {
     scripts = [
       "${path.root}/../scripts/build/configure-system.sh",
       "${path.root}/../custom/files/after-reboot.sh",
+      "${path.root}/../custom/files/configure-syn-reroll.sh",
       "${path.root}/../custom/files/configure-full-rolaunch.sh",
       "${path.root}/../custom/files/prepare-direct-uefi.sh"
     ]

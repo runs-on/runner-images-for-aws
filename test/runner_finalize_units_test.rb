@@ -21,6 +21,13 @@ class RunnerFinalizeUnitsTest < Minitest::Test
     assert_includes masked_units, "packagekit-offline-update.timer"
   end
 
+  def test_minimal_allowlist_keeps_the_syn_reroll_units
+    allowlist = @content[/variant_allowlist_units\(\) \{.*?\n\}/m]
+
+    assert_includes allowlist, "runs-on-syn-reroll.service"
+    assert_includes allowlist, "runs-on-syn-reroll-stop.timer"
+  end
+
   private
 
   def masked_units

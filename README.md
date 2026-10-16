@@ -19,10 +19,12 @@ Those images are very close to 1-1 compatible with official GitHub Actions runne
 
 See the notes below for Ubuntu 26 specifics.
 
-Minimal images only ship the GitHub Actions runner and Docker, for the fastest boot times:
+Minimal images only ship the GitHub Actions runner and Docker, for the fastest boot times. On UEFI instances they boot straight into a unified kernel image (UKI), without GRUB; x64 instance types without UEFI still boot through GRUB:
 
 * `ubuntu24-minimal-x64`
 * `ubuntu24-minimal-arm64`
+* `ubuntu26-minimal-x64`
+* `ubuntu26-minimal-arm64`
 
 ### Windows
 
@@ -91,6 +93,7 @@ For instance, for the `ubuntu22-full-x64` image, search for:
 * On those Ubuntu 26 images, rolaunch gives up if it cannot reach the instance metadata endpoint within 60 seconds. While it waits, it logs the state of each network interface every 10 seconds and, if the endpoint is still unreachable after 15 seconds, asks `systemd-networkd` to configure them again.
 * Ubuntu 26 uses `systemd-networkd` directly and disables cloud-init. This fast path supports a single primary ENA with IPv4 or dual-stack DHCP, including custom DHCP DNS and search domains.
 * Ubuntu 26 does not support multi-ENI policy routing, secondary IP discovery, IPv6-only subnets, old Xen network drivers, or persistent netplan configuration. Use Ubuntu 22 or 24 when those network layouts are required.
+* Ubuntu 26 full and StepSecurity images, and the minimal images, retry stalled connections to GitHub and AWS on a new source port during their first two minutes. In us-east-1, an instance launched during a few minutes that recur about every hour loses the SYNs of some of its new outbound connections for its first minute, and such a connection otherwise stays stalled for up to a minute. Until two minutes after boot, TCP to GitHub's and AWS's published addresses on port 443 leaves with a random source port, and each SYN retransmission, one second apart, gets a new one. `sudo nft list table ip ro_syn` shows the rule and its counter; its chain is empty after two minutes.
 * For local validation, set `AMI_PUBLIC=false` to keep a full Ubuntu AMI private.
 
 ## Build provenance

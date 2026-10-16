@@ -7,13 +7,14 @@ export DEBIAN_FRONTEND=noninteractive
 TARGET_VOLUME_SIZE_GB="${TARGET_VOLUME_SIZE_GB:-2}"
 TARGET_ARCH="${TARGET_ARCH:-amd64}"
 UBUNTU_RELEASE="${UBUNTU_RELEASE:-noble}"
+MINIMAL_HOSTNAME="${IMAGE_OS:-ubuntu24}-minimal"
 UBUNTU_MIRROR="${UBUNTU_MIRROR:-http://archive.ubuntu.com/ubuntu}"
 UBUNTU_SECURITY_MIRROR="${UBUNTU_SECURITY_MIRROR:-http://security.ubuntu.com/ubuntu}"
 BOOTSTRAP_APT_TIMEOUT_SECONDS="${BOOTSTRAP_APT_TIMEOUT_SECONDS:-900}"
 DEBOOTSTRAP_TIMEOUT_SECONDS="${DEBOOTSTRAP_TIMEOUT_SECONDS:-1200}"
 CHROOT_APT_TIMEOUT_SECONDS="${CHROOT_APT_TIMEOUT_SECONDS:-900}"
 TARGET_ROOT_MOUNT="${TARGET_ROOT_MOUNT:-/mnt/minimal-root}"
-SPARSE_IMAGE="${SPARSE_IMAGE:-/var/tmp/ubuntu24-minimal-root.img}"
+SPARSE_IMAGE="${SPARSE_IMAGE:-/var/tmp/${MINIMAL_HOSTNAME}-root.img}"
 MINIMAL_TARGET_STATE_FILE="${MINIMAL_TARGET_STATE_FILE:-/var/lib/runs-on/minimal-target/state.env}"
 ROLAUNCH_SOURCE="${ROLAUNCH_SOURCE:-}"
 LOOP_DISK=""
@@ -303,9 +304,16 @@ if [[ "${TARGET_ARCH}" == "arm64" ]]; then
   run_logged "marking EFI partition on $LOOP_DISK" parted -s "$LOOP_DISK" set 1 esp on
   run_logged "creating root partition on $LOOP_DISK" parted -s -a optimal "$LOOP_DISK" mkpart primary ext4 261MiB 100%
 else
-  run_logged "creating partition table on $LOOP_DISK" parted -s "$LOOP_DISK" mklabel msdos
-  run_logged "creating root partition on $LOOP_DISK" parted -s -a optimal "$LOOP_DISK" mkpart primary ext4 1MiB 100%
-  run_logged "marking partition bootable on $LOOP_DISK" parted -s "$LOOP_DISK" set 1 boot on
+  # UEFI boots the UKI from the EFI partition; the BIOS boot partition keeps
+  # GRUB for instance types that only boot legacy BIOS.
+  efi_partition="${LOOP_DISK}p2"
+  root_partition="${LOOP_DISK}p3"
+  run_logged "creating GPT partition table on $LOOP_DISK" parted -s "$LOOP_DISK" mklabel gpt
+  run_logged "creating BIOS boot partition on $LOOP_DISK" parted -s -a optimal "$LOOP_DISK" mkpart bios 1MiB 2MiB
+  run_logged "marking BIOS boot partition on $LOOP_DISK" parted -s "$LOOP_DISK" set 1 bios_grub on
+  run_logged "creating EFI partition on $LOOP_DISK" parted -s -a optimal "$LOOP_DISK" mkpart ESP fat32 2MiB 66MiB
+  run_logged "marking EFI partition on $LOOP_DISK" parted -s "$LOOP_DISK" set 2 esp on
+  run_logged "creating root partition on $LOOP_DISK" parted -s -a optimal "$LOOP_DISK" mkpart primary ext4 66MiB 100%
 fi
 partprobe "$LOOP_DISK" || true
 udevadm settle
@@ -322,12 +330,12 @@ if [[ -z "$ROOT_PARTUUID" ]]; then
 fi
 
 run_logged "formatting $root_partition as ext4" mkfs.ext4 -F -i 65536 -m 0 -E lazy_itable_init=0,lazy_journal_init=0 -L cloudimg-rootfs "$root_partition"
-if [[ "${TARGET_ARCH}" == "arm64" ]]; then
+if [[ -n "$efi_partition" ]]; then
   run_logged "formatting $efi_partition as EFI system partition" mkfs.vfat -F 32 "$efi_partition"
 fi
 mkdir -p "$TARGET_ROOT_MOUNT"
 run_logged "mounting sparse root filesystem" mount -o discard "$root_partition" "$TARGET_ROOT_MOUNT"
-if [[ "${TARGET_ARCH}" == "arm64" ]]; then
+if [[ -n "$efi_partition" ]]; then
   mkdir -p "$TARGET_ROOT_MOUNT/boot/efi"
   run_logged "mounting EFI system partition" mount "$efi_partition" "$TARGET_ROOT_MOUNT/boot/efi"
 fi
@@ -343,7 +351,6 @@ EOF
 
 mkdir -p \
   "$TARGET_ROOT_MOUNT/etc/dpkg/dpkg.cfg.d" \
-  "$TARGET_ROOT_MOUNT/etc/netplan" \
   "$TARGET_ROOT_MOUNT/etc/systemd/system/systemd-networkd-wait-online.service.d" \
   "$TARGET_ROOT_MOUNT/etc/modprobe.d" \
   "$TARGET_ROOT_MOUNT/etc/ssh/sshd_config.d"
@@ -376,6 +383,8 @@ if [[ "${TARGET_ARCH}" == "arm64" ]]; then
     grub2-common
   )
 fi
+# systemd-stub, for the UKI finalize-minimal-rootfs.sh builds.
+boot_packages+=(systemd-boot-efi)
 
 run_logged_timeout "installing minimal runtime packages" "$CHROOT_APT_TIMEOUT_SECONDS" \
   chroot "$TARGET_ROOT_MOUNT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -384,10 +393,11 @@ run_logged_timeout "installing minimal runtime packages" "$CHROOT_APT_TIMEOUT_SE
     cloud-guest-utils \
     openssh-server \
     ca-certificates \
+    iproute2 \
     ncdu \
-    netplan.io \
     sudo \
-    systemd-sysv
+    systemd-sysv \
+    udev
 
 run_logged "installing RunsOn bootstrap binaries into target rootfs" \
   bash /tmp/install-runs-on-bootstrap.sh "$TARGET_ROOT_MOUNT"
@@ -417,34 +427,33 @@ cat > "$TARGET_ROOT_MOUNT/etc/fstab" <<EOF
 PARTUUID=$ROOT_PARTUUID / ext4 defaults 0 0
 EOF
 
-cat > "$TARGET_ROOT_MOUNT/etc/hostname" <<'EOF'
-ubuntu24-minimal
+cat > "$TARGET_ROOT_MOUNT/etc/hostname" <<EOF
+$MINIMAL_HOSTNAME
 EOF
 
-cat > "$TARGET_ROOT_MOUNT/etc/hosts" <<'EOF'
+cat > "$TARGET_ROOT_MOUNT/etc/hosts" <<EOF
 127.0.0.1 localhost
-127.0.1.1 ubuntu24-minimal
+127.0.1.1 $MINIMAL_HOSTNAME
 
 ::1 localhost ip6-localhost ip6-loopback
 ff02::1 ip6-allnodes
 ff02::2 ip6-allrouters
 EOF
 
-cat > "$TARGET_ROOT_MOUNT/etc/netplan/10-ec2.yaml" <<'EOF'
-network:
-  version: 2
-  renderer: networkd
-  ethernets:
-    en-nic:
-      match:
-        name: "en*"
-      dhcp4: true
-      dhcp6: false
-    eth-nic:
-      match:
-        name: "eth*"
-      dhcp4: true
-      dhcp6: false
+# networkd takes the primary NIC's IPv4 address over DHCP. Netplan would
+# only render this file, and on 26.04 it needs netplan-configure.service at
+# boot to do so.
+install -d -m 0755 "$TARGET_ROOT_MOUNT/etc/systemd/network"
+cat > "$TARGET_ROOT_MOUNT/etc/systemd/network/10-ec2.network" <<'EOF'
+[Match]
+Name=en* eth*
+
+[Network]
+DHCP=ipv4
+
+[DHCPv4]
+RouteMetric=100
+UseMTU=yes
 EOF
 
 cat > "$TARGET_ROOT_MOUNT/etc/ssh/sshd_config.d/10-hostkeys.conf" <<'EOF'
@@ -474,6 +483,10 @@ rm -f "$TARGET_ROOT_MOUNT/etc/systemd/system/ldconfig-after-rolaunch.service"
 cat > "$TARGET_ROOT_MOUNT/etc/default/grub" <<'EOF'
 GRUB_DEFAULT=0
 GRUB_TIMEOUT=0
+# Every boot sets recordfail, and grub-common.service, which clears it after
+# a good boot, is disabled on minimal images: without this, every reboot or
+# restart from stopped waits 30 s at the menu.
+GRUB_RECORDFAIL_TIMEOUT=0
 GRUB_DISTRIBUTOR=`( . /etc/os-release; echo ${NAME:-Ubuntu} ) 2>/dev/null || echo Ubuntu`
 GRUB_CMDLINE_LINUX_DEFAULT="console=ttyS0 nvme_core.io_timeout=4294967295 panic=-1 raid=noautodetect i8042.nokbd i8042.noaux i8042.nomux i8042.nopnp"
 GRUB_CMDLINE_LINUX=""

@@ -72,7 +72,10 @@ variant_allowlist_units() {
         docker.socket \
         remote-fs.target \
         rolaunch.service \
-        serial-getty@ttyS0.service
+        runs-on-syn-reroll.service \
+        runs-on-syn-reroll-stop.timer \
+        serial-getty@ttyS0.service \
+        systemd-networkd.service
       ;;
   esac
 }

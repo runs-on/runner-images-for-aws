@@ -14,10 +14,13 @@ class UbuntuTemplateTest < Minitest::Test
   STEPSECURITY_ARM64_TEMPLATE = File.join(TEMPLATE_DIR, "ubuntu-stepsecurity-arm64.pkr.hcl")
   DESCENDANT_TEMPLATES = [GPU_X64_TEMPLATE, STEPSECURITY_X64_TEMPLATE, STEPSECURITY_ARM64_TEMPLATE].freeze
   FULL_ROLAUNCH_SCRIPT = File.expand_path("../patches/ubuntu/files/configure-full-rolaunch.sh", __dir__)
+  SYN_REROLL_SCRIPT = File.expand_path("../patches/ubuntu/files/configure-syn-reroll.sh", __dir__)
   ENVIRONMENT_FINALIZER = File.expand_path("../patches/ubuntu/files/finalize-runner-environment.sh", __dir__)
   DESCENDANT_ROLAUNCH_SCRIPT = File.expand_path("../patches/ubuntu/files/finalize-rolaunch-descendant.sh", __dir__)
   GPU_INSTALL_SCRIPT = File.expand_path("../patches/ubuntu/build/install-gpu.sh", __dir__)
   MINIMAL_BASE_SCRIPT = File.expand_path("../patches/ubuntu/files/bootstrap-minimal-base.sh", __dir__)
+  MINIMAL_FINALIZE_SCRIPT = File.expand_path("../patches/ubuntu/files/finalize-minimal-rootfs.sh", __dir__)
+  RUNNER_FINALIZE_UNITS_SCRIPT = File.expand_path("../patches/ubuntu/files/runner-finalize-units.sh", __dir__)
   PATCH_LIB = File.expand_path("../bin/patch/lib.sh", __dir__)
   PRE_SCRIPT = File.expand_path("../patches/ubuntu/files/pre.sh", __dir__)
   RUNNER_USER_SCRIPT = File.expand_path("../patches/ubuntu/files/runner-user.sh", __dir__)
@@ -111,8 +114,8 @@ class UbuntuTemplateTest < Minitest::Test
   end
 
   def test_minimal_images_use_architecture_appropriate_cdn_apt_mirrors
-    x64 = File.read(File.join(TEMPLATE_DIR, "ubuntu24-minimal-x64.pkr.hcl"))
-    arm64 = File.read(File.join(TEMPLATE_DIR, "ubuntu24-minimal-arm64.pkr.hcl"))
+    x64 = File.read(File.join(TEMPLATE_DIR, "ubuntu-minimal-x64.pkr.hcl"))
+    arm64 = File.read(File.join(TEMPLATE_DIR, "ubuntu-minimal-arm64.pkr.hcl"))
 
     assert_includes x64, "TARGET_UBUNTU_MIRROR=https://archive.ubuntu.com/ubuntu/"
     assert_includes x64, "TARGET_UBUNTU_SECURITY_MIRROR=https://security.ubuntu.com/ubuntu/"
@@ -123,8 +126,19 @@ class UbuntuTemplateTest < Minitest::Test
     refute_match(/\.ec2\.(archive|ports)\.ubuntu\.com/, arm64)
   end
 
+  def test_minimal_images_boot_a_uki_built_after_the_root_is_pinned
+    x64 = File.read(File.join(TEMPLATE_DIR, "ubuntu-minimal-x64.pkr.hcl"))
+    finalize = File.read(MINIMAL_FINALIZE_SCRIPT)
+
+    assert_includes x64, 'boot_mode                                 = "uefi-preferred"'
+    assert_operator finalize.index("\nbuild_uki\n"), :>, finalize.index("\npin_grub_root_partuuid\n")
+    assert_operator finalize.index("\nfinalize_sparse_rootfs_image"), :>, finalize.index("\nbuild_uki\n")
+    # bin/patch rewrites amd64 to arm64 in custom scripts for arm64 builds.
+    refute_match(/amd64\)|arm64\)/, finalize[finalize.index("build_uki() {")..])
+  end
+
   def test_full_and_minimal_images_run_dpkg_under_eatmydata_once_apt_is_configured
-    %w[ubuntu-full-x64 ubuntu-full-arm64 ubuntu24-minimal-x64 ubuntu24-minimal-arm64].each do |name|
+    %w[ubuntu-full-x64 ubuntu-full-arm64 ubuntu-minimal-x64 ubuntu-minimal-arm64].each do |name|
       template = File.read(File.join(TEMPLATE_DIR, "#{name}.pkr.hcl"))
       configure_apt = template.index("configure-apt.sh")
       eatmydata = template.index("configure-dpkg-eatmydata.sh")
@@ -167,12 +181,14 @@ class UbuntuTemplateTest < Minitest::Test
     end.to_h
 
     assert_equal(
-      %w[ubuntu26-gpu-x64 ubuntu26-stepsecurity-arm64 ubuntu26-stepsecurity-x64],
+      %w[ubuntu26-gpu-x64 ubuntu26-minimal-arm64 ubuntu26-minimal-x64 ubuntu26-stepsecurity-arm64 ubuntu26-stepsecurity-x64],
       configured.keys.sort
     )
     assert_equal "ubuntu-gpu-x64", configured.fetch("ubuntu26-gpu-x64").fetch("template")
     assert_equal "ubuntu-stepsecurity-x64", configured.fetch("ubuntu26-stepsecurity-x64").fetch("template")
     assert_equal "ubuntu-stepsecurity-arm64", configured.fetch("ubuntu26-stepsecurity-arm64").fetch("template")
+    assert_equal "ubuntu-minimal-x64", configured.fetch("ubuntu26-minimal-x64").fetch("template")
+    assert_equal "ubuntu-minimal-arm64", configured.fetch("ubuntu26-minimal-arm64").fetch("template")
     configured.each_value { |image| assert_equal 400, image.fetch("volume_throughput") }
   end
 
@@ -345,6 +361,51 @@ class UbuntuTemplateTest < Minitest::Test
     end
   end
 
+  def test_reroll_loads_before_rolaunch_and_is_flushed_not_deleted
+    script = File.read(SYN_REROLL_SCRIPT)
+
+    [FULL_X64_TEMPLATE, FULL_ARM64_TEMPLATE].each do |path|
+      template = File.read(path)
+      assert_operator template.index("configure-syn-reroll.sh"), :<, template.index("configure-full-rolaunch.sh"), path
+    end
+    # Full images build in place and get it from Ubuntu 26 on; minimal images
+    # pass the root they build into.
+    assert_match(/if \[\[ "\$\{root\}" == "\/" && "\$\{IMAGE_OS\}" != "ubuntu26" \]\]; then.*?exit 0/m, script)
+    assert_includes script, "Before=network-pre.target rolaunch.service"
+    # rolaunch is ordered after the unit but doesn't require it, and must not
+    # wait on a hung nft.
+    refute_match(/^(Requires|Requisite|BindsTo)=.*rolaunch/, script)
+    assert_includes script, "TimeoutStartSec=10s"
+    # Deleting the last nat chain unregisters the hook that NATs open connections.
+    assert_includes script, "nft flush chain ip ro_syn post"
+    refute_match(/nft (delete|destroy) table/, script)
+    # runner-user.sh and runner-finalize-units.sh disable timers.target, so the
+    # stop timer hangs off multi-user.target.
+    assert_includes File.read(RUNNER_USER_SCRIPT), "systemctl disable timers.target"
+    assert_includes File.read(File.expand_path("../patches/ubuntu/files/runner-finalize-units.sh", __dir__)),
+      "disable_target_units timers.target"
+    assert_match(/OnBootSec=120\nAccuracySec=1s\n\n(?:#.*\n)+\[Install\]\nWantedBy=multi-user\.target/, script)
+  end
+
+  def test_minimal_installs_the_reroll_into_its_target_before_the_unit_allowlist
+    script = File.read(SYN_REROLL_SCRIPT)
+
+    %w[ubuntu-minimal-x64 ubuntu-minimal-arm64].each do |name|
+      template = File.read(File.join(TEMPLATE_DIR, "#{name}.pkr.hcl"))
+      step = template[/provisioner "shell" \{(?:(?!provisioner).)*configure-syn-reroll\.sh"\s*\}/m]
+      refute_nil step, name
+      assert_includes step, '"TARGET_ROOT_MOUNT=/mnt/minimal-root"', name
+      assert_includes step, '"IMAGE_OS=${var.image_os}"', name
+      assert_operator template.index("minimal-install-target-docker.sh"), :<, template.index("configure-syn-reroll.sh"), name
+      assert_operator template.index("configure-syn-reroll.sh"), :<, template.index("runner-finalize-units.sh"), name
+    end
+    # The minimal target has no python3 or procps: the set is generated on the
+    # build host and the sysctls are written to /proc/sys.
+    assert_includes script, 'in_root nft -c -f /etc/runs-on/syn-reroll.nft'
+    refute_includes script, "sysctl -w"
+    assert_includes script, 'systemctl --root="${root}" enable runs-on-syn-reroll.service runs-on-syn-reroll-stop.timer'
+  end
+
   def test_full_rolaunch_activation_is_limited_to_ubuntu26
     patch_lib = File.read(PATCH_LIB)
     script = File.read(FULL_ROLAUNCH_SCRIPT)
@@ -422,6 +483,24 @@ class UbuntuTemplateTest < Minitest::Test
     assert_includes test_workflow, "journalctl --unit rolaunch.service"
     assert_includes test_workflow, "/var/lib/rolaunch/timings.json"
     assert_includes test_workflow, "/var/log/cloud-init-output.log"
+  end
+
+  def test_minimal_grub_does_not_wait_after_a_boot_it_never_marked_good
+    script = File.read(MINIMAL_BASE_SCRIPT)
+    grub_defaults = script[/cat > "\$TARGET_ROOT_MOUNT\/etc\/default\/grub" <<'EOF'\n(.*?)\nEOF\n/m, 1]
+
+    # grub-common.service clears recordfail after a good boot; minimal images
+    # disable it, so GRUB must not wait for the recordfail timeout instead.
+    assert_includes grub_defaults, "GRUB_RECORDFAIL_TIMEOUT=0"
+    assert_includes File.read(RUNNER_FINALIZE_UNITS_SCRIPT), "grub-common.service"
+  end
+
+  def test_minimal_grub_skips_the_ps2_probe_like_the_direct_boot
+    direct_arguments = File.read(File.expand_path("../patches/ubuntu/files/prepare-direct-uefi.sh", __dir__))[/^readonly skip_ps2_arguments=\((.*)\)$/, 1].split
+    grub_cmdline = File.read(MINIMAL_BASE_SCRIPT)[/^GRUB_CMDLINE_LINUX_DEFAULT="(.*)"$/, 1].split
+
+    refute_empty direct_arguments
+    assert_empty direct_arguments - grub_cmdline, "minimal GRUB command line lacks PS/2 arguments the direct boot uses"
   end
 
   def test_only_full_rolaunch_removes_the_systemd_start_deadline
