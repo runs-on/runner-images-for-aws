@@ -137,14 +137,16 @@ class UbuntuTemplateTest < Minitest::Test
     refute_match(/amd64\)|arm64\)/, finalize[finalize.index("build_uki() {")..])
   end
 
-  def test_full_and_minimal_images_run_dpkg_under_eatmydata_once_apt_is_configured
+  def test_full_and_minimal_images_tune_apt_once_it_is_configured
     %w[ubuntu-full-x64 ubuntu-full-arm64 ubuntu-minimal-x64 ubuntu-minimal-arm64].each do |name|
       template = File.read(File.join(TEMPLATE_DIR, "#{name}.pkr.hcl"))
       configure_apt = template.index("configure-apt.sh")
-      eatmydata = template.index("configure-dpkg-eatmydata.sh")
 
-      refute_nil eatmydata, name
-      assert_operator eatmydata, :>, configure_apt, name
+      %w[configure-dpkg-eatmydata.sh configure-apt-gzip-indexes.sh].each do |script|
+        position = template.index(script)
+        refute_nil position, "#{name}: #{script}"
+        assert_operator position, :>, configure_apt, "#{name}: #{script}"
+      end
     end
     refute_includes File.read(MINIMAL_BASE_SCRIPT), "Pipeline-Depth"
   end
