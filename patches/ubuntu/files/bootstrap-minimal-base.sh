@@ -351,7 +351,6 @@ EOF
 
 mkdir -p \
   "$TARGET_ROOT_MOUNT/etc/dpkg/dpkg.cfg.d" \
-  "$TARGET_ROOT_MOUNT/etc/netplan" \
   "$TARGET_ROOT_MOUNT/etc/systemd/system/systemd-networkd-wait-online.service.d" \
   "$TARGET_ROOT_MOUNT/etc/modprobe.d" \
   "$TARGET_ROOT_MOUNT/etc/ssh/sshd_config.d"
@@ -387,14 +386,6 @@ fi
 # systemd-stub, for the UKI finalize-minimal-rootfs.sh builds.
 boot_packages+=(systemd-boot-efi)
 
-# Netplan renders networkd config from a generator on noble. On later
-# releases it needs netplan-configure.service at boot, so those images give
-# networkd its own config instead.
-network_packages=()
-if [[ "${UBUNTU_RELEASE}" == "noble" ]]; then
-  network_packages=(netplan.io)
-fi
-
 run_logged_timeout "installing minimal runtime packages" "$CHROOT_APT_TIMEOUT_SECONDS" \
   chroot "$TARGET_ROOT_MOUNT" /usr/bin/env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     linux-image-aws \
@@ -404,7 +395,6 @@ run_logged_timeout "installing minimal runtime packages" "$CHROOT_APT_TIMEOUT_SE
     ca-certificates \
     iproute2 \
     ncdu \
-    "${network_packages[@]}" \
     sudo \
     systemd-sysv \
     udev
@@ -450,27 +440,11 @@ ff02::1 ip6-allnodes
 ff02::2 ip6-allrouters
 EOF
 
-if [[ "${UBUNTU_RELEASE}" == "noble" ]]; then
-  cat > "$TARGET_ROOT_MOUNT/etc/netplan/10-ec2.yaml" <<'EOF'
-network:
-  version: 2
-  renderer: networkd
-  ethernets:
-    en-nic:
-      match:
-        name: "en*"
-      dhcp4: true
-      dhcp6: false
-    eth-nic:
-      match:
-        name: "eth*"
-      dhcp4: true
-      dhcp6: false
-EOF
-else
-  # The same IPv4 DHCP that netplan renders from the noble config above.
-  install -d -m 0755 "$TARGET_ROOT_MOUNT/etc/systemd/network"
-  cat > "$TARGET_ROOT_MOUNT/etc/systemd/network/10-ec2.network" <<'EOF'
+# networkd takes the primary NIC's IPv4 address over DHCP. Netplan would
+# only render this file, and on 26.04 it needs netplan-configure.service at
+# boot to do so.
+install -d -m 0755 "$TARGET_ROOT_MOUNT/etc/systemd/network"
+cat > "$TARGET_ROOT_MOUNT/etc/systemd/network/10-ec2.network" <<'EOF'
 [Match]
 Name=en* eth*
 
@@ -481,7 +455,6 @@ DHCP=ipv4
 RouteMetric=100
 UseMTU=yes
 EOF
-fi
 
 cat > "$TARGET_ROOT_MOUNT/etc/ssh/sshd_config.d/10-hostkeys.conf" <<'EOF'
 HostKey /etc/ssh/ssh_host_ed25519_key
