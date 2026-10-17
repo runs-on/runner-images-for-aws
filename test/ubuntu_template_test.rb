@@ -521,6 +521,21 @@ class UbuntuTemplateTest < Minitest::Test
     refute_includes File.read(File.expand_path("../patches/ubuntu/files/finalize-minimal-rootfs.sh", __dir__)), "--initrd"
   end
 
+  def test_ubuntu26_full_presets_the_serial_console_like_minimal
+    direct = File.read(File.expand_path("../patches/ubuntu/files/prepare-direct-uefi.sh", __dir__))
+    console_arguments = direct[/^readonly console_arguments=\((.*)\)$/, 1].split
+    grub_dropin = File.read(FULL_ROLAUNCH_SCRIPT)[/95-runs-on-console\.cfg <<'EOF'\n(.*?)\nEOF\n/m, 1]
+    minimal_cmdline = File.read(MINIMAL_BASE_SCRIPT)[/^GRUB_CMDLINE_LINUX_DEFAULT="(.*)"$/, 1].split
+
+    refute_empty console_arguments
+    assert_includes direct, 'for argument in "${skip_ps2_arguments[@]}" "${console_arguments[@]}"; do'
+    console_arguments.each do |argument|
+      assert_includes grub_dropin, argument
+      assert_includes minimal_cmdline, argument
+    end
+    assert_includes File.read(FULL_ROLAUNCH_SCRIPT), "modules-load.d/ena.conf"
+  end
+
   def test_minimal_images_ship_libicu_and_a_writable_dotnet_root
     script = File.read(File.expand_path("../patches/ubuntu/files/minimal-install-target-tooling.sh", __dir__))
     releases = CONFIG.fetch("images").map { |image| image.fetch("id") }.grep(/-minimal-/).map { |id| id[/\Aubuntu\d+/] }.uniq
