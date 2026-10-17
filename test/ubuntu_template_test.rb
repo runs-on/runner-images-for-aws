@@ -505,6 +505,22 @@ class UbuntuTemplateTest < Minitest::Test
     assert_empty direct_arguments - grub_cmdline, "minimal GRUB command line lacks PS/2 arguments the direct boot uses"
   end
 
+  def test_minimal_boot_does_not_wait_on_the_serial_console_or_udev
+    script = File.read(MINIMAL_BASE_SCRIPT)
+    grub_cmdline = script[/^GRUB_CMDLINE_LINUX_DEFAULT="(.*)"$/, 1].split
+
+    # systemd 259 waits 333 ms for each console reply it never gets unless the
+    # terminal type and size are preset.
+    %w[systemd.tty.term.console=linux systemd.tty.rows.console=24 systemd.tty.columns.console=80 quiet net.ifnames=0].each do |argument|
+      assert_includes grub_cmdline, argument
+    end
+    assert_includes script, "modules-load.d/ena.conf"
+    assert_includes script, "systemd-networkd.service.d/10-early.conf"
+    assert_includes script, "rolaunch.service.d/10-early.conf"
+    # The minimal UKI carries no early-microcode initrd; a VM cannot load one.
+    refute_includes File.read(File.expand_path("../patches/ubuntu/files/finalize-minimal-rootfs.sh", __dir__)), "--initrd"
+  end
+
   def test_minimal_images_ship_libicu_and_a_writable_dotnet_root
     script = File.read(File.expand_path("../patches/ubuntu/files/minimal-install-target-tooling.sh", __dir__))
     releases = CONFIG.fetch("images").map { |image| image.fetch("id") }.grep(/-minimal-/).map { |id| id[/\Aubuntu\d+/] }.uniq
