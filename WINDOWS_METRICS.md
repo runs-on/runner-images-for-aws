@@ -71,3 +71,12 @@
 | 2026-10-18T11:31:47Z | - | - | - | - | - | - | - | builder-not-found image=not-found |
 
 - Peak observed used: n/a (no successful C: samples captured)
+
+## runs-on-dev-pr110-windows25-full-x64-20261018133600
+- Region: us-east-1
+- Sample interval: 180s
+
+| Timestamp (UTC) | Instance ID | State | Used GB | Free GB | Total GB | Used % | Peak Used GB | Note |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| 2026-10-18T11:37:16Z | - | - | - | - | - | - | - | builder-not-found image=not-found |
+| 2026-10-18T11:40:17Z | - | - | - | - | - | - | - | builder-not-found image=not-found |

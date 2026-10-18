@@ -30,9 +30,9 @@ class WindowsTemplateTest < Minitest::Test
 
   def test_boot_layout_is_traced_across_the_last_restart_and_packed
     template = File.read(TEMPLATE)
-    trace = template.index("Start-BootTrace.ps1")
+    trace = template.index("scripts/build/Start-BootTrace.ps1")
     restart = template.index('provisioner "windows-restart"', trace)
-    optimize = template.index("Optimize-BootLayout.ps1")
+    optimize = template.index("scripts/build/Optimize-BootLayout.ps1")
     assert trace && restart && optimize, "trace, restart and optimize steps present"
     assert_operator trace, :<, restart
     assert_operator restart, :<, optimize
