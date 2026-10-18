@@ -18,7 +18,8 @@ $workDir = "C:\ProgramData\RunsOn"
 $etl = Join-Path $workDir "boottrace.etl"
 $csv = Join-Path $workDir "boottrace.csv"
 $list = Join-Path $workDir "bootlayout.txt"
-$bootpack = Join-Path $env:IMAGE_FOLDER "assets\bootpack.exe"
+# Copied out of the image folder right after upload; cleanup removes that folder.
+$bootpack = Join-Path $workDir "bootpack.exe"
 if (-not (Test-Path $bootpack)) {
     throw "bootpack.exe is missing at $bootpack"
 }
@@ -74,3 +75,4 @@ $hives = "C:\Windows\System32\config\SOFTWARE,C:\Windows\System32\config\SYSTEM,
 if ($LASTEXITCODE -ne 0) {
     throw "bootpack failed with exit code $LASTEXITCODE"
 }
+Remove-Item $bootpack -Force

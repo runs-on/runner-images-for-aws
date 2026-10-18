@@ -241,6 +241,15 @@ build {
     source      = "${path.root}/../assets"
   }
 
+  # The image folder is removed during cleanup; keep bootpack.exe for
+  # Optimize-BootLayout.ps1, which runs after the last restart.
+  provisioner "powershell" {
+    inline = [
+      "New-Item -ItemType Directory -Force -Path 'C:\\ProgramData\\RunsOn' | Out-Null",
+      "Copy-Item '${var.image_folder}\\assets\\bootpack.exe' 'C:\\ProgramData\\RunsOn\\bootpack.exe' -Force"
+    ]
+  }
+
   provisioner "file" {
     destination = "${var.image_folder}\\scripts\\"
     sources     = [
@@ -515,8 +524,7 @@ provisioner "powershell" {
   }
 
   provisioner "powershell" {
-    environment_vars = ["IMAGE_FOLDER=${var.image_folder}"]
-    scripts          = ["${path.root}/../scripts/build/Optimize-BootLayout.ps1"]
+    scripts = ["${path.root}/../scripts/build/Optimize-BootLayout.ps1"]
   }
 
   provisioner "powershell" {
