@@ -505,8 +505,18 @@ provisioner "powershell" {
     ]
   }
 
+  # The next restart is recorded so that the files it reads can be packed.
+  provisioner "powershell" {
+    scripts = ["${path.root}/../scripts/build/Start-BootTrace.ps1"]
+  }
+
   provisioner "windows-restart" {
     restart_timeout = "20m"
+  }
+
+  provisioner "powershell" {
+    environment_vars = ["IMAGE_FOLDER=${var.image_folder}"]
+    scripts          = ["${path.root}/../scripts/build/Optimize-BootLayout.ps1"]
   }
 
   provisioner "powershell" {

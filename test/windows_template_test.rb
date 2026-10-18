@@ -27,4 +27,17 @@ class WindowsTemplateTest < Minitest::Test
     refute_includes config, "setWallpaper"
     assert_includes File.read(BOOT_SCRIPT), 'Register-ScheduledTask -TaskName "RunsOn Windows activation"'
   end
+
+  def test_boot_layout_is_traced_across_the_last_restart_and_packed
+    template = File.read(TEMPLATE)
+    trace = template.index("Start-BootTrace.ps1")
+    restart = template.index('provisioner "windows-restart"', trace)
+    optimize = template.index("Optimize-BootLayout.ps1")
+    assert trace && restart && optimize, "trace, restart and optimize steps present"
+    assert_operator trace, :<, restart
+    assert_operator restart, :<, optimize
+    patch = File.read(PATCH_SCRIPT)
+    assert_includes patch, "GOOS=windows GOARCH=amd64 go build"
+    assert_includes patch, "images/windows/assets/bootpack.exe"
+  end
 end
