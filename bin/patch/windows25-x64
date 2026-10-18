@@ -26,6 +26,7 @@ cp patches/windows/build/Install-RunsOnBootstrap.ps1 "$release_dir/images/window
 cp patches/windows/build/Install-NativeImages.ps1 "$release_dir/images/windows/scripts/build/"
 cp patches/windows/build/Install-VisualStudio.ps1 "$release_dir/images/windows/scripts/build/"
 cp patches/windows/build/Install-GPU.ps1 "$release_dir/images/windows/scripts/build/"
+cp patches/windows/build/Configure-RunsOnBoot.ps1 "$release_dir/images/windows/scripts/build/"
 
 for file in patches/windows/files/patch-*.ps1; do
   if [ -f "$file" ]; then
