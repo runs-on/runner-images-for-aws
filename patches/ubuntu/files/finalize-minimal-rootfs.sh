@@ -113,12 +113,12 @@ build_uki() {
   log "building ${efi_arch} UKI from ${kernel#"${TARGET_ROOT_MOUNT}"} with: ${cmdline}"
   DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends systemd-ukify >/dev/null
   install -d "$(dirname "${output}")"
-  local -a initrd=()
-  [[ -f "${TARGET_ROOT_MOUNT}/boot/microcode.cpio" ]] && initrd=(--initrd "${TARGET_ROOT_MOUNT}/boot/microcode.cpio")
+  # No early-microcode initrd: Nitro owns the microcode of a virtual machine
+  # and the guest cannot load any, so the 15 MB archive only slowed the
+  # firmware's read of the UKI. Metal instances keep the packages on disk.
   ukify build \
     --linux "${kernel}" \
     --uname "${release}" \
-    "${initrd[@]}" \
     --cmdline "${cmdline}" \
     --stub "${stub}" \
     --output "${output}"

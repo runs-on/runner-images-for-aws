@@ -208,6 +208,19 @@ done
 sed -i 's/^Storage=Volatile$/Storage=volatile/' /etc/systemd/journald.conf
 grep -qxF 'Storage=volatile' /etc/systemd/journald.conf || echo 'Storage=volatile' >> /etc/systemd/journald.conf
 
+# The same console arguments prepare-direct-uefi.sh adds to the direct x64
+# boot, for arm64 and for the GRUB fallback: systemd 259 otherwise waits
+# 333 ms for each of three serial-console replies that never come.
+install -d -m 0755 /etc/default/grub.d
+cat > /etc/default/grub.d/95-runs-on-console.cfg <<'EOF'
+GRUB_CMDLINE_LINUX_DEFAULT="$GRUB_CMDLINE_LINUX_DEFAULT quiet systemd.tty.term.console=linux systemd.tty.rows.console=24 systemd.tty.columns.console=80"
+EOF
+
+# Load the NIC driver with systemd-modules-load; udev coldplug only probes it
+# about 1.5 s into userspace.
+install -d -m 0755 /etc/modules-load.d
+printf 'ena\n' > /etc/modules-load.d/ena.conf
+
 update-grub
 for variable in \
   initrdfail \

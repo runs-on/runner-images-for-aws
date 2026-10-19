@@ -478,6 +478,26 @@ StandardError=journal+console
 WantedBy=multi-user.target
 EOF
 
+# Start networkd as soon as udev runs and rolaunch as soon as the network is
+# up, instead of waiting for sysinit.target and basic.target. With the ENA
+# driver loaded by systemd-modules-load below, DHCP completes a few
+# milliseconds after networkd starts and rolaunch no longer waits for IMDS.
+install -d "$TARGET_ROOT_MOUNT/etc/systemd/system/systemd-networkd.service.d" "$TARGET_ROOT_MOUNT/etc/systemd/system/rolaunch.service.d"
+cat > "$TARGET_ROOT_MOUNT/etc/systemd/system/systemd-networkd.service.d/10-early.conf" <<'EOF'
+[Unit]
+DefaultDependencies=no
+After=systemd-udevd.service systemd-modules-load.service systemd-sysusers.service systemd-sysctl.service systemd-tmpfiles-setup-dev.service systemd-tmpfiles-setup.service network-pre.target
+Conflicts=shutdown.target
+Before=shutdown.target
+EOF
+cat > "$TARGET_ROOT_MOUNT/etc/systemd/system/rolaunch.service.d/10-early.conf" <<'EOF'
+[Unit]
+DefaultDependencies=no
+After=systemd-networkd.service systemd-remount-fs.service systemd-tmpfiles-setup.service systemd-journald.socket local-fs.target runs-on-syn-reroll.service
+Conflicts=shutdown.target
+Before=shutdown.target multi-user.target
+EOF
+
 rm -f "$TARGET_ROOT_MOUNT/etc/systemd/system/ldconfig-after-rolaunch.service"
 
 cat > "$TARGET_ROOT_MOUNT/etc/default/grub" <<'EOF'
@@ -488,7 +508,12 @@ GRUB_TIMEOUT=0
 # restart from stopped waits 30 s at the menu.
 GRUB_RECORDFAIL_TIMEOUT=0
 GRUB_DISTRIBUTOR=`( . /etc/os-release; echo ${NAME:-Ubuntu} ) 2>/dev/null || echo Ubuntu`
-GRUB_CMDLINE_LINUX_DEFAULT="console=ttyS0 nvme_core.io_timeout=4294967295 panic=-1 raid=noautodetect i8042.nokbd i8042.noaux i8042.nomux i8042.nopnp"
+# quiet: the serial console is emulated and every kernel line costs a VM exit.
+# net.ifnames=0: networkd configures eth0 at once instead of after the rename.
+# systemd.tty.*: systemd 259 otherwise queries the serial console for its
+# terminfo, size and background colour and waits 333 ms for each reply that
+# never comes (0.7-1 s per boot in PID 1, before the first unit starts).
+GRUB_CMDLINE_LINUX_DEFAULT="console=ttyS0 nvme_core.io_timeout=4294967295 panic=-1 raid=noautodetect i8042.nokbd i8042.noaux i8042.nomux i8042.nopnp quiet net.ifnames=0 systemd.tty.term.console=linux systemd.tty.rows.console=24 systemd.tty.columns.console=80"
 GRUB_CMDLINE_LINUX=""
 GRUB_TERMINAL="console serial"
 GRUB_SERIAL_COMMAND="serial --speed=115200 --unit=0 --word=8 --parity=no --stop=1"
@@ -518,6 +543,11 @@ EOF
 cat > "$TARGET_ROOT_MOUNT/etc/apt/apt.conf.d/99-phased-updates" <<'EOF'
 APT::Get::Always-Include-Phased-Updates "true";
 EOF
+
+install -d -m 0755 "$TARGET_ROOT_MOUNT/etc/modules-load.d"
+# Load the NIC driver with systemd-modules-load; udev coldplug only probed it
+# about 1.5 s into userspace.
+printf 'ena\n' > "$TARGET_ROOT_MOUNT/etc/modules-load.d/ena.conf"
 
 cat > "$TARGET_ROOT_MOUNT/etc/modprobe.d/runs-on-minimal-blacklist.conf" <<'EOF'
 # Legacy parallel-port stack is not useful on EC2 runner images.
