@@ -30,17 +30,6 @@ const (
 	chunkBytes                = 512 * 1024
 )
 
-type extent struct {
-	nextVcn int64
-	lcn     int64
-}
-
-type item struct {
-	path     string
-	clusters int64
-	extents  int
-}
-
 func main() {
 	list := flag.String("list", `C:\ProgramData\RunsOn\bootlayout.txt`, "file list in boot order")
 	volume := flag.String("volume", "C:", "volume")
@@ -66,17 +55,12 @@ func main() {
 	var items []item
 	var needed int64
 	for _, p := range files {
-		stream := p
-		ext, size, err := retrievalPointers(stream)
-		if err == nil && size == 0 {
-			stream = p + ":WofCompressedData"
-			ext, size, err = retrievalPointers(stream)
-		}
-		if err != nil || size == 0 {
+		it, err := fileItem(p, retrievalPointers)
+		if err != nil || it.clusters == 0 {
 			continue
 		}
-		items = append(items, item{stream, size, len(ext)})
-		needed += size
+		items = append(items, it)
+		needed += it.clusters
 	}
 	fragmented := 0
 	for _, it := range items {
@@ -104,31 +88,19 @@ func main() {
 		return
 	}
 
-	// Fill free runs from the largest, each file whole; a file that does not
-	// fit the rest of the current run goes to the next one.
-	runIdx := 0
-	cursor, end := runs[0][0], runs[0][1]
-	var moved, failed, movedClusters int64
-	for _, it := range items {
-		for cursor+it.clusters > end {
-			runIdx++
-			if runIdx >= len(runs) {
-				fatal("ran out of free runs after %d files", moved)
-			}
-			cursor, end = runs[runIdx][0], runs[runIdx][1]
-		}
-		if err := moveWhole(vol, it.path, cursor, it.clusters); err != nil {
-			failed++
-			if failed <= 20 {
-				fmt.Printf("skip %s: %v\n", it.path, err)
-			}
-			continue
-		}
-		moved++
-		movedClusters += it.clusters
-		cursor += it.clusters
+	refresh := func() [][2]int64 {
+		total, current := volumeBitmap(vol)
+		fresh := freeRuns(current, total, *minFree<<20/clusterSize)
+		sort.Slice(fresh, func(i, j int) bool { return fresh[i][1]-fresh[i][0] > fresh[j][1]-fresh[j][0] })
+		return fresh
 	}
-	fmt.Printf("moved %d files (%d MiB), %d failed\n", moved, movedClusters*clusterSize>>20, failed)
+	moved, movedClusters, err := packFiles(items, runs, refresh, func(it item, lcn int64) error {
+		return moveWhole(vol, it.path, lcn, it.clusters)
+	})
+	if err != nil {
+		fatal("packing stopped after %d files: %v", moved, err)
+	}
+	fmt.Printf("moved %d files (%d MiB)\n", moved, movedClusters*clusterSize>>20)
 	fmt.Printf("512 KiB chunks touched by the set after packing: %d\n", chunkCount(items, clusterSize))
 }
 
@@ -190,38 +162,6 @@ func volumeBitmap(vol windows.Handle) (int64, []byte) {
 	return total, out[16:n]
 }
 
-func isFree(bitmap []byte, c int64) bool {
-	return c/8 < int64(len(bitmap)) && bitmap[c/8]&(1<<(uint(c)%8)) == 0
-}
-
-func countFree(bitmap []byte, total int64) int64 {
-	var free int64
-	for c := int64(0); c < total; c++ {
-		if isFree(bitmap, c) {
-			free++
-		}
-	}
-	return free
-}
-
-func freeRuns(bitmap []byte, total int64, minClusters int64) [][2]int64 {
-	var runs [][2]int64
-	start := int64(-1)
-	for c := int64(0); c <= total; c++ {
-		free := c < total && isFree(bitmap, c)
-		if free && start < 0 {
-			start = c
-		}
-		if !free && start >= 0 {
-			if c-start >= minClusters {
-				runs = append(runs, [2]int64{start, c})
-			}
-			start = -1
-		}
-	}
-	return runs
-}
-
 func openForMove(path string) (windows.Handle, error) {
 	return windows.CreateFile(windows.StringToUTF16Ptr(path), windows.FILE_READ_ATTRIBUTES|windows.SYNCHRONIZE, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE, nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS, 0)
 }
@@ -241,19 +181,7 @@ func retrievalPointers(path string) ([]extent, int64, error) {
 		}
 		return nil, 0, err
 	}
-	count := int64(binary.LittleEndian.Uint32(out[0:4]))
-	startVcn := int64(binary.LittleEndian.Uint64(out[8:16]))
-	var ext []extent
-	last := startVcn
-	for i := int64(0); i < count && 16+i*16+16 <= int64(n); i++ {
-		next := int64(binary.LittleEndian.Uint64(out[16+i*16 : 24+i*16]))
-		lcn := int64(binary.LittleEndian.Uint64(out[24+i*16 : 32+i*16]))
-		if lcn != -1 { // sparse hole
-			ext = append(ext, extent{next, lcn})
-		}
-		last = next
-	}
-	return ext, last - startVcn, nil
+	return decodeExtents(out[:n])
 }
 
 func moveWhole(vol windows.Handle, path string, lcn int64, clusters int64) error {
@@ -282,12 +210,15 @@ func chunkCount(items []item, clusterSize int64) int {
 		vcn := int64(0)
 		for _, e := range ext {
 			length := e.nextVcn - vcn
+			vcn = e.nextVcn
+			if e.lcn == -1 {
+				continue
+			}
 			startByte := e.lcn * clusterSize
 			endByte := (e.lcn + length) * clusterSize
 			for c := startByte / chunkBytes; c < (endByte+chunkBytes-1)/chunkBytes; c++ {
 				chunks[c] = struct{}{}
 			}
-			vcn = e.nextVcn
 		}
 	}
 	return len(chunks)

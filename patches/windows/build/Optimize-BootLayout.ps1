@@ -38,34 +38,14 @@ if ($LASTEXITCODE -ne 0) {
 }
 Remove-Item $etl -Force
 
-# DiskIo/Read events carry the file object; FileIo/FileCreate and FileRundown
-# events map file objects to names. Keep the files in first-read order.
-$names = @{}
-$first = @{}
-$t0 = 0
-foreach ($line in [IO.File]::ReadLines($csv)) {
-    if ($line.StartsWith("      FileIo, FileCreate") -or $line.StartsWith("      FileIo, FileRundown")) {
-        $parts = $line.Split(',')
-        $names[$parts[19].Trim()] = ($parts[20..($parts.Length - 1)] -join ',').Trim().Trim('"')
-        continue
-    }
-    if ($line.StartsWith("      DiskIo,       Read,")) {
-        $parts = $line.Split(',')
-        $ts = [int64]$parts[16].Trim()
-        if ($t0 -eq 0) { $t0 = $ts }
-        $fo = $parts[24].Trim()
-        if (-not $first.ContainsKey($fo)) { $first[$fo] = $ts - $t0 }
-    }
-}
-Remove-Item $csv -Force
-
-$files = $first.GetEnumerator() | Sort-Object Value | ForEach-Object {
-    if (-not $names.ContainsKey($_.Key)) { return }
-    $name = $names[$_.Key] -replace '^\\Device\\HarddiskVolume\d+', 'C:'
+Import-Module (Join-Path $workDir 'BootTrace.psm1') -Force
+$files = Get-BootTraceFiles -Path $csv | ForEach-Object {
+    $name = $_ -replace '^\\Device\\HarddiskVolume\d+', 'C:'
     $name -replace ':WofCompressedData$', ''
 } | Where-Object {
     $_ -notmatch '\\\$|:\$|\\pagefile\.sys$|\\config\\(SYSTEM|SOFTWARE|DEFAULT|SAM|SECURITY|DRIVERS|BBI|COMPONENTS)$|\.evtx$|\.etl$|\.log$|\\Temp\\' -and (Test-Path -LiteralPath $_ -PathType Leaf)
 } | Select-Object -Unique
+Remove-Item $csv -Force
 [IO.File]::WriteAllLines($list, [string[]]$files)
 Write-Host "Boot file set: $($files.Count) files"
 

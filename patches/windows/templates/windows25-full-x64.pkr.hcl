@@ -241,12 +241,13 @@ build {
     source      = "${path.root}/../assets"
   }
 
-  # The image folder is removed during cleanup; keep bootpack.exe for
+  # The image folder is removed during cleanup; keep the boot layout tools for
   # Optimize-BootLayout.ps1, which runs after the last restart.
   provisioner "powershell" {
     inline = [
       "New-Item -ItemType Directory -Force -Path 'C:\\ProgramData\\RunsOn' | Out-Null",
-      "Copy-Item '${var.image_folder}\\assets\\bootpack.exe' 'C:\\ProgramData\\RunsOn\\bootpack.exe' -Force"
+      "Copy-Item '${var.image_folder}\\assets\\bootpack.exe' 'C:\\ProgramData\\RunsOn\\bootpack.exe' -Force",
+      "Copy-Item '${var.image_folder}\\assets\\BootTrace.psm1' 'C:\\ProgramData\\RunsOn\\BootTrace.psm1' -Force"
     ]
   }
 

@@ -8,14 +8,19 @@
 $ErrorActionPreference = "Stop"
 
 # EC2Launch v2: the RunsOn agent grows the root partition itself, runners have
-# no use for a wallpaper or an Administrator password, and activation is done
-# by a startup task below instead of blocking the preReady stage for 3 to 5 s.
+# no use for a wallpaper, and activation is done by a startup task below
+# instead of blocking the preReady stage for 3 to 5 s. Keep password rotation:
+# derived image builders use it for WinRM, and each runner needs its own credential.
 # (EC2Launch skips activateWindows when it is placed in postReady.)
 $agentConfig = @"
 version: "1.0"
 config:
   - stage: preReady
     tasks:
+      - task: setAdminAccount
+        inputs:
+          password:
+            type: random
       - task: setDnsSuffix
         inputs:
           suffixes:
