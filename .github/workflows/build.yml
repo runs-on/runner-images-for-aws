@@ -48,11 +48,6 @@ jobs:
           install_args: go upx
       - name: Show Packer version
         run: packer version
-      - name: Setup Go (windows25 custom plugin)
-        if: ${{ startsWith(inputs.image_id, 'windows25-') }}
-        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
-        with:
-          go-version: 1.25.1
       - name: Build patched amazon plugin (windows25)
         if: ${{ startsWith(inputs.image_id, 'windows25-') }}
         id: patched_amazon_plugin

@@ -6,6 +6,7 @@ on:
       - '.github/workflows/build.yml'
       - '.github/workflows/windows-boot-tests.yml'
       - 'bin/patch/windows25-x64'
+      - 'mise.toml'
       - 'patches/windows/**'
       - 'tools/bootpack/**'
       - 'test/boot_trace_test.ps1'
@@ -27,7 +28,7 @@ jobs:
         run: ./test/boot_trace_test.ps1
       - name: Packing regressions and real NTFS moves
         working-directory: tools/bootpack
-        run: mise exec go@1.26.1 -- go test -v ./...
+        run: mise exec go -- go test -v ./...
       - name: Vet bootpack
         working-directory: tools/bootpack
-        run: mise exec go@1.26.1 -- go vet ./...
+        run: mise exec go -- go vet ./...

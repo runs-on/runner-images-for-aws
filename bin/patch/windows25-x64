@@ -33,7 +33,7 @@ cp patches/windows/build/Optimize-BootLayout.ps1 "$release_dir/images/windows/sc
 # bootpack places the boot file set contiguously (see Optimize-BootLayout.ps1).
 # Packer uploads the assets directory into the image folder.
 mkdir -p "$release_dir/images/windows/assets" dist
-(cd tools/bootpack && mise exec go@1.26.1 -- env CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o "$OLDPWD/dist/bootpack-windows-amd64.exe" .)
+(cd tools/bootpack && mise exec go -- env CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o "$OLDPWD/dist/bootpack-windows-amd64.exe" .)
 # Packer's WinRM upload rejects the 2 MB binary; the UPX-packed one goes through.
 if ! command -v upx >/dev/null; then
   echo "upx is required to compress bootpack for packer upload" >&2
