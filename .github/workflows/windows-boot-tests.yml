@@ -1,0 +1,34 @@
+name: Windows boot tests
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/build.yml'
+      - '.github/workflows/windows-boot-tests.yml'
+      - 'bin/patch/windows25-x64'
+      - 'mise.toml'
+      - 'patches/windows/**'
+      - 'tools/bootpack/**'
+      - 'test/boot_trace_test.ps1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  boot:
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5
+        with:
+          install_args: go
+      - name: Trace correlation (Windows PowerShell 5.1)
+        shell: powershell
+        run: ./test/boot_trace_test.ps1
+      - name: Packing regressions and real NTFS moves
+        working-directory: tools/bootpack
+        run: mise exec go -- go test -v ./...
+      - name: Vet bootpack
+        working-directory: tools/bootpack
+        run: mise exec go -- go vet ./...

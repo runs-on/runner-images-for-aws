@@ -29,58 +29,28 @@ Dism.exe /Online /Cleanup-Image /StartComponentCleanup /ResetBase
 Write-Host "Component Store cleanup completed."
 
 #
-# Cleans up the .NET Framework Native Image Cache (Ngen) to reduce image size.
-# This script dynamically detects all installed .NET Framework versions.
+# Native images for Windows PowerShell. A fresh runner pays about 25 s on a
+# 2 vCPU instance for the first powershell.exe when they are missing, because
+# every assembly is JIT-compiled from a cold EBS volume. The upstream image
+# used to uninstall all native images to save space; keep them, and make sure
+# the assemblies a typical PowerShell session loads have one.
 #
-Write-Host "--- Starting .NET Framework Native Image Cache (Ngen) cleanup ---"
-
-# Base paths for 32-bit and 64-bit .NET Framework installations
-$frameworkBasePaths = @(
-    "C:\Windows\Microsoft.NET\Framework64",
-    "C:\Windows\Microsoft.NET\Framework"
-)
-
-# Dynamically find all ngen.exe paths
-$ngenPaths = @()
-foreach ($basePath in $frameworkBasePaths) {
-    if (Test-Path $basePath) {
-        Get-ChildItem -Path $basePath -Directory -Filter "v*" | ForEach-Object {
-            $ngenExePath = Join-Path -Path $_.FullName -ChildPath "ngen.exe"
-            if (Test-Path $ngenExePath) {
-                $ngenPaths += $ngenExePath
-            }
-        }
-    }
+Write-Host "--- Generating native images for Windows PowerShell ---"
+$ngen64 = "$env:SystemRoot\Microsoft.NET\Framework64\v4.0.30319\ngen.exe"
+$assemblies = & powershell.exe -NoProfile -NonInteractive -Command {
+    Import-Module Microsoft.PowerShell.Management, Microsoft.PowerShell.Utility, Microsoft.PowerShell.Security, CimCmdlets -ErrorAction SilentlyContinue
+    Get-Date | Out-Null
+    Get-CimInstance Win32_OperatingSystem | Out-Null
+    try { Invoke-WebRequest -Uri http://127.0.0.1:1/ -UseBasicParsing -TimeoutSec 1 | Out-Null } catch { }
+    [AppDomain]::CurrentDomain.GetAssemblies() | Where-Object { $_.Location -and -not $_.IsDynamic } | ForEach-Object { $_.Location } | Sort-Object -Unique
 }
-
-if ($ngenPaths.Count -eq 0) {
-    Write-Host "No ngen.exe instances found. Nothing to do."
-} else {
-    Write-Host "Found the following ngen.exe instances to process:"
-    $ngenPaths | ForEach-Object { Write-Host "- $_" }
-
-    # Uninstall all existing native images to save space.
-    Write-Host "Uninstalling all native images..."
-    foreach ($ngen in $ngenPaths) {
-        Write-Host "Executing uninstall for: $ngen"
-        & $ngen uninstall *
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "ngen.exe uninstall failed for $ngen with exit code $LASTEXITCODE"
-        }
-    }
-
-    # Execute any queued items to clear out pending compilation tasks.
-    Write-Host "Executing queued items..."
-    foreach ($ngen in $ngenPaths) {
-        Write-Host "Executing queued items for: $ngen"
-        & $ngen executeQueuedItems
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warning "ngen.exe executeQueuedItems failed for $ngen with exit code $LASTEXITCODE"
-        }
-    }
+$installed = 0
+foreach ($assembly in $assemblies) {
+    & $ngen64 install $assembly /nologo /silent 2>&1 | Out-Null
+    if ($LASTEXITCODE -eq 0) { $installed++ }
 }
-
-Write-Host "--- .NET Framework cleanup complete ---"
+& $ngen64 executeQueuedItems /nologo /silent 2>&1 | Out-Null
+Write-Host "Native images installed for $installed of $($assemblies.Count) PowerShell assemblies."
 
 # Remove the installer user to save space
 if ($env:INSTALL_USER) {

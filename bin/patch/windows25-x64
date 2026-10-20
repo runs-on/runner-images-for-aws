@@ -26,6 +26,22 @@ cp patches/windows/build/Install-RunsOnBootstrap.ps1 "$release_dir/images/window
 cp patches/windows/build/Install-NativeImages.ps1 "$release_dir/images/windows/scripts/build/"
 cp patches/windows/build/Install-VisualStudio.ps1 "$release_dir/images/windows/scripts/build/"
 cp patches/windows/build/Install-GPU.ps1 "$release_dir/images/windows/scripts/build/"
+cp patches/windows/build/Configure-RunsOnBoot.ps1 "$release_dir/images/windows/scripts/build/"
+cp patches/windows/build/Start-BootTrace.ps1 "$release_dir/images/windows/scripts/build/"
+cp patches/windows/build/Optimize-BootLayout.ps1 "$release_dir/images/windows/scripts/build/"
+
+# bootpack places the boot file set contiguously (see Optimize-BootLayout.ps1).
+# Packer uploads the assets directory into the image folder.
+mkdir -p "$release_dir/images/windows/assets" dist
+(cd tools/bootpack && mise exec go -- env CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -trimpath -ldflags='-s -w' -o "$OLDPWD/dist/bootpack-windows-amd64.exe" .)
+# Packer's WinRM upload rejects the 2 MB binary; the UPX-packed one goes through.
+if ! command -v upx >/dev/null; then
+  echo "upx is required to compress bootpack for packer upload" >&2
+  exit 1
+fi
+upx -f -1 dist/bootpack-windows-amd64.exe
+cp dist/bootpack-windows-amd64.exe "$release_dir/images/windows/assets/bootpack.exe"
+cp patches/windows/files/BootTrace.psm1 "$release_dir/images/windows/assets/BootTrace.psm1"
 
 for file in patches/windows/files/patch-*.ps1; do
   if [ -f "$file" ]; then

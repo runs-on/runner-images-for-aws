@@ -241,6 +241,16 @@ build {
     source      = "${path.root}/../assets"
   }
 
+  # The image folder is removed during cleanup; keep the boot layout tools for
+  # Optimize-BootLayout.ps1, which runs after the last restart.
+  provisioner "powershell" {
+    inline = [
+      "New-Item -ItemType Directory -Force -Path 'C:\\ProgramData\\RunsOn' | Out-Null",
+      "Copy-Item '${var.image_folder}\\assets\\bootpack.exe' 'C:\\ProgramData\\RunsOn\\bootpack.exe' -Force",
+      "Copy-Item '${var.image_folder}\\assets\\BootTrace.psm1' 'C:\\ProgramData\\RunsOn\\BootTrace.psm1' -Force"
+    ]
+  }
+
   provisioner "file" {
     destination = "${var.image_folder}\\scripts\\"
     sources     = [
@@ -491,6 +501,7 @@ provisioner "powershell" {
       "${path.root}/../scripts/build/Install-NativeImages.ps1",
       "${path.root}/../scripts/build/Configure-System.ps1",
       "${path.root}/../scripts/build/Configure-User.ps1",
+      "${path.root}/../scripts/build/Configure-RunsOnBoot.ps1",
       # "${path.root}/../scripts/build/Post-Build-Validation.ps1"
     ]
     skip_clean       = true
@@ -504,8 +515,17 @@ provisioner "powershell" {
     ]
   }
 
+  # The next restart is recorded so that the files it reads can be packed.
+  provisioner "powershell" {
+    scripts = ["${path.root}/../scripts/build/Start-BootTrace.ps1"]
+  }
+
   provisioner "windows-restart" {
     restart_timeout = "20m"
+  }
+
+  provisioner "powershell" {
+    scripts = ["${path.root}/../scripts/build/Optimize-BootLayout.ps1"]
   }
 
   provisioner "powershell" {
