@@ -1,0 +1,49 @@
+name: Windows GPU images
+
+on:
+  workflow_dispatch:
+    inputs:
+      windows25_gpu_x64:
+        type: boolean
+        description: windows25-gpu-x64
+        default: true
+  workflow_run:
+    workflows: ['Windows images']
+    branches: [main]
+    types:
+      - completed
+
+jobs:
+  select-images:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
+    name: Select images
+    runs-on: ubuntu-latest
+    outputs:
+      image_ids: ${{ steps.select.outputs.image_ids }}
+    steps:
+      - id: select
+        env:
+          WINDOWS25_GPU_X64: ${{ github.event_name != 'workflow_dispatch' || inputs.windows25_gpu_x64 }}
+        run: |
+          images=()
+          [ "$WINDOWS25_GPU_X64" = "true" ] && images+=("windows25-gpu-x64")
+          if [ "${#images[@]}" -eq 0 ]; then
+            echo "No images selected" >&2
+            exit 1
+          fi
+          image_ids="$(printf '%s\n' "${images[@]}" | jq -R . | jq -s -c .)"
+          echo "image_ids=$image_ids" >> "$GITHUB_OUTPUT"
+
+  build-test-release:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
+    name: Build/Test/Release ${{ matrix.image_id }}
+    needs: select-images
+    strategy:
+      fail-fast: false
+      matrix:
+        image_id: ${{ fromJSON(needs.select-images.outputs.image_ids) }}
+    uses: ./.github/workflows/build-test-release.yml
+    secrets: inherit
+    with:
+      image_id: ${{ matrix.image_id }}
+      platform: windows

@@ -11,10 +11,6 @@ on:
         type: boolean
         description: windows25-full-x64
         default: true
-      windows25_gpu_x64:
-        type: boolean
-        description: windows25-gpu-x64
-        default: true
   schedule:
     - cron: '0 6 2,17 * *'
 
@@ -29,12 +25,10 @@ jobs:
         env:
           WINDOWS22_FULL_X64: ${{ github.event_name != 'workflow_dispatch' || inputs.windows22_full_x64 }}
           WINDOWS25_FULL_X64: ${{ github.event_name != 'workflow_dispatch' || inputs.windows25_full_x64 }}
-          WINDOWS25_GPU_X64: ${{ github.event_name == 'workflow_dispatch' && inputs.windows25_gpu_x64 }}
         run: |
           images=()
           [ "$WINDOWS22_FULL_X64" = "true" ] && images+=("windows22-full-x64")
           [ "$WINDOWS25_FULL_X64" = "true" ] && images+=("windows25-full-x64")
-          [ "$WINDOWS25_GPU_X64" = "true" ] && images+=("windows25-gpu-x64")
           if [ "${#images[@]}" -eq 0 ]; then
             echo "No images selected" >&2
             exit 1
