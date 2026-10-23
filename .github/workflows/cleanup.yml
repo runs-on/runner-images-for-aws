@@ -1,4 +1,4 @@
-name: Cleanup production AMIs
+name: Cleanup AMIs
 
 concurrency:
   group: cleanup
@@ -6,7 +6,7 @@ concurrency:
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 2 */3 * *'
+    - cron: '0 2 * * *'
 
 jobs:
   cleanup:
@@ -25,3 +25,4 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
       - run: bundle exec bin/utils/cleanup-amis -f --prod
+      - run: bundle exec bin/utils/cleanup-amis -f
