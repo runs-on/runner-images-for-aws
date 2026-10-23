@@ -177,6 +177,11 @@ build {
 
   sources = ["source.amazon-ebs.build_ebs"]
 
+  provisioner "file" {
+    source      = "${path.root}/../custom/files/install-runs-on-bootstrap.sh"
+    destination = "/tmp/install-runs-on-bootstrap.sh"
+  }
+
   provisioner "shell" {
     execute_command = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
     scripts         = ["${path.root}/../custom/files/pre.sh"]
