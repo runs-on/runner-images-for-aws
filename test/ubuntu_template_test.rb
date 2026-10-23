@@ -350,6 +350,24 @@ class UbuntuTemplateTest < Minitest::Test
     end
   end
 
+  # A missing runs-on-bootstrap-<tag> makes the user data download it from
+  # GitHub without a checksum, and a stub left in its place strands the
+  # instance when rolaunch's agent prefetch fails. Every image installs the
+  # same verified binaries.
+  def test_full_and_minimal_images_install_the_verified_bootstrap_binaries
+    installer = "/tmp/install-runs-on-bootstrap.sh"
+    [FULL_X64_TEMPLATE, FULL_ARM64_TEMPLATE].each do |path|
+      template = File.read(path)
+      assert_includes template, "destination = \"#{installer}\"", path
+      assert_operator template.index(installer), :<, template.index("files/pre.sh\"]"), path
+    end
+    assert_includes File.read(PRE_SCRIPT), "bash #{installer}\n"
+    assert_includes File.read(MINIMAL_BASE_SCRIPT), "bash #{installer} \"$TARGET_ROOT_MOUNT\""
+    %w[x64 arm64].each do |arch|
+      assert_includes File.read(File.join(TEMPLATE_DIR, "ubuntu-minimal-#{arch}.pkr.hcl")), "destination = \"#{installer}\""
+    end
+  end
+
   def test_full_rolaunch_is_staged_for_both_ubuntu26_architectures
     patch_lib = File.read(PATCH_LIB)
 
