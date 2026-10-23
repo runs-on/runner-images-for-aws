@@ -69,9 +69,10 @@ Write-Host "Boot loader settings applied"
 # Services that start automatically but do nothing for a runner until a job
 # asks for them. Manual services still start on demand.
 # TextInputManagementService is protected and refuses the change; leave it.
+# vmms stays automatic: nothing starts it on demand, and without it the Hyper-V
+# cmdlets (Get-VMSwitch, New-VM) fail on nested-virt runners.
 $manualServices = @(
     "WSLService",
-    "vmms",
     "Audiosrv",
     "AudioEndpointBuilder",
     "Themes",
