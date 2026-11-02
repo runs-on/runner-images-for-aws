@@ -619,6 +619,52 @@ func waitForRootFilesystemResize(done <-chan rootResizeResult) bool {
 	return result.changed
 }
 
+// growPartition grows the partition to the end of its disk. sfdisk rewrites
+// the table, moving a GPT backup header to the disk's new end, and partx
+// tells the kernel the partition's new size: about 40 ms, where growpart
+// takes 1 to 2 s at boot. growpart remains the fallback.
+func growPartition(ctx context.Context, device, partNum string) error {
+	_, sfdiskErr := exec.LookPath("sfdisk")
+	_, partxErr := exec.LookPath("partx")
+	if sfdiskErr == nil && partxErr == nil {
+		cmd := exec.CommandContext(ctx, "sfdisk", "--force", "--quiet", "--no-reread", "--no-tell-kernel", "-N", partNum, device)
+		cmd.Stdin = strings.NewReader(",+\n")
+		out, err := cmd.CombinedOutput()
+		if err == nil {
+			out, err = exec.CommandContext(ctx, "partx", "--update", "--nr", partNum, device).CombinedOutput()
+			if err != nil {
+				// The table already holds the new size: growpart would see
+				// nothing to change.
+				return fmt.Errorf("partx --update %s %s failed: %w (output: %s)", device, partNum, err, strings.TrimSpace(string(out)))
+			}
+			log.Printf("partition %s of %s grown with sfdisk", partNum, device)
+			return nil
+		}
+		log.Printf("warning: sfdisk could not grow %s %s, trying growpart: %v (%s)", device, partNum, err, strings.TrimSpace(string(out)))
+	}
+
+	if _, err := exec.LookPath("growpart"); err != nil {
+		return fmt.Errorf("growpart not available: %w", err)
+	}
+	out, err := exec.CommandContext(ctx, "growpart", device, partNum).CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if err != nil {
+		if strings.Contains(text, "NOCHANGE:") {
+			log.Printf("growpart returned NOCHANGE, continuing: %s", text)
+		} else {
+			return fmt.Errorf("growpart %s %s failed: %w (output: %s)", device, partNum, err, text)
+		}
+	} else if text != "" {
+		log.Printf("growpart output: %s", text)
+	}
+	if _, err := exec.LookPath("udevadm"); err == nil {
+		if out, err := exec.CommandContext(ctx, "udevadm", "settle").CombinedOutput(); err != nil {
+			log.Printf("warning: udevadm settle failed after growpart: %v (%s)", err, strings.TrimSpace(string(out)))
+		}
+	}
+	return nil
+}
+
 func maybeResizeRootFilesystem(ctx context.Context) (bool, error) {
 	rootPartition, fsType, err := rootMountInfo()
 	if err != nil {
@@ -678,26 +724,8 @@ func maybeResizeRootFilesystem(ctx context.Context) (bool, error) {
 	)
 
 	if needGrowpart {
-		if _, err := exec.LookPath("growpart"); err != nil {
-			return false, fmt.Errorf("growpart not available: %w", err)
-		}
-
-		out, err := exec.CommandContext(ctx, "growpart", device, partNum).CombinedOutput()
-		text := strings.TrimSpace(string(out))
-		if err != nil {
-			if strings.Contains(text, "NOCHANGE:") {
-				log.Printf("growpart returned NOCHANGE, continuing: %s", text)
-			} else {
-				return false, fmt.Errorf("growpart %s %s failed: %w (output: %s)", device, partNum, err, text)
-			}
-		} else if text != "" {
-			log.Printf("growpart output: %s", text)
-		}
-
-		if _, err := exec.LookPath("udevadm"); err == nil {
-			if out, err := exec.CommandContext(ctx, "udevadm", "settle").CombinedOutput(); err != nil {
-				log.Printf("warning: udevadm settle failed after growpart: %v (%s)", err, strings.TrimSpace(string(out)))
-			}
+		if err := growPartition(ctx, device, partNum); err != nil {
+			return false, err
 		}
 	}
 

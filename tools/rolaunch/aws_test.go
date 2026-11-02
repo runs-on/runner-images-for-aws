@@ -223,6 +223,52 @@ EOF
 	}
 }
 
+func TestDetectMonorepoBootstrapPrefetchMatchesSandboxd(t *testing.T) {
+	t.Parallel()
+
+	workDir := t.TempDir()
+	raw := []byte(`#!/bin/bash -ex
+mkdir -p /etc/runs-on /runs-on
+cat <<'EOF' > /etc/runs-on/sandboxd.env
+RUNS_ON_STACK="runs-on-v4-dev"
+RUNS_ON_BUCKET="runs-on-v4-dev-substrate"
+RUNS_ON_BOOTSTRAP_TAG="v0.1.17"
+EOF
+
+cat <<'EOF' > /usr/local/bin/runs-on-sandboxd.sh
+#!/bin/bash
+BOOTSTRAP_BIN="/usr/local/bin/runs-on-bootstrap-$RUNS_ON_BOOTSTRAP_TAG"
+"$BOOTSTRAP_BIN" --exec "s3://$RUNS_ON_BUCKET/bin/sandboxd-linux-$(uname -m)"
+EOF
+
+cat <<'EOF' > /etc/systemd/system/runs-on-sandboxd.service
+[Service]
+ExecStart=/bin/bash -c '/usr/local/bin/runs-on-sandboxd.sh'
+EOF
+`)
+
+	spec, matched, err := detectMonorepoBootstrapPrefetch(workDir, raw)
+	if err != nil || !matched {
+		t.Fatalf("matched=%v err=%v", matched, err)
+	}
+	agentName, err := agentArtifactNameForArch(runtime.GOARCH)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantName := "sandboxd" + strings.TrimPrefix(agentName, "agent")
+	want := bootstrapPrefetchSpec{
+		BootstrapTag:      "v0.1.17",
+		BootstrapPath:     "/usr/local/bin/runs-on-bootstrap-v0.1.17",
+		AgentBinaryName:   wantName,
+		S3Bucket:          "runs-on-v4-dev-substrate",
+		S3Key:             "bin/" + wantName,
+		DownloadedBinPath: filepath.Join(workDir, "prefetched", "v0.1.17", wantName),
+	}
+	if spec != want {
+		t.Fatalf("spec = %+v, want %+v", spec, want)
+	}
+}
+
 func TestDetectMonorepoBootstrapPrefetchRejectsUnrelatedUserData(t *testing.T) {
 	t.Parallel()
 
