@@ -395,6 +395,9 @@ func discoverPublicKeyIndex(body []byte) (string, bool) {
 }
 
 func detectMonorepoBootstrapPrefetch(workDir string, raw []byte) (bootstrapPrefetchSpec, bool, error) {
+	if spec, matched, err := detectSandboxdPrefetch(workDir, raw); matched {
+		return spec, matched, err
+	}
 	script := string(raw)
 	if !strings.Contains(script, `BOOTSTRAP_BIN="/usr/local/bin/runs-on-bootstrap-$RUNS_ON_BOOTSTRAP_TAG"`) ||
 		!strings.Contains(script, `AGENT_BINARY_URL="$RUNS_ON_AGENT_S3_BUCKET/agent-linux-$(uname -m)"`) ||
@@ -432,6 +435,41 @@ func detectMonorepoBootstrapPrefetch(workDir string, raw []byte) (bootstrapPrefe
 		S3Bucket:          bucket,
 		S3Key:             key,
 		DownloadedBinPath: filepath.Join(workDir, "prefetched", bootstrapTag, agentBinaryName),
+	}, true, nil
+}
+
+// detectSandboxdPrefetch matches the RunsOn v4 user data, whose
+// runs-on-sandboxd unit runs the bootstrap on the stack bucket's sandboxd
+// (monorepo terraform/modules/v4/user-data/linux.sh.tmpl).
+func detectSandboxdPrefetch(workDir string, raw []byte) (bootstrapPrefetchSpec, bool, error) {
+	script := string(raw)
+	if !strings.Contains(script, `BOOTSTRAP_BIN="/usr/local/bin/runs-on-bootstrap-$RUNS_ON_BOOTSTRAP_TAG"`) ||
+		!strings.Contains(script, `"$BOOTSTRAP_BIN" --exec "s3://$RUNS_ON_BUCKET/bin/sandboxd-linux-$(uname -m)"`) ||
+		!strings.Contains(script, `cat <<'EOF' > /etc/systemd/system/runs-on-sandboxd.service`) {
+		return bootstrapPrefetchSpec{}, false, nil
+	}
+
+	bootstrapTag, found := extractQuotedEnvAssignment(script, "RUNS_ON_BOOTSTRAP_TAG")
+	if !found || bootstrapTag == "" {
+		return bootstrapPrefetchSpec{}, true, fmt.Errorf("matched RunsOn sandboxd template missing RUNS_ON_BOOTSTRAP_TAG")
+	}
+	bucket, found := extractQuotedEnvAssignment(script, "RUNS_ON_BUCKET")
+	if !found || bucket == "" || strings.ContainsAny(bucket, "/$") {
+		return bootstrapPrefetchSpec{}, true, fmt.Errorf("matched RunsOn sandboxd template missing RUNS_ON_BUCKET")
+	}
+	agentName, err := agentArtifactNameForArch(runtime.GOARCH)
+	if err != nil {
+		return bootstrapPrefetchSpec{}, true, err
+	}
+	binaryName := "sandboxd" + strings.TrimPrefix(agentName, "agent")
+
+	return bootstrapPrefetchSpec{
+		BootstrapTag:      bootstrapTag,
+		BootstrapPath:     filepath.Join("/usr/local/bin", "runs-on-bootstrap-"+bootstrapTag),
+		AgentBinaryName:   binaryName,
+		S3Bucket:          bucket,
+		S3Key:             "bin/" + binaryName,
+		DownloadedBinPath: filepath.Join(workDir, "prefetched", bootstrapTag, binaryName),
 	}, true, nil
 }
 
