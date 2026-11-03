@@ -7,28 +7,26 @@ permissions:
   contents: read
 
 jobs:
-  liblzma-parity:
-    name: liblzma on ${{ matrix.runner }}
+  login-path:
+    name: login shell PATH on ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
         runner:
-          - runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-x64/image=ubuntu24-full-x64
+          - ubuntu-26.04
+          - runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-x64/image=ubuntu26-full-x64
     runs-on: ${{ matrix.runner }}
     steps:
-      - name: Inspect liblzma
+      - name: Login shell keeps a prepended PATH
         run: |
-          head -2 /etc/os-release
-          dpkg -l 'liblzma*' | grep '^ii' || true
-          echo "installed reverse deps of liblzma-dev:"
-          apt-cache rdepends --installed liblzma-dev 2>/dev/null || true
-          ls -l /usr/lib/x86_64-linux-gnu/liblzma.* || true
-          pkg-config --modversion --libs liblzma || echo "pkg-config: no liblzma"
-          echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH:-}"; grep -i pkg_config /etc/environment || true
-          sudo find /usr /opt -name 'liblzma.pc' 2>/dev/null || true
-          echo "dpkg -dev count: $(dpkg -l | grep -c '^ii  lib.*-dev')"
-          dpkg -l | awk '/^ii  lib.*-dev/{print $2}' | sed 's/:amd64//' | sort > dev-packages.txt
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: dev-packages-${{ strategy.job-index }}
-          path: dev-packages.txt
+          grep -E '^(ImageOS|ImageVersion)=' /etc/environment || true
+          readlink -f "$(command -v env)"; readlink -f "$(command -v bash)"; bash --version | head -1
+          echo "--- /etc/profile"; cat /etc/profile
+          echo "--- /etc/bash.bashrc PATH/environment lines"; grep -nE 'PATH|environment' /etc/bash.bashrc || true
+          echo "--- profile.d sourcing /etc/environment"; grep -rln 'environment' /etc/profile.d || true
+          echo "--- pam"; grep -rn 'pam_env' /etc/pam.d/ 2>/dev/null | head
+          d=$(mktemp -d); h=$(mktemp -d)
+          printf '#!/bin/sh\necho stub-ok\n' > "$d/zzstub"; chmod +x "$d/zzstub"
+          HOME="$h" PATH="$d:$PATH" bash -lc 'echo "login PATH=$PATH"; command -v zzstub; env zzstub' || echo "LOGIN SHELL LOST PATH"
+          echo "--- trace"
+          HOME="$h" PATH="$d:$PATH" bash -xlc 'true' 2>&1 | grep -nE 'PATH|environment|^\+ \. |source' | head -40 || true
