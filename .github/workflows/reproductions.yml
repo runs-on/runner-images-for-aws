@@ -7,223 +7,29 @@ permissions:
   contents: read
 
 jobs:
-  php-ubuntu24-arm64:
-    name: Fast PHP installs on ubuntu24-full-arm64
-    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-arm64/image=ubuntu24-dev-arm64
+  liblzma-parity:
+    name: liblzma on ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - runs-on=${{ github.run_id }}/runner=2cpu-linux-x64
+    runs-on: ${{ matrix.runner }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - name: Show PHP defaults
+      - name: Inspect liblzma
         run: |
-          command -v php || true
-          php -v || true
-      - name: Setup PHP 8.3
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+          head -2 /etc/os-release
+          dpkg -l 'liblzma*' | grep '^ii' || true
+          echo "installed reverse deps of liblzma-dev:"
+          apt-cache rdepends --installed liblzma-dev 2>/dev/null || true
+          ls -l /usr/lib/x86_64-linux-gnu/liblzma.* || true
+          pkg-config --modversion --libs liblzma || echo "pkg-config: no liblzma"
+          echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH:-}"
+          sudo find / -xdev -name 'liblzma.pc' 2>/dev/null || true
+          echo "dpkg -dev count: $(dpkg -l | grep -c '^ii  lib.*-dev')"
+          dpkg -l | awk '/^ii  lib.*-dev/{print $2}' | sed 's/:amd64//' | sort > dev-packages.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          php-version: "8.3"
-      - name: Check PHP 8.3
-        run: php -v
-      - name: Setup PHP 8.4
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
-        with:
-          php-version: "8.4"
-      - name: Check PHP 8.4
-        run: php -v
-
-  git-lfs-ubuntu24-arm64:
-    name: git-lfs on ubuntu24-full-arm64
-    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-arm64/image=ubuntu24-dev-arm64
-    steps:
-      - name: Check git-lfs is available
-        run: |
-          command -v git-lfs
-          git-lfs version
-
-  imageos-ubuntu24-x64:
-    name: ImageOS/ImageVersion on ubuntu24-full-x64
-    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-full-x64
-    steps:
-      - name: Check ImageOS and ImageVersion env vars
-        run: |
-          echo "ImageOS=$ImageOS"
-          echo "ImageVersion=$ImageVersion"
-          test -n "$ImageOS" || (echo "ERROR: ImageOS is not set" && exit 1)
-          test -n "$ImageVersion" || (echo "ERROR: ImageVersion is not set" && exit 1)
-
-  issue-61-apt-cdn-ubuntu24-full-x64:
-    name: issue 61 CDN apt mirror on ubuntu24-full-x64
-    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-dev-x64
-    steps:
-      - name: Check apt mirror and acquire settings
-        run: |
-          set -euo pipefail
-
-          sources=()
-          [ ! -f /etc/apt/sources.list ] || sources+=(/etc/apt/sources.list)
-          [ ! -f /etc/apt/sources.list.d/ubuntu.sources ] || sources+=(/etc/apt/sources.list.d/ubuntu.sources)
-          if [ "${#sources[@]}" -eq 0 ]; then
-            echo "No apt sources found" >&2
-            exit 1
-          fi
-
-          sed -n '1,120p' "${sources[@]}"
-          if ! grep -E 'https://archive\.ubuntu\.com/ubuntu/?' "${sources[@]}"; then
-            echo "Expected apt sources to use archive.ubuntu.com" >&2
-            exit 1
-          fi
-          if grep -E 'https?://[^/]+\.ec2\.(archive|ports)\.ubuntu\.com/' "${sources[@]}"; then
-            echo "Found a regional EC2 apt mirror" >&2
-            exit 1
-          fi
-
-          apt-config dump | grep -Fx 'Acquire::Retries "5";'
-          apt-config dump | grep -Fx 'Acquire::http::Timeout "20";'
-          apt-config dump | grep -Fx 'Acquire::https::Timeout "20";'
-          sudo apt-get update -y
-
-  issue-31-runner-home-path-ubuntu24-full-x64:
-    name: issue 31 runner HOME paths on ubuntu24-full-x64
-    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-dev-x64
-    steps:
-      - name: Check runner HOME paths and tools
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          literal_home="\$HOME"
-          if grep -qF "${literal_home}" /etc/environment; then
-            echo "/etc/environment contains a literal ${literal_home}" >&2
-            exit 1
-          fi
-
-          case "${PATH}" in
-            *"${literal_home}"*) echo "PATH contains a literal ${literal_home}" >&2; exit 1 ;;
-          esac
-
-          for expected in \
-            /home/runner/.local/bin \
-            /home/runner/.cargo/bin \
-            /home/runner/.config/composer/vendor/bin \
-            /home/runner/.dotnet/tools; do
-            case ":${PATH}:" in
-              *":${expected}:"*) ;;
-              *) echo "PATH is missing ${expected}" >&2; exit 1 ;;
-            esac
-          done
-
-          command -v cargo
-          command -v rustup
-          command -v dotnet
-
-  issue-41-ubuntu24-gpu-arm64:
-    name: issue 41 Ubuntu 24 GPU ARM64 on g5g
-    runs-on: runs-on=${{ github.run_id }}/runner=4cpu-linux-arm64/image=ubuntu24-gpu-arm64/family=g5g
-    steps:
-      - name: Check native CUDA 13 and the open driver
-        run: |
-          set -euo pipefail
-          test "$(dpkg --print-architecture)" = arm64
-          nvcc --version | grep -F "release 13.0"
-          modinfo -F license nvidia | grep -F "Dual MIT/GPL"
-          nvidia-smi
-          nvidia-smi -L
-      - name: Check CUDA 13 container access
-        run: docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi -L
-
-  issue-46-ubuntu24-cuda13-x64:
-    name: issue 46 CUDA 13 on Ubuntu 24 GPU x64
-    runs-on: runs-on=${{ github.run_id }}/runner=4cpu-linux-x64/image=ubuntu24-gpu-x64/family=g4dn
-    steps:
-      - name: Check native CUDA 13
-        run: |
-          set -euo pipefail
-          nvcc --version | grep -F "release 13.0"
-          nvidia-smi
-          nvidia-smi -L
-      - name: Check CUDA 13 container access
-        run: docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi -L
-
-  issue-55-ubuntu24-blackwell-x64:
-    name: issue 55 Ubuntu 24 open driver on Blackwell
-    runs-on: runs-on=${{ github.run_id }}/runner=8cpu-linux-x64/image=ubuntu24-gpu-x64/family=g7e
-    steps:
-      - name: Check Blackwell with the open driver
-        run: |
-          set -euo pipefail
-          modinfo -F license nvidia | grep -F "Dual MIT/GPL"
-          nvidia-smi --query-gpu=name --format=csv,noheader | grep -i blackwell
-          nvidia-smi -L
-      - name: Check CUDA 13 container access
-        run: docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi -L
-
-  issue-19-windows25-hyperv-vs-cpp:
-    name: issue-19 windows25 Hyper-V + VS + C++
-    runs-on: runs-on=${{ github.run_id }}/image=windows25-dev-x64/family=m8i
-    steps:
-      - name: Check Visual Studio install
-        shell: pwsh
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found at $vswhere" }
-          $installPath = (& $vswhere -latest -products * -property installationPath | Select-Object -First 1).Trim()
-          if (-not $installPath) { throw "Visual Studio installation path not found" }
-          $devenv = Join-Path $installPath "Common7\IDE\devenv.exe"
-          if (-not (Test-Path $devenv)) { throw "devenv.exe not found at $devenv" }
-          Write-Host "Visual Studio installation path: $installPath"
-
-      - name: Check C++ toolchain (cl.exe)
-        shell: pwsh
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $installPath = (& $vswhere -latest -products * -property installationPath | Select-Object -First 1).Trim()
-          if (-not $installPath) { throw "Visual Studio installation path not found" }
-          $vsDevCmd = Join-Path $installPath "Common7\Tools\VsDevCmd.bat"
-          if (-not (Test-Path $vsDevCmd)) { throw "VsDevCmd.bat not found at $vsDevCmd" }
-          cmd.exe /c "\"$vsDevCmd\" -arch=x64 >nul && where cl"
-          if ($LASTEXITCODE -ne 0) { throw "cl.exe not found from VS developer command prompt" }
-
-      - name: Check issue-19 package set
-        shell: pwsh
-        run: |
-          $required = @("bash", "cargo", "rustc", "pwsh", "AzureSignTool")
-          foreach ($tool in $required) {
-            $found = Get-Command $tool -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($null -eq $found) { throw "$tool was not found on PATH" }
-            Write-Host "$tool => $($found.Source)"
-          }
-          pwsh --version
-          cargo --version
-          rustc --version
-          AzureSignTool --version
-
-      - name: Check Hyper-V feature states
-        shell: pwsh
-        run: |
-          $serverFeatures = @("Hyper-V", "Hyper-V-PowerShell")
-          foreach ($feature in $serverFeatures) {
-            $state = (Get-WindowsFeature -Name $feature).InstallState
-            Write-Host "$feature=$state"
-            if ($state -ne "Installed") { throw "$feature is not Installed" }
-          }
-          $optionalState = (Get-WindowsOptionalFeature -Online -FeatureName "HypervisorPlatform").State
-          Write-Host "HypervisorPlatform=$optionalState"
-          if ($optionalState -ne "Enabled") { throw "HypervisorPlatform is not Enabled" }
-
-      - name: Hyper-V diagnostics (systeminfo)
-        shell: pwsh
-        run: |
-          systeminfo
-
-  journal-access-ubuntu24-full-x64:
-    name: runner reads the volatile journal on ubuntu24-full-x64
-    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-full-x64
-    steps:
-      - name: Read the journal as the runner user
-        run: |
-          set -euo pipefail
-          id
-          ls -la /run/log/journal/*/ || true
-          id -nG | tr ' ' '\n' | grep -qx systemd-journal
-          logger -t runs-on-journal-check "hello from $(id -un)"
-          sleep 1
-          journalctl -t runs-on-journal-check --no-pager | grep -q "hello from runner"
+          name: dev-packages-${{ strategy.job-index }}
+          path: dev-packages.txt
