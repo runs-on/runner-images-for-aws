@@ -13,10 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         runner:
-          - ubuntu-24.04
-          - ubuntu-latest
-          - ubuntu-26.04
-          - runs-on=${{ github.run_id }}/runner=2cpu-linux-x64
+          - runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-x64/image=ubuntu24-full-x64
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Inspect liblzma
@@ -27,7 +24,7 @@ jobs:
           apt-cache rdepends --installed liblzma-dev 2>/dev/null || true
           ls -l /usr/lib/x86_64-linux-gnu/liblzma.* || true
           pkg-config --modversion --libs liblzma || echo "pkg-config: no liblzma"
-          echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH:-}"
+          echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH:-}"; grep -i pkg_config /etc/environment || true
           sudo find /usr /opt -name 'liblzma.pc' 2>/dev/null || true
           echo "dpkg -dev count: $(dpkg -l | grep -c '^ii  lib.*-dev')"
           dpkg -l | awk '/^ii  lib.*-dev/{print $2}' | sed 's/:amd64//' | sort > dev-packages.txt
