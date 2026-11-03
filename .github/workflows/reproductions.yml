@@ -14,6 +14,8 @@ jobs:
       matrix:
         runner:
           - ubuntu-24.04
+          - ubuntu-latest
+          - ubuntu-26.04
           - runs-on=${{ github.run_id }}/runner=2cpu-linux-x64
     runs-on: ${{ matrix.runner }}
     steps:
@@ -26,7 +28,7 @@ jobs:
           ls -l /usr/lib/x86_64-linux-gnu/liblzma.* || true
           pkg-config --modversion --libs liblzma || echo "pkg-config: no liblzma"
           echo "PKG_CONFIG_PATH=${PKG_CONFIG_PATH:-}"
-          sudo find / -xdev -name 'liblzma.pc' 2>/dev/null || true
+          sudo find /usr /opt -name 'liblzma.pc' 2>/dev/null || true
           echo "dpkg -dev count: $(dpkg -l | grep -c '^ii  lib.*-dev')"
           dpkg -l | awk '/^ii  lib.*-dev/{print $2}' | sed 's/:amd64//' | sort > dev-packages.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
