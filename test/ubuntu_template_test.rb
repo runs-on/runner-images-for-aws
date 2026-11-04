@@ -86,6 +86,23 @@ class UbuntuTemplateTest < Minitest::Test
       "usermod -aG adm,systemd-journal runner"
   end
 
+  def test_full_images_let_unconfined_runc_change_profile
+    # apparmor.service stays disabled, so no runc profile is loaded: without this
+    # sysctl Ubuntu 26 stacks every container's profile as
+    # docker-default//&unconfined and signals inside containers are denied
+    # (issue 116).
+    runner_user = File.read(RUNNER_USER_SCRIPT)
+    assert_includes runner_user, "systemctl disable apport.service"
+    assert_match(/apparmor\.service/, runner_user)
+    assert_includes runner_user, "cat > /etc/sysctl.d/20-apparmor.conf <<'EOF'"
+    assert_includes runner_user, "-kernel.apparmor_restrict_unprivileged_unconfined = 0\n"
+    refute_includes runner_user, "apparmor_restrict_unprivileged_userns"
+
+    reproductions = File.read(REPRODUCTIONS_WORKFLOW)
+    assert_includes reproductions, "issue-116-apparmor-stacking:"
+    assert_includes reproductions, "run: test/reproductions/issue-116-apparmor-stacking.sh"
+  end
+
   def test_full_images_configure_official_cdn_apt_mirrors
     content = File.read(PRE_SCRIPT)
 
