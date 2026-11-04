@@ -436,59 +436,6 @@ func TestRunTreatsRootResizeFailureAsWarning(t *testing.T) {
 	}
 }
 
-func TestRunDoesNotInvokeRunnerWarmupWhenDisabled(t *testing.T) {
-	cfg := testConfig(t.TempDir())
-	ops := testLauncherOps()
-
-	ops.warmupRunner = func(context.Context) (bool, error) {
-		t.Fatal("warmupRunner should not be called when runner warmup is disabled")
-		return false, nil
-	}
-
-	if err := runWithOps(context.Background(), cfg, ops); err != nil {
-		t.Fatalf("runWithOps returned error: %v", err)
-	}
-}
-
-func TestRunnerWarmupCommandRunsAsRunnerUser(t *testing.T) {
-	t.Parallel()
-
-	ctx := context.Background()
-	runner := commandUser{
-		name:    "runner",
-		uid:     1234,
-		gid:     2345,
-		homeDir: "/home/runner",
-	}
-
-	cmd := runnerWarmupCommand(ctx, "/home/runner/bin/Runner.Listener", runner)
-
-	if cmd.Dir != runner.homeDir {
-		t.Fatalf("unexpected working dir: got %q want %q", cmd.Dir, runner.homeDir)
-	}
-	if cmd.SysProcAttr == nil || cmd.SysProcAttr.Credential == nil {
-		t.Fatal("expected warmup command credentials to be configured")
-	}
-	if got := cmd.SysProcAttr.Credential.Uid; got != runner.uid {
-		t.Fatalf("unexpected uid: got %d want %d", got, runner.uid)
-	}
-	if got := cmd.SysProcAttr.Credential.Gid; got != runner.gid {
-		t.Fatalf("unexpected gid: got %d want %d", got, runner.gid)
-	}
-	if !envContains(cmd.Env, "HOME="+runner.homeDir) {
-		t.Fatalf("expected HOME override in env: %v", cmd.Env)
-	}
-	if !envContains(cmd.Env, "USER="+runner.name) {
-		t.Fatalf("expected USER override in env: %v", cmd.Env)
-	}
-	if !envContains(cmd.Env, "LOGNAME="+runner.name) {
-		t.Fatalf("expected LOGNAME override in env: %v", cmd.Env)
-	}
-	if got := strings.Join(cmd.Args, " "); !strings.Contains(got, "Runner.Listener") || !strings.Contains(got, "_diag") {
-		t.Fatalf("unexpected warmup command args: %v", cmd.Args)
-	}
-}
-
 func TestTimingRecorderSaveWritesNewFile(t *testing.T) {
 	t.Parallel()
 
@@ -1107,7 +1054,7 @@ func testConfig(workDir string) config {
 func testLauncherOps() launcherOps {
 	return launcherOps{
 		ensureHostKey:        func() error { return nil },
-		warmupRunner:         func(context.Context) (bool, error) { return false, nil },
+		prefetchRunner:       func(context.Context) (int64, error) { return 0, nil },
 		makeWorkDir:          func(string) error { return nil },
 		ensureResolverConfig: func(string) error { return nil },
 		waitForInstanceIdentity: func(context.Context, config) (instanceIdentity, error) {
@@ -1187,15 +1134,6 @@ func assertNoUnexpectedCall(t *testing.T, ch <-chan string) {
 		t.Fatalf("unexpected call to %s", call)
 	default:
 	}
-}
-
-func envContains(env []string, target string) bool {
-	for _, entry := range env {
-		if entry == target {
-			return true
-		}
-	}
-	return false
 }
 
 func mustLoadSteps(t *testing.T, path string) []Step {
