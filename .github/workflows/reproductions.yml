@@ -9,7 +9,7 @@ permissions:
 jobs:
   php-ubuntu24-arm64:
     name: Fast PHP installs on ubuntu24-full-arm64
-    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-arm64/image=ubuntu24-dev-arm64
+    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-arm64/image=ubuntu24-dev-arm64
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -32,7 +32,7 @@ jobs:
 
   git-lfs-ubuntu24-arm64:
     name: git-lfs on ubuntu24-full-arm64
-    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-arm64/image=ubuntu24-dev-arm64
+    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-arm64/image=ubuntu24-dev-arm64
     steps:
       - name: Check git-lfs is available
         run: |
@@ -41,7 +41,7 @@ jobs:
 
   imageos-ubuntu24-x64:
     name: ImageOS/ImageVersion on ubuntu24-full-x64
-    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-full-x64
+    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-x64/image=ubuntu24-full-x64
     steps:
       - name: Check ImageOS and ImageVersion env vars
         run: |
@@ -52,7 +52,7 @@ jobs:
 
   issue-61-apt-cdn-ubuntu24-full-x64:
     name: issue 61 CDN apt mirror on ubuntu24-full-x64
-    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-dev-x64
+    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-x64/image=ubuntu24-dev-x64
     steps:
       - name: Check apt mirror and acquire settings
         run: |
@@ -83,7 +83,7 @@ jobs:
 
   issue-31-runner-home-path-ubuntu24-full-x64:
     name: issue 31 runner HOME paths on ubuntu24-full-x64
-    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-dev-x64
+    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-x64/image=ubuntu24-dev-x64
     steps:
       - name: Check runner HOME paths and tools
         shell: bash
@@ -117,7 +117,7 @@ jobs:
 
   issue-41-ubuntu24-gpu-arm64:
     name: issue 41 Ubuntu 24 GPU ARM64 on g5g
-    runs-on: runs-on=${{ github.run_id }}/runner=4cpu-linux-arm64/image=ubuntu24-gpu-arm64/family=g5g
+    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=4cpu-linux-arm64/image=ubuntu24-gpu-arm64/family=g5g
     steps:
       - name: Check native CUDA 13 and the open driver
         run: |
@@ -132,7 +132,7 @@ jobs:
 
   issue-46-ubuntu24-cuda13-x64:
     name: issue 46 CUDA 13 on Ubuntu 24 GPU x64
-    runs-on: runs-on=${{ github.run_id }}/runner=4cpu-linux-x64/image=ubuntu24-gpu-x64/family=g4dn
+    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=4cpu-linux-x64/image=ubuntu24-gpu-x64/family=g4dn
     steps:
       - name: Check native CUDA 13
         run: |
@@ -145,7 +145,7 @@ jobs:
 
   issue-55-ubuntu24-blackwell-x64:
     name: issue 55 Ubuntu 24 open driver on Blackwell
-    runs-on: runs-on=${{ github.run_id }}/runner=8cpu-linux-x64/image=ubuntu24-gpu-x64/family=g7e
+    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=8cpu-linux-x64/image=ubuntu24-gpu-x64/family=g7e
     steps:
       - name: Check Blackwell with the open driver
         run: |
@@ -158,7 +158,7 @@ jobs:
 
   issue-19-windows25-hyperv-vs-cpp:
     name: issue-19 windows25 Hyper-V + VS + C++
-    runs-on: runs-on=${{ github.run_id }}/image=windows25-dev-x64/family=m8i
+    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/image=windows25-dev-x64/family=m8i
     steps:
       - name: Check Visual Studio install
         shell: pwsh
@@ -216,7 +216,7 @@ jobs:
 
   journal-access-ubuntu24-full-x64:
     name: runner reads the volatile journal on ubuntu24-full-x64
-    runs-on: runs-on=${{ github.run_id }}/runner=2cpu-linux-x64/image=ubuntu24-full-x64
+    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-x64/image=ubuntu24-full-x64
     steps:
       - name: Read the journal as the runner user
         run: |
