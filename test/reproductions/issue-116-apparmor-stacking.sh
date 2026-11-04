@@ -24,23 +24,24 @@ echo "apparmor.service: $(systemctl is-enabled apparmor.service 2>&1)"
 for k in apparmor_restrict_unprivileged_unconfined apparmor_restrict_unprivileged_userns; do
   echo "kernel.$k=$(cat /proc/sys/kernel/$k 2>&1)"
 done
-cat /etc/sysctl.d/20-apparmor.conf 2>&1 | grep -v '^#'
+sudo cat /etc/sysctl.d/20-apparmor.conf 2>&1 | grep -v '^#'
 sudo aa-status --profiled 2>&1 | sed 's/^/profiles loaded: /'
 sudo dmesg -C 2>/dev/null || true
 
 docker pull -q ubuntu:24.04 >/dev/null
 out=$(docker run --rm ubuntu:24.04 sh -c 'cat /proc/self/attr/current; sleep 30 & kill $! && echo kill=ok' 2>&1)
-check "docker run label" "docker-default" "$out"
+check "docker run label" "docker-default (enforce)" "$(head -1 <<<"$out")"
 check "docker run kill" "kill=ok" "$out"
-[[ "$out" != *'//&'* ]] || { echo "FAIL docker run label is stacked"; failures=$((failures + 1)); }
 
 out=$(printf 'FROM ubuntu:24.04\nRUN sh -c "sleep 30 & kill \\$!" && echo build-kill=ok\n' |
   docker build --no-cache --progress=plain -t issue116-build - 2>&1)
-check "BuildKit RUN kill" "build-kill=ok" "$(grep -E 'build-kill|ERROR' <<<"$out" | tail -1)"
+check "BuildKit RUN kill" "build-kill=ok" "$(grep -E '^#[0-9]+ [0-9.]+ build-kill=ok|^ERROR' <<<"$out" | tail -1)"
 
 if command -v podman >/dev/null; then
   sudo podman pull -q ubuntu:24.04 >/dev/null 2>&1 || true
   out=$(sudo podman run --rm ubuntu:24.04 sh -c 'cat /proc/self/attr/current; sleep 30 & kill $! && echo kill=ok' 2>&1)
+  check "podman run label" "(enforce)" "$(head -1 <<<"$out")"
+  [[ "$out" != *'//&'* ]] || { echo "FAIL podman run label is stacked"; failures=$((failures + 1)); }
   check "podman run kill" "kill=ok" "$out"
 fi
 
