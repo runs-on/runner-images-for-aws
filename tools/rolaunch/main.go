@@ -948,7 +948,7 @@ func (r *timingRecorder) add(name string, at ...time.Time) {
 
 	stepTime := time.Now().UTC()
 	if len(at) > 0 {
-		stepTime = at[0]
+		stepTime = at[0].UTC()
 	}
 	r.steps = append(r.steps, Step{Name: name, Time: stepTime})
 }
