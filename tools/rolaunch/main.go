@@ -32,12 +32,11 @@ const (
 	defaultResolverConfigPath = "/etc/resolv.conf"
 	defaultEC2Resolver        = "169.254.169.253"
 	defaultTimingsPath        = defaultWorkDir + "/timings.json"
-	defaultRunnerListenerPath = "/home/runner/bin/Runner.Listener"
-	defaultRunnerUser         = "runner"
+	defaultRunnerHome         = "/home/runner"
 	defaultReadinessTimeout   = 3 * time.Minute
 	defaultReadinessInterval  = 50 * time.Millisecond
 	defaultRootResizeTimeout  = 3 * time.Minute
-	enableRunnerWarmup        = false
+	runnerPrefetchTimeout     = 30 * time.Second
 )
 
 type launchMode string
@@ -116,7 +115,7 @@ type asyncResult[T any] struct {
 
 type launcherOps struct {
 	ensureHostKey               func() error
-	warmupRunner                func(context.Context) (bool, error)
+	prefetchRunner              func(context.Context) (int64, error)
 	makeWorkDir                 func(string) error
 	ensureResolverConfig        func(string) error
 	waitForInstanceIdentity     func(context.Context, config) (instanceIdentity, error)
@@ -139,7 +138,7 @@ func defaultLauncherOps() launcherOps {
 	awsState := newAWSState()
 	return launcherOps{
 		ensureHostKey:        ensureHostKey,
-		warmupRunner:         warmupRunnerListener,
+		prefetchRunner:       func(ctx context.Context) (int64, error) { return prefetchRunnerFiles(ctx, defaultRunnerHome) },
 		makeWorkDir:          func(path string) error { return os.MkdirAll(path, 0o700) },
 		ensureResolverConfig: ensureResolverConfig,
 		waitForInstanceIdentity: func(ctx context.Context, cfg config) (instanceIdentity, error) {
@@ -238,14 +237,31 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 		recorder.add("rolaunch.host-key-ready")
 		return nil
 	})
-	if enableRunnerWarmup {
-		warmupTask := startAsync(func() (bool, error) {
-			return ops.warmupRunner(ctx)
-		})
-		defer func() {
-			finishWarmupTask(warmupTask, recorder)
-		}()
-	}
+	// Prefetch overlaps startup and only delays exit until its own deadline.
+	// File I/O may outlive the context, so bound the wait separately.
+	prefetchCtx, cancelPrefetch := context.WithTimeout(context.WithoutCancel(ctx), runnerPrefetchTimeout)
+	defer cancelPrefetch()
+	prefetchDone := make(chan struct{})
+	go func() {
+		defer close(prefetchDone)
+		started := time.Now()
+		read, err := ops.prefetchRunner(prefetchCtx)
+		finished := time.Now()
+		if err != nil {
+			log.Printf("warning: runner prefetch stopped after %d bytes: %v", read, err)
+			return
+		}
+		if read > 0 {
+			recorder.add("rolaunch.runner-prefetched", finished)
+			log.Printf("prefetched %d MiB of runner files in %s", read>>20, finished.Sub(started).Round(time.Millisecond))
+		}
+	}()
+	defer func() {
+		select {
+		case <-prefetchDone:
+		case <-prefetchCtx.Done():
+		}
+	}()
 	workDirTask := startAsyncTask(func() error {
 		if err := ops.makeWorkDir(cfg.workDir); err != nil {
 			return fmt.Errorf("create workdir: %w", err)
@@ -474,95 +490,6 @@ func ensureHostKey() error {
 		return fmt.Errorf("generate ssh host key (%s): %w", defaultHostKeyPath, err)
 	}
 	return nil
-}
-
-func warmupRunnerListener(ctx context.Context) (bool, error) {
-	return warmupRunnerListenerAtPath(ctx, defaultRunnerListenerPath)
-}
-
-func warmupRunnerListenerAtPath(ctx context.Context, path string) (bool, error) {
-	if _, err := os.Stat(path); err != nil {
-		if os.IsNotExist(err) {
-			return false, fmt.Errorf("runner warmup skipped: %s not found", path)
-		}
-		return false, fmt.Errorf("runner warmup stat failed for %s: %w", path, err)
-	}
-
-	runnerUser, err := lookupCommandUser(defaultRunnerUser)
-	if err != nil {
-		return false, fmt.Errorf("runner warmup skipped: %w", err)
-	}
-
-	command := runnerWarmupCommand(ctx, path, runnerUser)
-	out, err := command.CombinedOutput()
-	if err != nil {
-		text := strings.TrimSpace(string(out))
-		if text != "" {
-			return false, fmt.Errorf("runner warmup failed: %w (output: %s)", err, text)
-		}
-		return false, fmt.Errorf("runner warmup failed: %w", err)
-	}
-
-	return true, nil
-}
-
-type commandUser struct {
-	name    string
-	uid     uint32
-	gid     uint32
-	homeDir string
-}
-
-func lookupCommandUser(name string) (commandUser, error) {
-	account, err := user.Lookup(name)
-	if err != nil {
-		return commandUser{}, err
-	}
-
-	uid, err := strconv.ParseUint(account.Uid, 10, 32)
-	if err != nil {
-		return commandUser{}, fmt.Errorf("parse %s uid %q: %w", name, account.Uid, err)
-	}
-	gid, err := strconv.ParseUint(account.Gid, 10, 32)
-	if err != nil {
-		return commandUser{}, fmt.Errorf("parse %s gid %q: %w", name, account.Gid, err)
-	}
-
-	return commandUser{
-		name:    account.Username,
-		uid:     uint32(uid),
-		gid:     uint32(gid),
-		homeDir: account.HomeDir,
-	}, nil
-}
-
-func runnerWarmupCommand(ctx context.Context, path string, runner commandUser) *exec.Cmd {
-	command := fmt.Sprintf("%s warmup && rm -rf %s", strconv.Quote(path), strconv.Quote(filepath.Join(runner.homeDir, "_diag")))
-	cmd := exec.CommandContext(ctx, "bash", "-lc", command)
-	cmd.Dir = runner.homeDir
-	cmd.Env = append(os.Environ(),
-		"HOME="+runner.homeDir,
-		"USER="+runner.name,
-		"LOGNAME="+runner.name,
-	)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		Credential: &syscall.Credential{
-			Uid: runner.uid,
-			Gid: runner.gid,
-		},
-	}
-	return cmd
-}
-
-func finishWarmupTask(task asyncResult[bool], recorder *timingRecorder) {
-	success, err := task.wait()
-	if err != nil {
-		log.Printf("warning: runner warmup skipped: %v", err)
-		return
-	}
-	if success {
-		recorder.add("rolaunch.runner-warmup-finished")
-	}
 }
 
 func ensureResolverConfig(path string) error {
@@ -1021,7 +948,7 @@ func (r *timingRecorder) add(name string, at ...time.Time) {
 
 	stepTime := time.Now().UTC()
 	if len(at) > 0 {
-		stepTime = at[0]
+		stepTime = at[0].UTC()
 	}
 	r.steps = append(r.steps, Step{Name: name, Time: stepTime})
 }

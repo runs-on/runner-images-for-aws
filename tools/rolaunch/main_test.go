@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -436,56 +437,77 @@ func TestRunTreatsRootResizeFailureAsWarning(t *testing.T) {
 	}
 }
 
-func TestRunDoesNotInvokeRunnerWarmupWhenDisabled(t *testing.T) {
-	cfg := testConfig(t.TempDir())
-	ops := testLauncherOps()
+func TestRunBoundsRunnerPrefetchWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := testConfig(t.TempDir())
+		ops := testLauncherOps()
+		prefetchFinished := make(chan struct{})
+		ops.prefetchRunner = func(ctx context.Context) (int64, error) {
+			defer close(prefetchFinished)
+			// A blocked file read cannot observe context cancellation.
+			time.Sleep(runnerPrefetchTimeout + time.Second)
+			return 0, ctx.Err()
+		}
 
-	ops.warmupRunner = func(context.Context) (bool, error) {
-		t.Fatal("warmupRunner should not be called when runner warmup is disabled")
-		return false, nil
-	}
-
-	if err := runWithOps(context.Background(), cfg, ops); err != nil {
-		t.Fatalf("runWithOps returned error: %v", err)
-	}
+		started := time.Now()
+		if err := runWithOps(context.Background(), cfg, ops); err != nil {
+			t.Errorf("runWithOps returned error: %v", err)
+		}
+		elapsed := time.Since(started)
+		// Let the simulated read finish before leaving the synctest bubble.
+		<-prefetchFinished
+		if elapsed != runnerPrefetchTimeout {
+			t.Errorf("runner prefetch delayed exit by %s, want %s", elapsed, runnerPrefetchTimeout)
+		}
+		assertStepAbsent(t, mustLoadSteps(t, cfg.timingsPath), "rolaunch.runner-prefetched")
+	})
 }
 
-func TestRunnerWarmupCommandRunsAsRunnerUser(t *testing.T) {
-	t.Parallel()
+func TestRunRecordsRunnerPrefetchCompletionTime(t *testing.T) {
+	for _, userDataDuration := range []time.Duration{5 * time.Second, runnerPrefetchTimeout + 5*time.Second} {
+		t.Run(userDataDuration.String(), func(t *testing.T) {
+			var logs bytes.Buffer
+			originalWriter := log.Writer()
+			log.SetOutput(&logs)
+			defer log.SetOutput(originalWriter)
 
-	ctx := context.Background()
-	runner := commandUser{
-		name:    "runner",
-		uid:     1234,
-		gid:     2345,
-		homeDir: "/home/runner",
-	}
+			synctest.Test(t, func(t *testing.T) {
+				cfg := testConfig(t.TempDir())
+				cfg.mode = launchModeFull
+				ops := testLauncherOps()
+				prefetchFinished := make(chan time.Time, 1)
+				var completedAt time.Time
+				ops.prefetchRunner = func(context.Context) (int64, error) {
+					prefetchFinished <- time.Now()
+					return 1 << 20, nil
+				}
+				ops.fetchUserData = func(context.Context, config) ([]byte, error) {
+					return []byte("#!/bin/sh\ntrue\n"), nil
+				}
+				ops.executeUserData = func(context.Context, config) error {
+					completedAt = <-prefetchFinished
+					time.Sleep(userDataDuration)
+					return nil
+				}
 
-	cmd := runnerWarmupCommand(ctx, "/home/runner/bin/Runner.Listener", runner)
-
-	if cmd.Dir != runner.homeDir {
-		t.Fatalf("unexpected working dir: got %q want %q", cmd.Dir, runner.homeDir)
-	}
-	if cmd.SysProcAttr == nil || cmd.SysProcAttr.Credential == nil {
-		t.Fatal("expected warmup command credentials to be configured")
-	}
-	if got := cmd.SysProcAttr.Credential.Uid; got != runner.uid {
-		t.Fatalf("unexpected uid: got %d want %d", got, runner.uid)
-	}
-	if got := cmd.SysProcAttr.Credential.Gid; got != runner.gid {
-		t.Fatalf("unexpected gid: got %d want %d", got, runner.gid)
-	}
-	if !envContains(cmd.Env, "HOME="+runner.homeDir) {
-		t.Fatalf("expected HOME override in env: %v", cmd.Env)
-	}
-	if !envContains(cmd.Env, "USER="+runner.name) {
-		t.Fatalf("expected USER override in env: %v", cmd.Env)
-	}
-	if !envContains(cmd.Env, "LOGNAME="+runner.name) {
-		t.Fatalf("expected LOGNAME override in env: %v", cmd.Env)
-	}
-	if got := strings.Join(cmd.Args, " "); !strings.Contains(got, "Runner.Listener") || !strings.Contains(got, "_diag") {
-		t.Fatalf("unexpected warmup command args: %v", cmd.Args)
+				if err := runWithOps(context.Background(), cfg, ops); err != nil {
+					t.Fatalf("runWithOps returned error: %v", err)
+				}
+				steps := mustLoadSteps(t, cfg.timingsPath)
+				assertStepsPresent(t, steps, []string{"rolaunch.runner-prefetched"})
+				for _, step := range steps {
+					if step.Name == "rolaunch.runner-prefetched" && !step.Time.Equal(completedAt) {
+						t.Errorf("runner prefetch milestone is %s late", step.Time.Sub(completedAt))
+					}
+				}
+				if !strings.Contains(logs.String(), "prefetched 1 MiB of runner files in 0s") {
+					t.Errorf("expected actual prefetch duration in logs, got: %s", logs.String())
+				}
+				if strings.Contains(logs.String(), "warning:") {
+					t.Errorf("completed runner prefetch produced a warning: %s", logs.String())
+				}
+			})
+		})
 	}
 }
 
@@ -1107,7 +1129,7 @@ func testConfig(workDir string) config {
 func testLauncherOps() launcherOps {
 	return launcherOps{
 		ensureHostKey:        func() error { return nil },
-		warmupRunner:         func(context.Context) (bool, error) { return false, nil },
+		prefetchRunner:       func(context.Context) (int64, error) { return 0, nil },
 		makeWorkDir:          func(string) error { return nil },
 		ensureResolverConfig: func(string) error { return nil },
 		waitForInstanceIdentity: func(context.Context, config) (instanceIdentity, error) {
@@ -1187,15 +1209,6 @@ func assertNoUnexpectedCall(t *testing.T, ch <-chan string) {
 		t.Fatalf("unexpected call to %s", call)
 	default:
 	}
-}
-
-func envContains(env []string, target string) bool {
-	for _, entry := range env {
-		if entry == target {
-			return true
-		}
-	}
-	return false
 }
 
 func mustLoadSteps(t *testing.T, path string) []Step {
