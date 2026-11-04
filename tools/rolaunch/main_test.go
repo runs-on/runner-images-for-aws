@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -433,6 +434,80 @@ func TestRunTreatsRootResizeFailureAsWarning(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "warning: root filesystem resize skipped: resize failed") {
 		t.Fatalf("expected root resize warning, got %q", logs.String())
+	}
+}
+
+func TestRunBoundsRunnerPrefetchWait(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cfg := testConfig(t.TempDir())
+		ops := testLauncherOps()
+		prefetchFinished := make(chan struct{})
+		ops.prefetchRunner = func(ctx context.Context) (int64, error) {
+			defer close(prefetchFinished)
+			// A blocked file read cannot observe context cancellation.
+			time.Sleep(runnerPrefetchTimeout + time.Second)
+			return 0, ctx.Err()
+		}
+
+		started := time.Now()
+		if err := runWithOps(context.Background(), cfg, ops); err != nil {
+			t.Errorf("runWithOps returned error: %v", err)
+		}
+		elapsed := time.Since(started)
+		// Let the simulated read finish before leaving the synctest bubble.
+		<-prefetchFinished
+		if elapsed != runnerPrefetchTimeout {
+			t.Errorf("runner prefetch delayed exit by %s, want %s", elapsed, runnerPrefetchTimeout)
+		}
+		assertStepAbsent(t, mustLoadSteps(t, cfg.timingsPath), "rolaunch.runner-prefetched")
+	})
+}
+
+func TestRunRecordsRunnerPrefetchCompletionTime(t *testing.T) {
+	for _, userDataDuration := range []time.Duration{5 * time.Second, runnerPrefetchTimeout + 5*time.Second} {
+		t.Run(userDataDuration.String(), func(t *testing.T) {
+			var logs bytes.Buffer
+			originalWriter := log.Writer()
+			log.SetOutput(&logs)
+			defer log.SetOutput(originalWriter)
+
+			synctest.Test(t, func(t *testing.T) {
+				cfg := testConfig(t.TempDir())
+				cfg.mode = launchModeFull
+				ops := testLauncherOps()
+				prefetchFinished := make(chan time.Time, 1)
+				var completedAt time.Time
+				ops.prefetchRunner = func(context.Context) (int64, error) {
+					prefetchFinished <- time.Now()
+					return 1 << 20, nil
+				}
+				ops.fetchUserData = func(context.Context, config) ([]byte, error) {
+					return []byte("#!/bin/sh\ntrue\n"), nil
+				}
+				ops.executeUserData = func(context.Context, config) error {
+					completedAt = <-prefetchFinished
+					time.Sleep(userDataDuration)
+					return nil
+				}
+
+				if err := runWithOps(context.Background(), cfg, ops); err != nil {
+					t.Fatalf("runWithOps returned error: %v", err)
+				}
+				steps := mustLoadSteps(t, cfg.timingsPath)
+				assertStepsPresent(t, steps, []string{"rolaunch.runner-prefetched"})
+				for _, step := range steps {
+					if step.Name == "rolaunch.runner-prefetched" && !step.Time.Equal(completedAt) {
+						t.Errorf("runner prefetch milestone is %s late", step.Time.Sub(completedAt))
+					}
+				}
+				if !strings.Contains(logs.String(), "prefetched 1 MiB of runner files in 0s") {
+					t.Errorf("expected actual prefetch duration in logs, got: %s", logs.String())
+				}
+				if strings.Contains(logs.String(), "warning:") {
+					t.Errorf("completed runner prefetch produced a warning: %s", logs.String())
+				}
+			})
+		})
 	}
 }
 

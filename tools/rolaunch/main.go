@@ -104,6 +104,11 @@ type rootResizeResult struct {
 	err     error
 }
 
+type runnerPrefetchResult struct {
+	read     int64
+	finished time.Time
+}
+
 type timingRecorder struct {
 	mu    sync.Mutex
 	steps []Step
@@ -237,23 +242,35 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 		recorder.add("rolaunch.host-key-ready")
 		return nil
 	})
-	// Started first, ended last: nothing waits for it but rolaunch's exit,
-	// which no unit is ordered after, and its own deadline bounds that.
+	// Prefetch overlaps startup and only delays exit until its own deadline.
+	// File I/O may outlive the context, so bound the wait separately.
 	prefetchCtx, cancelPrefetch := context.WithTimeout(context.WithoutCancel(ctx), runnerPrefetchTimeout)
 	prefetchStarted := time.Now()
-	runnerPrefetchTask := startAsync(func() (int64, error) {
-		return ops.prefetchRunner(prefetchCtx)
+	runnerPrefetchTask := startAsync(func() (runnerPrefetchResult, error) {
+		read, err := ops.prefetchRunner(prefetchCtx)
+		return runnerPrefetchResult{read: read, finished: time.Now()}, err
 	})
 	defer func() {
-		read, err := runnerPrefetchTask.wait()
-		cancelPrefetch()
-		if err != nil {
-			log.Printf("warning: runner prefetch stopped after %d bytes: %v", read, err)
+		defer cancelPrefetch()
+		var result taskResult[runnerPrefetchResult]
+		select {
+		case result = <-runnerPrefetchTask.ch:
+		case <-prefetchCtx.Done():
+			// User data may outlast the deadline after prefetch has finished.
+			select {
+			case result = <-runnerPrefetchTask.ch:
+			default:
+				log.Printf("warning: timed out waiting for runner prefetch: %v", prefetchCtx.Err())
+				return
+			}
+		}
+		if result.err != nil {
+			log.Printf("warning: runner prefetch stopped after %d bytes: %v", result.value.read, result.err)
 			return
 		}
-		if read > 0 {
-			recorder.add("rolaunch.runner-prefetched")
-			log.Printf("prefetched %d MiB of runner files in %s", read>>20, time.Since(prefetchStarted).Round(time.Millisecond))
+		if result.value.read > 0 {
+			recorder.add("rolaunch.runner-prefetched", result.value.finished)
+			log.Printf("prefetched %d MiB of runner files in %s", result.value.read>>20, result.value.finished.Sub(prefetchStarted).Round(time.Millisecond))
 		}
 	}()
 	workDirTask := startAsyncTask(func() error {
