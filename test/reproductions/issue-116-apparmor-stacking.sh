@@ -19,7 +19,7 @@ container_check() {
 build_check() {
   # BuildKit RUN steps run under docker-default too (issue 116, second report).
   printf 'FROM ubuntu:24.04\nRUN sh -c "sleep 30 & kill \\$!" && echo build-kill=ok\n' |
-    docker build --no-cache --progress=plain -q -t issue116-build - 2>&1 | grep -E 'build-kill|Permission denied|ERROR|error' || echo "build: no output matched (exit ${PIPESTATUS[1]})"
+    docker build --no-cache --progress=plain -t issue116-build - 2>&1 | grep -E 'build-kill|Permission denied|ERROR' || echo "build: no output matched (exit ${PIPESTATUS[1]})"
 }
 
 podman_check() {
