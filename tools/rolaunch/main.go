@@ -104,11 +104,6 @@ type rootResizeResult struct {
 	err     error
 }
 
-type runnerPrefetchResult struct {
-	read     int64
-	finished time.Time
-}
-
 type timingRecorder struct {
 	mu    sync.Mutex
 	steps []Step
@@ -245,32 +240,26 @@ func runWithOps(ctx context.Context, cfg config, ops launcherOps) error {
 	// Prefetch overlaps startup and only delays exit until its own deadline.
 	// File I/O may outlive the context, so bound the wait separately.
 	prefetchCtx, cancelPrefetch := context.WithTimeout(context.WithoutCancel(ctx), runnerPrefetchTimeout)
-	prefetchStarted := time.Now()
-	runnerPrefetchTask := startAsync(func() (runnerPrefetchResult, error) {
+	defer cancelPrefetch()
+	prefetchDone := make(chan struct{})
+	go func() {
+		defer close(prefetchDone)
+		started := time.Now()
 		read, err := ops.prefetchRunner(prefetchCtx)
-		return runnerPrefetchResult{read: read, finished: time.Now()}, err
-	})
-	defer func() {
-		defer cancelPrefetch()
-		var result taskResult[runnerPrefetchResult]
-		select {
-		case result = <-runnerPrefetchTask.ch:
-		case <-prefetchCtx.Done():
-			// User data may outlast the deadline after prefetch has finished.
-			select {
-			case result = <-runnerPrefetchTask.ch:
-			default:
-				log.Printf("warning: timed out waiting for runner prefetch: %v", prefetchCtx.Err())
-				return
-			}
-		}
-		if result.err != nil {
-			log.Printf("warning: runner prefetch stopped after %d bytes: %v", result.value.read, result.err)
+		finished := time.Now()
+		if err != nil {
+			log.Printf("warning: runner prefetch stopped after %d bytes: %v", read, err)
 			return
 		}
-		if result.value.read > 0 {
-			recorder.add("rolaunch.runner-prefetched", result.value.finished)
-			log.Printf("prefetched %d MiB of runner files in %s", result.value.read>>20, result.value.finished.Sub(prefetchStarted).Round(time.Millisecond))
+		if read > 0 {
+			recorder.add("rolaunch.runner-prefetched", finished)
+			log.Printf("prefetched %d MiB of runner files in %s", read>>20, finished.Sub(started).Round(time.Millisecond))
+		}
+	}()
+	defer func() {
+		select {
+		case <-prefetchDone:
+		case <-prefetchCtx.Done():
 		}
 	}()
 	workDirTask := startAsyncTask(func() error {
