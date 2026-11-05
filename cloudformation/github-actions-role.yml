@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   IAM role assumed through GitHub OIDC by the runner-images-for-aws workflows
   (build, release, sync, cleanup). Deploy once in the AMI account, then store
-  the RoleArn output as the AWS_ROLE_ARN repository secret.
+  the RoleArn output as the AWS_ROLE_ARN repository variable.
 
 Parameters:
   GitHubRepository:
@@ -93,5 +93,5 @@ Resources:
 
 Outputs:
   RoleArn:
-    Description: Store as the AWS_ROLE_ARN repository secret.
+    Description: Store as the AWS_ROLE_ARN repository variable.
     Value: !GetAtt Role.Arn
