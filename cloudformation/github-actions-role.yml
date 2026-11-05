@@ -1,0 +1,97 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  IAM role assumed through GitHub OIDC by the runner-images-for-aws workflows
+  (build, release, sync, cleanup). Deploy once in the AMI account, then store
+  the RoleArn output as the AWS_ROLE_ARN repository variable.
+
+Parameters:
+  GitHubRepository:
+    Type: String
+    Default: runs-on/runner-images-for-aws
+    Description: owner/name of the repository allowed to assume the role.
+  ExistingOIDCProviderArn:
+    Type: String
+    Default: ""
+    Description: >-
+      ARN of an existing token.actions.githubusercontent.com provider in this
+      account. Leave empty to create one (an account holds only one per URL).
+  Regions:
+    Type: CommaDelimitedList
+    Default: us-east-1,us-east-2,us-west-2,eu-west-1,eu-west-2,eu-west-3,eu-central-1,ap-south-1,ap-northeast-1,ap-southeast-1,ap-southeast-2
+    Description: Regions the workflows may call EC2 in (config.yml regions).
+  BuildInstanceRoleName:
+    Type: String
+    Default: SSMInstanceProfile
+    Description: >-
+      IAM role behind the SSMInstanceProfile instance profile that Packer
+      attaches to build instances.
+
+Conditions:
+  CreateOIDCProvider: !Equals [!Ref ExistingOIDCProviderArn, ""]
+
+Resources:
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Condition: CreateOIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: runner-images-for-aws-github
+      Description: GitHub Actions role for runner-images-for-aws AMI builds and releases.
+      # Packer builds run for up to 5 hours on one set of credentials.
+      MaxSessionDuration: 21600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - CreateOIDCProvider
+                - !Ref GitHubOIDCProvider
+                - !Ref ExistingOIDCProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                # Runs on any branch of the repository (builds are also
+                # dispatched from branches; pull requests and other
+                # repositories never match), and release.yml, which runs in
+                # one protected environment per image (the sub claim then
+                # names it). Other environments, such as copilot, are not
+                # trusted.
+                token.actions.githubusercontent.com:sub:
+                  - !Sub repo:${GitHubRepository}:ref:refs/heads/*
+                  - !Sub repo:${GitHubRepository}:environment:ubuntu*
+                  - !Sub repo:${GitHubRepository}:environment:windows*
+      Policies:
+        - PolicyName: ami-pipeline
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Packer builds, AMI copies, publication and cleanup.
+              - Effect: Allow
+                Action: ec2:*
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref Regions
+              - Effect: Allow
+                Action: iam:GetInstanceProfile
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/SSMInstanceProfile
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${BuildInstanceRoleName}
+                Condition:
+                  StringEquals:
+                    iam:PassedToService: ec2.amazonaws.com
+
+Outputs:
+  RoleArn:
+    Description: Store as the AWS_ROLE_ARN repository variable.
+    Value: !GetAtt Role.Arn

@@ -62,6 +62,9 @@ jobs:
 
   sync:
     uses: ./.github/workflows/sync.yml
+    permissions:
+      contents: read
+      id-token: write
     secrets: inherit
     with:
       release_prefix: linux
@@ -77,6 +80,9 @@ jobs:
       matrix:
         image_id: ${{ fromJSON(needs.select-images.outputs.image_ids) }}
     uses: ./.github/workflows/build-test-release.yml
+    permissions:
+      contents: read
+      id-token: write
     secrets: inherit
     with:
       image_id: ${{ matrix.image_id }}

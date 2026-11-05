@@ -20,9 +20,17 @@ on:
         description: "The ID of the built AMI"
         value: ${{ jobs.build.outputs.ami_id }}
 
+# Only the build and release jobs may request an AWS OIDC token; the test
+# jobs run image code and must not.
+permissions:
+  contents: read
+
 jobs:
   build:
     uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+      id-token: write
     with:
       image_id: ${{ inputs.image_id }}
     secrets: inherit
@@ -112,6 +120,9 @@ jobs:
       - test-gpu
       - test-gpu-blackwell
     uses: ./.github/workflows/release.yml
+    permissions:
+      contents: read
+      id-token: write
     secrets: inherit
     with:
       image_id: ${{ inputs.image_id }}
