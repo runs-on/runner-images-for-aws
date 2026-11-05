@@ -85,9 +85,6 @@ Resources:
                 Action: iam:GetInstanceProfile
                 Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/SSMInstanceProfile
               - Effect: Allow
-                Action: iam:GetRole
-                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${BuildInstanceRoleName}
-              - Effect: Allow
                 Action: iam:PassRole
                 Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${BuildInstanceRoleName}
                 Condition:
