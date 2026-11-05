@@ -60,10 +60,12 @@ Resources:
                 token.actions.githubusercontent.com:aud: sts.amazonaws.com
               StringLike:
                 # main-branch runs, and release.yml, which runs in one
-                # environment per image (the sub claim then names it).
+                # protected environment per image (the sub claim then names
+                # it). Other environments, such as copilot, are not trusted.
                 token.actions.githubusercontent.com:sub:
                   - !Sub repo:${GitHubRepository}:ref:refs/heads/main
-                  - !Sub repo:${GitHubRepository}:environment:*
+                  - !Sub repo:${GitHubRepository}:environment:ubuntu*
+                  - !Sub repo:${GitHubRepository}:environment:windows*
       Policies:
         - PolicyName: ami-pipeline
           PolicyDocument:
