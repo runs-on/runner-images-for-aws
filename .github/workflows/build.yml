@@ -26,8 +26,7 @@ on:
 jobs:
   build:
     name: Build ${{ inputs.image_id }}
-    # ubuntu-latest is Ubuntu 26.04, where ruby/setup-ruby has no Ruby 3.2.2 build.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
@@ -58,9 +57,8 @@ jobs:
         run: |
           plugin_binary="$(./scripts/build-patched-packer-plugin-amazon.sh)"
           echo "plugin_binary=$plugin_binary" >> "$GITHUB_OUTPUT"
-      - uses: ruby/setup-ruby@89f90524b88a01fe6e0b732220432cc6142926af # v1
+      - uses: ruby/setup-ruby@26e5b7d197ebf60545ee9667bcbace0be11ccaec # v1.334.0
         with:
-          ruby-version: 3.2.2
           bundler-cache: true
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v6
