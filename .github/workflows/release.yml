@@ -25,7 +25,8 @@ on:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    # ubuntu-latest is Ubuntu 26.04, where ruby/setup-ruby has no Ruby 3.2.2 build.
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       id-token: write
