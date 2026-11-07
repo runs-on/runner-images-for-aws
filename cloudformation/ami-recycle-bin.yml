@@ -1,0 +1,25 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Seven-day recovery for RunsOn AMIs and their snapshots in this region.
+Resources:
+  AmiRecovery:
+    Type: AWS::Rbin::Rule
+    Properties:
+      Description: Retain deleted RunsOn AMIs for seven days
+      ResourceType: EC2_IMAGE
+      ResourceTags:
+        - ResourceTagKey: creator
+          ResourceTagValue: RunsOn
+      RetentionPeriod:
+        RetentionPeriodValue: 7
+        RetentionPeriodUnit: DAYS
+  SnapshotRecovery:
+    Type: AWS::Rbin::Rule
+    Properties:
+      Description: Retain deleted RunsOn snapshots for seven days
+      ResourceType: EBS_SNAPSHOT
+      ResourceTags:
+        - ResourceTagKey: creator
+          ResourceTagValue: RunsOn
+      RetentionPeriod:
+        RetentionPeriodValue: 7
+        RetentionPeriodUnit: DAYS

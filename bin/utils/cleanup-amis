@@ -3,161 +3,120 @@ require 'aws-sdk-ec2'
 require 'terminal-table'
 require 'slop'
 require 'yaml'
-require 'date'
-require 'colorize'
+require 'json'
+require_relative '../../lib/ami_retention'
+require_relative '../../lib/ami_recycle_bin'
 
-CONFIG = YAML.load_file(File.expand_path("../../config.yml", __dir__))
-REGIONS = CONFIG.fetch("regions")
+module AmiCleanup
+  module_function
 
-options = {}
-usage = Slop::Options.new do |opts|
-  opts.banner = "Usage: #{$0} [--force] [--all] [--prod] [--help]"
-  opts.bool '-f', '--force', 'Do not ask for confirmation'
-  opts.bool '-a', '--all', 'Consider all AMIs [warn: this could delete all AMIs]'
-  opts.bool '--prod', "Target production AMIs (#{CONFIG.fetch('ami_prod_prefix')}) instead of dev ones"
-  opts.string '--region', 'Region to cleanup', default: "all"
-  opts.bool '-h', '--help', 'Show help'
-end
+  CONFIG = YAML.load_file(File.expand_path('../../config.yml', __dir__))
 
-begin
-  options = usage.parse(ARGV).to_hash
-rescue Slop::Error => e
-  puts "Error: #{e.message}"
-  puts
-  puts usage
-  exit 1
-end
-
-if options[:help]
-  puts usage
-  exit 0
-end
-
-force, all = options.values_at(:force, :all)
-skip_most_recent = !all
-images_to_remove = []
-# Precedence: explicit AMI_PREFIX env > --prod flag > dev prefix default
-AMI_PREFIX = ENV['AMI_PREFIX'].to_s.empty? ?
-  CONFIG.fetch(options[:prod] ? 'ami_prod_prefix' : 'ami_dev_prefix') :
-  ENV['AMI_PREFIX']
-dev_prefix = AMI_PREFIX.start_with?(CONFIG.fetch('ami_dev_prefix'))
-keep_count = dev_prefix ? 1 : 2
-
-class Image < Struct.new(:ami, :region)
-end
-
-def format_last_launched(last_launched)
-  if last_launched.nil?
-    return "Never".colorize(:color => :black, :background => :yellow)
+  def inventory(ec2, prefix)
+    ec2.describe_images(owners: ['self'], include_deprecated: true, include_disabled: true,
+                        filters: [{ name: 'name', values: ["#{prefix}*"] }]).flat_map(&:images)
   end
 
-  # Parse the time if it's a string
-  launch_time = last_launched.is_a?(String) ? Time.parse(last_launched) : last_launched
+  def protection_errors(ec2, region, rows, rule_loader: AmiRecycleBin.method(:rules))
+    images = rows.select { |row| row[:delete] }.map { |row| row[:image] }
+    return [] if images.empty?
 
-  time_diff = Time.now - launch_time
-  months_old = time_diff / (30 * 24 * 60 * 60) # Approximate months
-
-  formatted_time = launch_time.strftime("%Y-%m-%d %H:%M")
-
-  if months_old > 3
-    formatted_time.colorize(:color => :black, :background => :yellow)
-  else
-    formatted_time
-  end
-end
-
-REGIONS.each_with_index do |region, index|
-  if options[:region] != "all" && region != options[:region]
-    next
-  end
-
-  if dev_prefix && region != "us-east-1"
-    next
+    image_rules = rule_loader.call(region, 'EC2_IMAGE')
+    snapshot_rules = rule_loader.call(region, 'EBS_SNAPSHOT')
+    errors = images.filter_map do |image|
+      "#{region}: #{image.image_id} lacks available 7-day AMI protection" unless AmiRecycleBin.protected?(image_rules, image.tags)
+    end
+    ids = images.flat_map { |image| image.block_device_mappings.filter_map { |mapping| mapping.ebs&.snapshot_id } }.uniq
+    snapshots = ids.each_slice(100).flat_map do |batch|
+      ec2.describe_snapshots(owner_ids: ['self'], snapshot_ids: batch).flat_map(&:snapshots)
+    end
+    errors += (ids - snapshots.map(&:snapshot_id)).map { |id| "#{region}: cannot verify snapshot #{id}" }
+    snapshots.each do |snapshot|
+      errors << "#{region}: #{snapshot.snapshot_id} lacks available 7-day snapshot protection" unless AmiRecycleBin.protected?(snapshot_rules, snapshot.tags)
+    end
+    errors
   end
 
-  3.times { puts "" } unless index == 0
-
-  ec2 = Aws::EC2::Client.new(region: region)
-
-  # Get all AMIs with the specified name pattern
-  resp = ec2.describe_images({
-    filters: [
-      {
-        name: "name",
-        values: ["#{AMI_PREFIX}*"],
-      },
-    ],
-  })
-
-  grouped_amis = resp.images.group_by { |ami| ami.name.split('-')[3..5] }.each do |(dist, variant, arch), amis|
-    amis.sort_by!(&:creation_date)
-    amis.reverse!
-  end
-
-  grouped_amis.each do |(dist, variant, arch), amis|
-    puts "## #{region} #{AMI_PREFIX} #{dist} #{variant} #{arch}"
-    table = Terminal::Table.new do |t|
-      t.headings = ['AMI ID', 'Created at', 'Last Launched', 'Name', 'Keep?']
-      amis.each_with_index do |ami, index|
-        keep = skip_most_recent && index < keep_count
-        formatted_last_launched = format_last_launched(ami.last_launched_time)
-        t << [ami.image_id, ami.creation_date, formatted_last_launched, ami.name, keep ? "✅" : "❌"]
-        unless keep
-          images_to_remove << Image.new(ami, region)
-        end
+  def apply(ec2, rows, now:)
+    rows.each do |row|
+      if row[:observe_publication] && !row[:delete]
+        ec2.create_tags(resources: [row[:image].image_id], tags: [{ key: AmiRetention::PUBLISHED_AT_TAG, value: now.utc.iso8601 }])
       end
     end
+    rows.select { |row| row[:delete] }.each do |row|
+      response = ec2.deregister_image(image_id: row[:image].image_id, delete_associated_snapshots: true)
+      raise "Deregistration failed: #{row[:image].image_id}" unless response.return
 
-    puts table
-  end
-end
-
-if images_to_remove.empty?
-  puts "No images to remove"
-  exit 0
-end
-
-puts ""
-puts "Found #{images_to_remove.count} images to remove"
-puts ""
-
-grouped_images_to_remove = images_to_remove.group_by { |image| image.ami.name.sub(AMI_PREFIX + "-", "").split('-')[0..2] }.each do |(dist, variant, arch), images|
-  images.sort_by{|i| i.ami.creation_date}
-  images.reverse!
-end
-
-table = Terminal::Table.new do |t|
-  t.headings = ['Region', 'AMI ID', 'Created at', 'Last Launched', 'Name']
-  grouped_images_to_remove.each do |(dist, variant, arch), images|
-    images.each do |image|
-      formatted_last_launched = format_last_launched(image.ami.last_launched_time)
-      t << [image.region, image.ami.image_id, image.ami.creation_date, formatted_last_launched, image.ami.name]
+      failures = response.delete_snapshot_results.reject { |result| result.return_code == 'success' }
+      unless failures.empty?
+        raise "Snapshot deletion incomplete for #{row[:image].image_id}: #{failures.map { |result| "#{result.snapshot_id}=#{result.return_code}" }.join(', ')}"
+      end
     end
   end
-end
-puts table
-puts ""
 
-# Ask for confirmation before each removal
-reply = if force
-  "y"
-else
-  print "Are you sure you want to deregister the above AMIs and delete their associated snapshots? (y/n) "
-  $stdin.gets.chomp
-end
-
-if reply.downcase == 'y'
-  grouped_images_to_remove.each do |(dist, variant, arch), images|
-    images.each do |image|
-      ec2 = Aws::EC2::Client.new(region: image.region)
-
-      puts "Deregistering AMI #{image.ami.image_id}..."
-      sleep 2
-
-      # Deregister the AMI
-      ec2.deregister_image(image_id: image.ami.image_id, delete_associated_snapshots: true)
+  def run(argv = ARGV, out: $stdout, input: $stdin, now: Time.now.utc,
+          client_factory: ->(region) { Aws::EC2::Client.new(region: region) },
+          rule_loader: AmiRecycleBin.method(:rules))
+    opts = Slop.parse(argv) do |o|
+      o.banner = 'Usage: cleanup-amis [--prod] [--region REGION] [--dry-run] [--force] [--json FILE]'
+      o.bool '--prod', 'Clean production images; default is development'
+      o.bool '-f', '--force', 'Apply the displayed plan without prompting'
+      o.bool '--dry-run', 'Read and display the plan without any AWS mutations'
+      o.string '--region', 'One region; default is every configured publication region'
+      o.string '--json', 'Write the plan as JSON'
+      o.bool '-h', '--help', 'Show help'
     end
+    if opts.help?
+      out.puts opts
+      return true
+    end
+    raise 'Unexpected positional arguments' unless opts.arguments.empty?
+
+    prefix = ENV.fetch('AMI_PREFIX', '').empty? ? CONFIG.fetch(opts.prod? ? 'ami_prod_prefix' : 'ami_dev_prefix') : ENV.fetch('AMI_PREFIX')
+    production = prefix.start_with?(CONFIG.fetch('ami_prod_prefix'))
+    unless production || prefix.start_with?(CONFIG.fetch('ami_dev_prefix'))
+      raise "Unsupported AMI_PREFIX #{prefix.inspect}"
+    end
+    raise '--prod conflicts with the development AMI_PREFIX' if opts.prod? && !production
+
+    regions = opts[:region] ? [opts[:region]] : CONFIG.fetch('regions')
+    clients = regions.to_h { |region| [region, client_factory.call(region)] }
+    plans = clients.to_h do |region, ec2|
+      out.puts "Reading #{region} (#{prefix})..."
+      [region, AmiRetention.plan(inventory(ec2, prefix), production: production, now: now)]
+    end
+    rows = plans.flat_map do |region, plan|
+      plan.map do |row|
+        { region: region, image_id: row[:image].image_id, name: row[:image].name,
+          created_at: row[:image].creation_date, delete: row[:delete], reason: row[:reason],
+          observe_publication: !!row[:observe_publication], eligible_at: row[:eligible_at], successor_id: row[:successor_id] }
+      end
+    end
+    out.puts Terminal::Table.new(headings: ['Region', 'AMI', 'Name', 'Action', 'Reason'], rows: rows.map { |r| [r[:region], r[:image_id], r[:name], r[:delete] ? 'DELETE' : 'KEEP', r[:reason]] })
+    errors = plans.flat_map { |region, plan| protection_errors(clients.fetch(region), region, plan, rule_loader: rule_loader) }
+    summary = { as_of: now.iso8601, dry_run: opts.dry_run?, prefix: prefix, images: rows,
+                delete_count: rows.count { |row| row[:delete] }, publication_tags_to_record: rows.count { |row| row[:observe_publication] && !row[:delete] },
+                protection_errors: errors }
+    File.write(opts[:json], JSON.pretty_generate(summary) + "\n") if opts[:json]
+    out.puts "#{summary[:delete_count]} AMIs to delete; #{summary[:publication_tags_to_record]} publication timestamps to record."
+    out.puts errors.uniq unless errors.empty?
+    if opts.dry_run?
+      out.puts 'DRY RUN: no AMIs, snapshots, tags, or Recycle Bin rules changed.'
+      return true
+    end
+    raise 'Cleanup blocked: configure 7-day Recycle Bin protection before applying this plan.' unless errors.empty?
+    return true if summary[:delete_count].zero? && summary[:publication_tags_to_record].zero?
+
+    unless opts.force?
+      out.print 'Apply this plan (including publication tags)? (y/n) '
+      return true unless input.gets&.strip&.downcase == 'y'
+    end
+    plans.each { |region, plan| apply(clients.fetch(region), plan, now: now) }
+    true
+  rescue StandardError => e
+    out.puts "Cleanup failed: #{e.message}"
+    false
   end
-else
-  puts "Skipping AMI removal"
 end
+
+exit(AmiCleanup.run ? 0 : 1) if $PROGRAM_NAME == __FILE__
