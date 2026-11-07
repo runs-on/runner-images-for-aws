@@ -152,6 +152,15 @@ patch_ubuntu() {
   yq -oj -i 'eval(.clang | .default_version |= (parent | .versions[-1]))' $TOOLSET_PATH
   # only keep latest dotnet version
   yq -oj -i 'eval(.dotnet | .versions |= [.[-1]])' $TOOLSET_PATH
+  # Install only the SDK bands Microsoft still patches: the ones its latest
+  # release ships. Upstream installs the newest SDK of every band ever
+  # released, and retired bands (10.0.2xx, 10.0.3xx) bring runtimes that stay
+  # vulnerable.
+  perl -0pi -e 's/\Q.releases[].sdk.version | select(\E/.releases[0].sdk.version | select(/; s/\Q.releases[].sdks[]?.version | select(\E/.releases[0].sdks[]?.version | select(/' "$build_dir/install-dotnetcore-sdk.sh"
+  if grep -q '\.releases\[\]' "$build_dir/install-dotnetcore-sdk.sh"; then
+    echo "install-dotnetcore-sdk.sh changed upstream: review the .NET SDK band patch" >&2
+    exit 1
+  fi
   # remove PSScriptAnalyzer
   yq -oj -i 'eval(del(.powershellModules[] | select(.name == "PSScriptAnalyzer")))' $TOOLSET_PATH
   # only keep the default java version (use action to install additional, adds 5s)

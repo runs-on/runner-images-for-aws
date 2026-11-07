@@ -26,7 +26,7 @@ on:
 jobs:
   build:
     name: Build ${{ inputs.image_id }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       id-token: write
