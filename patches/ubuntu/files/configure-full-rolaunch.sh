@@ -214,6 +214,26 @@ rm -f \
   /usr/lib/systemd/system/sysinit.target.wants/systemd-binfmt.service \
   /usr/lib/systemd/system/sysinit.target.wants/ldconfig.service
 
+# PID 1 starts no mount unit while its mount monitor is rate limited (five
+# changes a second, which the API mounts of early boot exceed). A mount
+# ordered before local-fs.target then holds sysinit.target, and every unit
+# after it, for about 0.8 s. No job needs /boot or the EFI partition that
+# early: nofail takes them out of local-fs.target and they mount beside the
+# boot. grub-initrd-fallback.service clears initrdfail in /boot/grub/grubenv
+# and must wait for /boot itself, or the next GRUB boot loads the initramfs.
+sed -i -E '/[[:space:]]\/boot(\/efi)?[[:space:]]/{/nofail/!s/^(\S+\s+\S+\s+\S+\s+)(\S+)/\1\2,nofail/}' /etc/fstab
+if awk '$1 !~ /^#/ && $2 ~ /^\/boot(\/efi)?$/ && $4 !~ /(^|,)nofail(,|$)/' /etc/fstab | grep -q .; then
+  echo "a /boot entry of /etc/fstab is still ordered before local-fs.target" >&2
+  exit 1
+fi
+install -d -m 0755 /etc/systemd/system/grub-initrd-fallback.service.d
+cat > /etc/systemd/system/grub-initrd-fallback.service.d/10-boot-mount.conf <<'EOF'
+[Unit]
+RequiresMountsFor=/boot
+EOF
+# The same wait, for an image file (/var/lib/machines.raw) no runner has.
+systemctl mask var-lib-machines.mount
+
 for unit in \
   amazon-ssm-agent.service \
   chrony.service \
