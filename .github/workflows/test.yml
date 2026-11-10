@@ -177,6 +177,12 @@ jobs:
             if sudo systemctl cat rolaunch.service | grep -q -- '--mode=full'; then
               test -e /etc/cloud/cloud-init.disabled
               test -s /etc/systemd/network/10-runs-on-ec2.network
+              # AMIs built before the early root resize have no such unit;
+              # where it exists, it must have grown the root without error.
+              if sudo systemctl list-unit-files rolaunch-resize.service --no-legend | grep -q '^rolaunch-resize.service'; then
+                sudo journalctl --unit rolaunch-resize.service --no-pager || true
+                sudo systemctl is-active --quiet rolaunch-resize.service
+              fi
               test "$(sudo systemctl is-enabled cloud-init-main.service)" = masked
               test "$(sudo systemctl is-enabled netplan-configure.service)" = masked
               test "$(sudo systemctl is-enabled systemd-networkd-wait-online.service)" = masked
