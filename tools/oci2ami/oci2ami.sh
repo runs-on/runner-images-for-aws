@@ -19,7 +19,7 @@ case $(uname -m) in
   aarch64) EFI_ARCH=aa64 ;;
   *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
 esac
-W=$(mktemp -d /var/tmp/oci2ami.XXXX); trap 'umount -q $W/esp 2>/dev/null; rm -rf $W' EXIT
+W=$(mktemp -d /var/tmp/oci2ami.XXXX); trap 'umount -q $W/esp 2>/dev/null || true; rm -rf $W' EXIT
 t0=$(date +%s.%N)
 ctr=$(docker create "$IMAGE" /bin/true)
 mkdir $W/root $W/esp
