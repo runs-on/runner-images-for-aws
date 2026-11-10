@@ -8,7 +8,8 @@
 # KERNEL_ARGS replaces the kernel arguments after root= and ro (the default
 # is the minimal image's). An image can leave /etc/hosts, /etc/hostname and
 # /etc/resolv.conf in /etc/oci2ami, since Docker owns those files in every
-# container; otherwise they get the minimal image's.
+# container; otherwise they get the minimal image's. ROOT_HOOK, when set, runs
+# with the exported root as its last argument before the disk is written.
 set -euo pipefail
 IMAGE=$1; DEV=$2
 PARTUUID=${PARTUUID:-6b1e7a52-0c1d-4f0e-9a51-52756e734f6e}
@@ -40,6 +41,7 @@ if [ -d $W/root/etc/oci2ami ]; then
   done
   rm -rf $W/root/etc/oci2ami
 fi
+[ -z "${ROOT_HOOK:-}" ] || $ROOT_HOOK "$W/root"
 # The image is built: no first-boot ldconfig or update-done pass.
 touch $W/root/etc/.updated $W/root/var/.updated
 # Keep an image fstab that mounts / (Canonical's cloud root: LABEL=cloudimg-rootfs

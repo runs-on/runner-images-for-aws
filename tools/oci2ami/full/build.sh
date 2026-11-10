@@ -28,7 +28,9 @@ context)
   mkdir -p "$dir/ubuntu" "$dir/oci"
   cp -a "$release/images/ubuntu/"{scripts,custom,toolsets,assets} "$dir/ubuntu/"
   cp -a "$release/helpers/software-report-base" "$dir/"
-  cp -a "$here/shims" "$here/step.sh" "$here/patches" "$here/canonical-ami.sh" "$dir/oci/"
+  cp -a "$here/shims" "$here/step.sh" "$here/patches" "$here/canonical-ami.sh" "$here/prepull.sh" "$dir/oci/"
+  # The images install-docker.sh pulls, pulled at conversion (prepull.sh).
+  sed -n 's/^[[:space:]]*\(docker pull .*\)$/\1/p' "$release/images/ubuntu/scripts/build/install-docker.sh" > "$dir/oci/docker-pulls"
   cp -a "$here/../oci2ami.sh" "$dir/"
   (cd "$repo/tools/rolaunch" && CGO_ENABLED=0 GOOS=linux GOARCH=$goarch go build -trimpath -ldflags='-s -w' -o "$dir/rolaunch" .)
   "$here/gen-dockerfile.sh" "$id" > "$dir/Dockerfile"
@@ -51,7 +53,8 @@ image)
   [ -s "$dir/root.tar.xz" ] || curl -fsSL --retry 5 -o "$dir/root.tar.xz" \
     "https://cloud-images.ubuntu.com/resolute/current/resolute-server-cloudimg-$deb-root.tar.xz"
   docker build --progress=plain --build-arg IMAGE_VERSION="${IMAGE_VERSION:-$(date -u +%Y%m%d%H%M%S)}" -t "runs-on-$id" "$dir"
-  KERNEL_ARGS=$args "$dir/oci2ami.sh" "runs-on-$id" "$dev"
+  KERNEL_ARGS=$args ROOT_HOOK="$dir/oci/prepull.sh runs-on-$id $dir/oci/docker-pulls" \
+    "$dir/oci2ami.sh" "runs-on-$id" "$dev"
   ;;
 *) sed -n '2,15p' "$0"; exit 1 ;;
 esac

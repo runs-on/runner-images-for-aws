@@ -49,8 +49,14 @@ runner-images scripts in a Dockerfile.
   `CAP_NET_ADMIN`). Each must match or the build stops. `step.sh` applies them
   to a copy of the script and runs it like packer; each step bind-mounts only
   its scripts and edits, so changing one rebuilds from that step.
+- `prepull.sh`: the Docker images `install-docker.sh` pulls (Dependabot,
+  gh-aw, github-mcp-server: 3.4 GB) are pulled at conversion, by the image's
+  own containerd and dockerd run against the exported root (`ROOT_HOOK` of
+  `oci2ami.sh`). The OCI image itself does not carry them.
 - `build.sh context IMAGE_ID DIR`, then `build.sh image DIR DEVICE` on a
-  builder of the image's architecture.
+  builder of the image's architecture. Register the AMI with its root on
+  `/dev/sda1`, like the published ones: launch templates size the root volume
+  on that device name, and on another it becomes a second, empty disk.
 
 The packer reboot is not replayed, and `prepare-direct-uefi.sh` is replaced by
 the converter's UKI (arm64 included, which the published image boots with GRUB).
