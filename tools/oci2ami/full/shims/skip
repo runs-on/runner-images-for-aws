@@ -1,0 +1,6 @@
+#!/bin/sh
+# Container build shim for commands that act on the running machine (snapd,
+# kernel modules, the root block device, the boot loader). The AMI conversion
+# does their part: see oci2ami.sh.
+echo "$(basename "$0") $* (skipped: container build)" >&2
+exit 0
