@@ -56,11 +56,13 @@ ukify build --linux "$KIMG" --uname "${K##*/vmlinuz-}" --cmdline "$CMDLINE" \
   --stub /usr/lib/systemd/boot/efi/linux$EFI_ARCH.efi.stub --output $W/$EFI >/dev/null
 wipefs -qaf "$DEV"
 sgdisk -Z "$DEV" >/dev/null || true
-sgdisk -n 1:2048:+64M -t 1:EF00 -c 1:ESP -n 2:0:0 -t 2:8300 -c 2:root -u 2:$PARTUUID "$DEV" >/dev/null
+sgdisk -n 1:2048:+256M -t 1:EF00 -c 1:ESP -n 2:0:0 -t 2:8300 -c 2:root -u 2:$PARTUUID "$DEV" >/dev/null
 partprobe "$DEV"; udevadm settle
 case $DEV in *[0-9]) P1=${DEV}p1 P2=${DEV}p2;; *) P1=${DEV}1 P2=${DEV}2;; esac
 mkfs.vfat -F 32 -n UEFI "$P1" >/dev/null
-mount "$P1" $W/esp && install -D $W/$EFI $W/esp/EFI/BOOT/$EFI && umount $W/esp
+mount "$P1" $W/esp
+install -D $W/$EFI $W/esp/EFI/BOOT/$EFI
+umount $W/esp
 mkfs.ext4 -q -F -i 65536 -m 0 -E lazy_itable_init=0,lazy_journal_init=0 -L cloudimg-rootfs -d $W/root "$P2"
 sync
 t2=$(date +%s.%N)

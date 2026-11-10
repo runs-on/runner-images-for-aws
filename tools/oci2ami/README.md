@@ -12,7 +12,7 @@ any image build.
   and the unit set of the minimal images (Docker on its socket, no ldconfig,
   apt timers or getty on tty1, a volatile journal).
 - `oci2ami.sh IMAGE DEVICE`: exports the image, writes a GPT disk with a
-  64 MiB EFI partition holding a UKI (the image's kernel and the minimal
+  256 MiB EFI partition holding a UKI (the image's kernel and the minimal
   images' command line, no initrd, no GRUB) and an ext4 root with a fixed
   PARTUUID, and the files Docker owns at run time (`/etc/hosts`,
   `/etc/resolv.conf`, `/etc/hostname`, `/etc/fstab`). `KERNEL_ARGS` sets the
