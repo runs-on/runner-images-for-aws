@@ -17,7 +17,7 @@ repo=$(cd "$here/../../.." && pwd)
 
 case ${1:-} in
 context)
-  id=$2; dir=$3
+  id=$2; mkdir -p "$3"; dir=$(cd "$3" && pwd)
   case $id in
     ubuntu26-full-x64) arch=x64 goarch=amd64 ;;
     ubuntu26-full-arm64) arch=arm64 goarch=arm64 ;;
