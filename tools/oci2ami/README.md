@@ -65,21 +65,30 @@ the converter's UKI (arm64 included, which the published image boots with GRUB).
 
 The GPU and StepSecurity images are packer builds on top of a full AMI. The
 steps of `ubuntu-gpu-x64.pkr.hcl` were run on the OCI-built x64 AMI on
-2026-11-10 (g4dn.xlarge, over SSM instead of packer's SSH): driver 595 and CUDA
-13.3 install, the modules load after the reboot, and the resulting AMI passes
-the release test's GPU checks on a T4 (`nvidia-smi`, a CUDA kernel built with
-`nvcc`, the same in a container with `--gpus all`). Two things were missing:
+2026-11-10 (g4dn.xlarge; as `ubuntu` with sudo like packer's shell
+provisioner, but over SSM instead of packer's SSH): driver 595 and CUDA 13.3
+install, the modules load after the reboot, the final scripts pass, and the
+resulting AMI passes the release test's GPU checks on a T4 (`nvidia-smi`, a
+CUDA kernel built with `nvcc`, the same in a container with `--gpus all`).
+Not tried: packer itself, the Blackwell test (no g7e capacity that day), the
+StepSecurity templates, arm64.
+
+Two things were missing at first, and the build above has both:
 
 - **The `ubuntu` user.** cloud-init creates it at the first boot of Canonical's
   AMI; packer logs in with it and rolaunch gives it the instance's SSH key.
-  The Dockerfile now creates it first, like cloud-init (uid 1000, sudo
-  without password).
+  The Dockerfile creates it first, like cloud-init (uid 1000, sudo without
+  password); the install scripts then add it to the same groups as on the
+  published image.
 - **The kernel of the UKI.** `prepare-direct-uefi.sh`, the last step of every
   descendant, expects GRUB and `/boot/efi`. On an image that booted a UKI it
-  now writes the UKI of the newest installed linux-aws kernel in its place,
-  with the same command line (`systemd-ukify` and `systemd-boot-efi` are in
-  the image for that). Without it, a descendant whose packages bring a newer
+  writes the UKI of the newest installed linux-aws kernel in its place, with
+  the same command line (`systemd-ukify` and `systemd-boot-efi` are in the
+  image for that). Without it, a descendant whose packages bring a newer
   kernel would keep booting the old one, without the new kernel's modules.
+  On 2026-11-10 the driver's prebuilt modules were for the parent's kernel, so
+  the rewritten UKI held the same kernel: a build that changes the kernel has
+  not been seen yet.
 
 ## Boot time of the full images
 
