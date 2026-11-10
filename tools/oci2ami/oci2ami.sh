@@ -27,6 +27,8 @@ docker export "$ctr" | tar -x -C $W/root --numeric-owner --xattrs-include='*'
 docker rm "$ctr" >/dev/null
 # Docker owns these at run time; the export leaves them empty.
 rm -f $W/root/.dockerenv
+# /run is a tmpfs at boot: drop what build steps wrote there.
+find $W/root/run -mindepth 1 -delete
 printf 'nameserver 169.254.169.253\n' > $W/root/etc/resolv.conf
 echo runs-on > $W/root/etc/hostname
 printf '127.0.0.1 localhost\n127.0.1.1 runs-on\n::1 localhost ip6-localhost ip6-loopback\n' > $W/root/etc/hosts

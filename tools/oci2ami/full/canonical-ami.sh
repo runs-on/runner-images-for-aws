@@ -6,4 +6,4 @@
 set -euxo pipefail
 apt-get update
 apt-get install -y acpid ec2-hibinit-agent ec2-instance-connect irqbalance efibootmgr \
-  linux-aws ubuntu-fan ubuntu-kernel-accessories
+  linux-aws ubuntu-kernel-accessories

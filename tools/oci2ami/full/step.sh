@@ -24,6 +24,9 @@ if [[ -f /etc/environment ]]; then
     export "$k=$v"
   done < /etc/environment
 fi
+# Packer runs scripts from the SSH user's home: what they leave in the
+# current directory must not land in /.
+work=$(mktemp -d /var/tmp/oci-step.XXXX); cd "$work"
 for script in "$@"; do
   name=${script##*/}
   echo "=== oci build step: $name"
@@ -33,3 +36,4 @@ for script in "$@"; do
   if [[ $runner == pwsh ]]; then pwsh -f "$tmp"; else sh -c "$tmp"; fi
   rm -f "$tmp"
 done
+cd / && rm -rf "$work"
