@@ -2,12 +2,13 @@
 # prepull.sh IMAGE PULLS ROOT: pulls into ROOT (the image's exported root) the
 # Docker images that install-docker.sh pulls in a packer build, with the
 # image's own containerd and dockerd, since no daemon runs in a docker build.
-# PULLS holds install-docker.sh's `docker pull` lines.
+# PULLS holds install-docker.sh's `docker pull` lines. The container keeps its
+# own network: a dockerd in the host's would remove the host's docker0.
 set -euo pipefail
 image=$1 pulls=$(cd "$(dirname "$2")" && pwd)/$(basename "$2") root=$3
 [ -s "$pulls" ] || exit 0
 mkdir -p "$root/var/lib/containerd" "$root/var/lib/docker"
-docker run --rm --privileged --network host \
+docker run --rm --privileged \
   -v "$root/var/lib/containerd:/var/lib/containerd" \
   -v "$root/var/lib/docker:/var/lib/docker" \
   -v "$pulls:/oci-pulls:ro" \
