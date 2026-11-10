@@ -89,6 +89,7 @@ step DOCKERHUB_PULL_IMAGES=NO "$B/install-docker.sh"
 step pwsh "$B/Install-Toolset.ps1" "$B/Configure-Toolset.ps1"
 step "$C/prune-vulnerable-leftovers.sh"
 step "$B/configure-snap.sh"
+step oci/canonical-ami.sh
 step "$C/runner-user.sh"
 echo "# The packer build reboots here."
 step "$B/cleanup.sh"
