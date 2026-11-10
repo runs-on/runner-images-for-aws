@@ -1,0 +1,38 @@
+#!/bin/bash
+# oci2ami.sh IMAGE DEVICE: writes a bootable EC2 disk from an OCI image that
+# carries a kernel and systemd (the EC2 layer): GPT, an EFI partition with a
+# UKI (kernel + command line, no initrd), and an ext4 root with the image's
+# files. The caller snapshots DEVICE and registers the AMI (UEFI, ENA).
+set -euo pipefail
+IMAGE=$1; DEV=$2
+PARTUUID=${PARTUUID:-6b1e7a52-0c1d-4f0e-9a51-52756e734f6e}
+CMDLINE="root=PARTUUID=$PARTUUID ro console=ttyS0 nvme_core.io_timeout=4294967295 panic=-1 raid=noautodetect i8042.nokbd i8042.noaux i8042.nomux i8042.nopnp quiet net.ifnames=0 systemd.tty.term.console=linux systemd.tty.rows.console=24 systemd.tty.columns.console=80 rootflags=nobarrier,data=writeback,journal_async_commit,commit=30"
+W=$(mktemp -d /var/tmp/oci2ami.XXXX); trap 'umount -q $W/esp 2>/dev/null; rm -rf $W' EXIT
+t0=$(date +%s.%N)
+ctr=$(docker create "$IMAGE" /bin/true)
+mkdir $W/root $W/esp
+docker export "$ctr" | tar -x -C $W/root --numeric-owner --xattrs-include='*'
+docker rm "$ctr" >/dev/null
+# Docker owns these at run time; the export leaves them empty.
+rm -f $W/root/.dockerenv
+printf 'nameserver 169.254.169.253\n' > $W/root/etc/resolv.conf
+echo runs-on > $W/root/etc/hostname
+printf '127.0.0.1 localhost\n127.0.1.1 runs-on\n::1 localhost ip6-localhost ip6-loopback\n' > $W/root/etc/hosts
+# The image is built: no first-boot ldconfig or update-done pass.
+touch $W/root/etc/.updated $W/root/var/.updated
+echo "PARTUUID=$PARTUUID / ext4 defaults,discard 0 0" > $W/root/etc/fstab
+t1=$(date +%s.%N)
+K=$(ls $W/root/boot/vmlinuz-* | sort -V | tail -1)
+ukify build --linux "$K" --uname "${K##*/vmlinuz-}" --cmdline "$CMDLINE" \
+  --stub /usr/lib/systemd/boot/efi/linuxx64.efi.stub --output $W/BOOTX64.EFI >/dev/null
+wipefs -qaf "$DEV"
+sgdisk -Z "$DEV" >/dev/null || true
+sgdisk -n 1:2048:+64M -t 1:EF00 -c 1:ESP -n 2:0:0 -t 2:8300 -c 2:root -u 2:$PARTUUID "$DEV" >/dev/null
+partprobe "$DEV"; udevadm settle
+case $DEV in *[0-9]) P1=${DEV}p1 P2=${DEV}p2;; *) P1=${DEV}1 P2=${DEV}2;; esac
+mkfs.vfat -F 32 -n ESP "$P1" >/dev/null
+mount "$P1" $W/esp && install -D $W/BOOTX64.EFI $W/esp/EFI/BOOT/BOOTX64.EFI && umount $W/esp
+mkfs.ext4 -q -F -i 65536 -m 0 -E lazy_itable_init=0,lazy_journal_init=0 -L cloudimg-rootfs -d $W/root "$P2"
+sync
+t2=$(date +%s.%N)
+echo "export_s=$(echo "$t1-$t0"|bc) disk_s=$(echo "$t2-$t1"|bc) root_used=$(du -sh $W/root | cut -f1) uki=$(du -h $W/BOOTX64.EFI|cut -f1) kernel=${K##*/}"

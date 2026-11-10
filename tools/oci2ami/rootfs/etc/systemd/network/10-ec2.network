@@ -1,0 +1,9 @@
+[Match]
+Name=en* eth*
+
+[Network]
+DHCP=ipv4
+
+[DHCPv4]
+RouteMetric=100
+UseMTU=yes
