@@ -6,7 +6,8 @@
 #                                   checkout (after bin/sync --image-id
 #                                   IMAGE_ID). Needs yq and Go.
 #   build.sh image DIR DEVICE       On an Ubuntu 26.04 builder of the image's
-#                                   architecture: docker build, then
+#                                   architecture, from the copy of this script
+#                                   in DIR: docker build, then
 #                                   oci2ami.sh onto DEVICE (an empty 30 GB EBS
 #                                   volume). Needs docker.io, docker-buildx,
 #                                   systemd-ukify, systemd-boot-efi, gdisk,
@@ -31,7 +32,7 @@ context)
   cp -a "$here/shims" "$here/step.sh" "$here/patches" "$here/canonical-ami.sh" "$here/prepull.sh" "$dir/oci/"
   # The images install-docker.sh pulls, pulled at conversion (prepull.sh).
   sed -n 's/^[[:space:]]*\(docker pull .*\)$/\1/p' "$release/images/ubuntu/scripts/build/install-docker.sh" > "$dir/oci/docker-pulls"
-  cp -a "$here/../oci2ami.sh" "$dir/"
+  cp -a "$here/../oci2ami.sh" "$here/build.sh" "$dir/"
   (cd "$repo/tools/rolaunch" && CGO_ENABLED=0 GOOS=linux GOARCH=$goarch go build -trimpath -ldflags='-s -w' -o "$dir/rolaunch" .)
   "$here/gen-dockerfile.sh" "$id" > "$dir/Dockerfile"
   echo "$id" > "$dir/IMAGE_ID"
