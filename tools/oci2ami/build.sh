@@ -4,8 +4,10 @@
 # Ubuntu 26.04 builder of the target architecture (x64 only so far) with
 # docker.io, systemd-ukify, systemd-boot-efi, gdisk, dosfstools and Go.
 # Then: aws ec2 create-snapshot on the volume, and
-#   aws ec2 register-image --boot-mode uefi --ena-support --architecture x86_64 \
-#     --root-device-name /dev/xvda --block-device-mappings '[{"DeviceName":"/dev/xvda","Ebs":{"SnapshotId":"snap-..."}}]'
+#   aws ec2 register-image --virtualization-type hvm --boot-mode uefi --ena-support --architecture x86_64 \
+#     --root-device-name /dev/sda1 --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"SnapshotId":"snap-..."}}]'
+# Root on /dev/sda1 like the published AMIs: launch templates size the root
+# volume on that device name, and on another one it becomes a second, empty disk.
 set -euo pipefail
 cd "$(dirname "$0")"
 DEV=$1
