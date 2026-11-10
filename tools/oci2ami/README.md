@@ -43,10 +43,12 @@ runner-images scripts in a Dockerfile.
   `modprobe`, `tune2fs` and `update-grub` do nothing; `invoke_tests` records a
   failed Pester test in `/imagegeneration/oci-test-failures.txt` and goes on;
   services installed by apt stay stopped (`policy-rc.d`).
-- `patch-scripts.sh`: the edits the scripts need in a build (no cloud-init
+- `patches/<script>`: the edits a script needs in a build (no cloud-init
   boot, `/etc/hosts` and `/etc/resolv.conf` are Docker's, an overlayfs root, no
-  Docker daemon, no journald, no SSH host keys, no `CAP_NET_ADMIN`). Each must
-  match or the build stops.
+  Docker daemon or podman network, no journald, no SSH host keys, no
+  `CAP_NET_ADMIN`). Each must match or the build stops. `step.sh` applies them
+  to a copy of the script and runs it like packer; each step bind-mounts only
+  its scripts and edits, so changing one rebuilds from that step.
 - `build.sh context IMAGE_ID DIR`, then `build.sh image DIR DEVICE` on a
   builder of the image's architecture.
 

@@ -28,7 +28,7 @@ context)
   mkdir -p "$dir/ubuntu" "$dir/oci"
   cp -a "$release/images/ubuntu/"{scripts,custom,toolsets,assets} "$dir/ubuntu/"
   cp -a "$release/helpers/software-report-base" "$dir/"
-  cp -a "$here/shims" "$here/step.sh" "$here/patch-scripts.sh" "$dir/oci/"
+  cp -a "$here/shims" "$here/step.sh" "$here/patches" "$dir/oci/"
   cp -a "$here/../oci2ami.sh" "$dir/"
   (cd "$repo/tools/rolaunch" && CGO_ENABLED=0 GOOS=linux GOARCH=$goarch go build -trimpath -ldflags='-s -w' -o "$dir/rolaunch" .)
   "$here/gen-dockerfile.sh" "$id" > "$dir/Dockerfile"
