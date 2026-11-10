@@ -44,6 +44,27 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y linux-aws
 
 install -D -m 0755 "${ROLAUNCH_SOURCE}" /usr/bin/rolaunch
 
+# Growing the root to its volume takes 0.3 to 0.5 s, and in full mode the user
+# data waits for it. It needs only the root mounted read-write: started here,
+# it is over before the network is up and rolaunch.service starts. A failure
+# is not fatal: rolaunch.service resizes whatever this unit left.
+cat > /etc/systemd/system/rolaunch-resize.service <<'EOF'
+[Unit]
+Description=Grow the root filesystem to its volume
+DefaultDependencies=no
+After=systemd-remount-fs.service
+Before=rolaunch.service shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/rolaunch --resize-root
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 # A runner whose launcher failed never starts its agent. Power it off so that
 # InstanceInitiatedShutdownBehavior=terminate retires it within seconds instead
 # of leaving it to idle until housekeeping.
@@ -242,7 +263,7 @@ rm -f \
   /var/lib/rolaunch/user-data.sh
 
 systemctl daemon-reload
-systemctl enable rolaunch.service
+systemctl enable rolaunch-resize.service rolaunch.service
 systemd-analyze verify rolaunch.service
 
 apt-get clean
