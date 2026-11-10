@@ -201,6 +201,30 @@ class DirectUefiTest < Minitest::Test
     assert_equal stdout, repeated
   end
 
+  def test_unified_kernel_image_boot_is_read_from_the_stub_variables
+    Dir.mktmpdir("direct-uefi-uki") do |dir|
+      guid = "4a67b082-0a4c-41cf-b6c7-440b29bb8c4f"
+      escaped_dir = Shellwords.escape(dir)
+
+      _stdout, _stderr, status = run_function("booted_from_unified_kernel_image #{escaped_dir}")
+      refute status.success?
+
+      # efivarfs: four attribute bytes, then the UTF-16 value.
+      attributes = "\x06\x00\x00\x00".b
+      File.binwrite(File.join(dir, "StubInfo-#{guid}"), attributes)
+      File.binwrite(
+        File.join(dir, "StubImageIdentifier-#{guid}"),
+        attributes + "\\EFI\\BOOT\\BOOTX64.EFI\0".encode("UTF-16LE").b
+      )
+      stdout, stderr, status = run_function(
+        "booted_from_unified_kernel_image #{escaped_dir} && read_loader_variable StubImageIdentifier #{escaped_dir}"
+      )
+
+      assert status.success?, stderr
+      assert_equal "\\EFI\\BOOT\\BOOTX64.EFI", stdout
+    end
+  end
+
   def test_cleanup_removes_every_temporary_file
     Dir.mktmpdir("direct-uefi-cleanup") do |dir|
       paths = %w[before after].map { |name| File.join(dir, name) }
