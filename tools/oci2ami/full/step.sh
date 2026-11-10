@@ -12,6 +12,18 @@ edit() { # sed expression, text that must be present afterwards
   sed -i "$1" "$tmp"
   grep -qF -- "$2" "$tmp" || { echo "oci edit did not apply to $name: $1" >&2; exit 1; }
 }
+# Packer runs each provisioner in a new login, where PAM loads
+# /etc/environment (AGENT_TOOLSDIRECTORY and the others that
+# configure-environment.sh sets); sudo's secure_path keeps PATH.
+if [[ -f /etc/environment ]]; then
+  while IFS= read -r line; do
+    [[ $line =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
+    k=${BASH_REMATCH[1]} v=${BASH_REMATCH[2]}
+    [[ $k == PATH ]] && continue
+    v=${v#\"}; v=${v%\"}
+    export "$k=$v"
+  done < /etc/environment
+fi
 for script in "$@"; do
   name=${script##*/}
   echo "=== oci build step: $name"
