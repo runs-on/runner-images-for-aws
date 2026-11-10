@@ -99,5 +99,8 @@ step "$C/finalize-runner-environment.sh"
 cat <<'EOF'
 # Docker replaces /etc/hosts and /etc/resolv.conf in every container: the
 # converter installs the copies kept in /etc/oci2ami.
-RUN /opt/oci-build/shims/leave.sh && rm -rf /opt/oci-build /tmp/* /root/.cache
+# The packer build boots once, which seeds pollinate: without the marker it
+# would run on every instance's first boot.
+RUN /opt/oci-build/shims/leave.sh && rm -rf /opt/oci-build /tmp/* /root/.cache && \
+    mkdir -p /var/cache/pollinate && touch /var/cache/pollinate/seeded
 EOF
