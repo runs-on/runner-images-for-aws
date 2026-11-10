@@ -60,3 +60,76 @@ runner-images scripts in a Dockerfile.
 
 The packer reboot is not replayed, and `prepare-direct-uefi.sh` is replaced by
 the converter's UKI (arm64 included, which the published image boots with GRUB).
+
+## Boot time of the full images
+
+First boots on warm snapshots, six launches each in one round, against the
+published ubuntu26-full AMIs (m7i.large and m7g.large, us-east-1a, 2026-11-10).
+Time to the start of the user data, from VM start on x64 and from kernel start
+on arm64 (whose firmware time is not visible from inside):
+
+| | published | OCI |
+|---|---|---|
+| x64 | 3.59-3.86 s (median 3.70) | 2.73-3.23 s (median 2.82) |
+| arm64 | 2.66-2.91 s (median 2.83) | 2.11-2.59 s (median 2.49) |
+
+The arm64 snapshot was still warming: an earlier build of the same image, with
+more launches behind it, was at 1.85-2.46 s (median 2.15) in the same round.
+
+Launch to sandboxd in v4 (encrypted root volumes, spot, three jobs per image):
+x64 7.2-8.7 s against 7.0-10.2 s for the published AMI, arm64 7.8-8.3 s
+against 8.7-10.2 s. Most of that is EC2's own launch time, and the spread
+between two jobs of one image is larger than the gain. The runner-images
+Pester suite gives the same failures as the published AMIs on both
+architectures.
+
+What makes the difference, in the order found:
+
+- **Root volume throughput.** A launch template that names no throughput takes
+  the AMI's. Registered without one, the root is a gp3 volume at 125 MiB/s and
+  rolaunch reads the runner in 2.0 s; at the published AMIs' 400 MiB/s, 0.9 s.
+- **systemd's mount rate limit.** PID 1 starts no mount unit while its mount
+  monitor is rate limited (5 changes a second, which the API mounts of early
+  boot exceed), so every mount unit ordered before `local-fs.target` waits
+  about 0.8 s, and with it `sysinit.target` and everything after. Here that is
+  only `var-lib-machines.mount`, masked. The published AMIs wait on `/boot`
+  and `/boot/efi` too.
+- **The ext4 orphan file.** The kernel reads it block by block when it mounts
+  the root. mke2fs gives a 30 GB filesystem 512 blocks: 0.35 s of every boot.
+  `orphan_file_size=128k` (32 blocks) makes it 0.02 s.
+- **Reserved descriptor blocks.** The first boot's online resize reads every
+  reserved group descriptor block one by one. mke2fs reserves 1023 for a
+  30 GB filesystem (room for 8 TB) and the resize takes 0.5-0.65 s;
+  `resize=536870912` reserves about 250 (2 TB, like the published AMIs).
+- **Early root resize.** In full mode the user data waits for the resize
+  (0.3-0.5 s). `rolaunch-resize.service` (`rolaunch --resize-root`) runs it as
+  soon as the root is writable, while udev and the network come up: 0.35 s
+  less on x64, 0.45 s on arm64. The unit is written by
+  `configure-full-rolaunch.sh`, so the packer builds of the full images get it
+  too.
+
+Not fixed: DHCP completes 0.2-0.3 s later than on the published AMIs, counted
+from udev's start, because the services of `basic.target` now start at the
+same moment as networkd (holding them back 0.5 s brings DHCP forward 0.18 s on
+a reboot; a higher priority for networkd and udevd does not).
+
+## Warming a new snapshot
+
+A new snapshot boots slowly whatever was read from it before. Measured on a
+fresh copy of a full AMI, m7i.large, time from pending to the end of rolaunch
+and a cold read of `/home/runner` (1.3 GB):
+
+| launch | 2 | 3 | 4 | 5 | 6 | 7 | 8 and later |
+|---|---|---|---|---|---|---|---|
+| to rolaunch done | 27 s | 21 s | 13 s | 12 s | 10 s | 7.5 s | 6.6-8.7 s |
+| read | 59 s | 36 s | 23 s | 16 s | 12 s | 6.5 s | 5-6.7 s |
+
+It is per snapshot and per availability zone (the first launch in another zone
+is cold again), it follows the number of volumes created, not the blocks read
+(directories never read are warm too) and not the time elapsed, parallel
+launches count like sequential ones, and it holds after an idle hour and a
+half. Eight launches per zone remove the seconds; the last half second of the
+boot keeps improving until about forty. The first launches with encrypted
+volumes were slow again on a snapshot warmed with unencrypted ones (17.6, 9.4
+and 8.1 s to sandboxd in v4, then 7.2-8.7 s), seen once: warm with the volume
+settings of the stack.

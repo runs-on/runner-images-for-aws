@@ -67,7 +67,13 @@ mkfs.vfat -F 32 -n UEFI "$P1" >/dev/null
 mount "$P1" $W/esp
 install -D $W/$EFI $W/esp/EFI/BOOT/$EFI
 umount $W/esp
-mkfs.ext4 -q -F -i 65536 -m 0 -E lazy_itable_init=0,lazy_journal_init=0 -L cloudimg-rootfs -d $W/root "$P2"
+# The kernel reads the orphan file block by block when it mounts the root: the
+# default 512 blocks of a 30 GB filesystem cost 0.35 s of every boot, 32 cost 0.02 s.
+# The first boot's resize reads every reserved descriptor block the same way:
+# the default 1023 (room to grow to 8 TB) double its time, so reserve for 2 TB
+# like the published AMIs. A larger volume still grows (the kernel then moves
+# the filesystem to meta_bg).
+mkfs.ext4 -q -F -i 65536 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,orphan_file_size=128k,resize=536870912 -L cloudimg-rootfs -d $W/root "$P2"
 sync
 t2=$(date +%s.%N)
 echo "export_s=$(echo "$t1-$t0"|bc) disk_s=$(echo "$t2-$t1"|bc) root_used=$(du -sh $W/root | cut -f1) uki=$(du -h $W/$EFI|cut -f1) kernel=${K##*/}"

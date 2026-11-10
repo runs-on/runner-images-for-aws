@@ -72,7 +72,6 @@ step "$B/install-ms-repos.sh" "$B/configure-apt.sh" "$B/configure-dpkg-eatmydata
 step "$B/configure-limits.sh"
 cat <<EOF
 COPY ubuntu/scripts/build/ /imagegeneration/installers/
-COPY rolaunch /imagegeneration/installers/rolaunch
 COPY ubuntu/assets/post-gen/ /imagegeneration/post-generation/
 COPY ubuntu/scripts/tests/ /imagegeneration/tests/
 COPY ubuntu/scripts/docs-gen/ /imagegeneration/SoftwareReport/
@@ -93,6 +92,9 @@ step oci/canonical-ami.sh
 step "$C/runner-user.sh"
 echo "# The packer build reboots here."
 step "$B/cleanup.sh"
+# Copied here, not with the other installers: a change to rolaunch then
+# rebuilds only the last steps.
+echo 'COPY rolaunch /imagegeneration/installers/rolaunch'
 step "$B/configure-system.sh" "$C/after-reboot.sh" "$C/configure-syn-reroll.sh" "$C/configure-full-rolaunch.sh"
 echo "# prepare-direct-uefi.sh is replaced by the converter's unified kernel image."
 step "$C/finalize-runner-environment.sh"
@@ -101,6 +103,11 @@ cat <<'EOF'
 # converter installs the copies kept in /etc/oci2ami.
 # The packer build boots once, which seeds pollinate: without the marker it
 # would run on every instance's first boot.
+# systemd starts no mount unit while its mount monitor is rate limited (5
+# changes a second, which early boot exceeds). var-lib-machines.mount is the
+# only mount unit ordered before local-fs.target in this image: masked, the
+# target, and rolaunch after it, no longer wait about 0.8 s for the limit.
 RUN /opt/oci-build/shims/leave.sh && rm -rf /opt/oci-build /tmp/* /root/.cache && \
-    mkdir -p /var/cache/pollinate && touch /var/cache/pollinate/seeded
+    mkdir -p /var/cache/pollinate && touch /var/cache/pollinate/seeded && \
+    ln -sf /dev/null /etc/systemd/system/var-lib-machines.mount
 EOF
