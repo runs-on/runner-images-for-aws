@@ -61,6 +61,26 @@ runner-images scripts in a Dockerfile.
 The packer reboot is not replayed, and `prepare-direct-uefi.sh` is replaced by
 the converter's UKI (arm64 included, which the published image boots with GRUB).
 
+## Descendant images
+
+The GPU and StepSecurity images are packer builds on top of a full AMI. The
+steps of `ubuntu-gpu-x64.pkr.hcl` were run on the OCI-built x64 AMI on
+2026-11-10 (g4dn.xlarge, over SSM instead of packer's SSH): driver 595 and CUDA
+13.3 install, the modules load after the reboot, and the resulting AMI passes
+the release test's GPU checks on a T4 (`nvidia-smi`, a CUDA kernel built with
+`nvcc`, the same in a container with `--gpus all`). Two things were missing:
+
+- **The `ubuntu` user.** cloud-init creates it at the first boot of Canonical's
+  AMI; packer logs in with it and rolaunch gives it the instance's SSH key.
+  The Dockerfile now creates it first, like cloud-init (uid 1000, sudo
+  without password).
+- **The kernel of the UKI.** `prepare-direct-uefi.sh`, the last step of every
+  descendant, expects GRUB and `/boot/efi`. On an image that booted a UKI it
+  now writes the UKI of the newest installed linux-aws kernel in its place,
+  with the same command line (`systemd-ukify` and `systemd-boot-efi` are in
+  the image for that). Without it, a descendant whose packages bring a newer
+  kernel would keep booting the old one, without the new kernel's modules.
+
 ## Boot time of the full images
 
 First boots on warm snapshots, six launches each in one round, against the

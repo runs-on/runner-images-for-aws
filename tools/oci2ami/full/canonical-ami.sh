@@ -7,3 +7,7 @@ set -euxo pipefail
 apt-get update
 apt-get install -y acpid ec2-hibinit-agent ec2-instance-connect irqbalance efibootmgr \
   linux-aws ubuntu-kernel-accessories
+# Not in Canonical's AMI: with them prepare-direct-uefi.sh writes the UKI of
+# the newest installed kernel at the end of the build of a descendant image
+# (GPU, StepSecurity).
+apt-get install -y systemd-ukify systemd-boot-efi

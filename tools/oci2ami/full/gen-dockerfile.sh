@@ -58,6 +58,14 @@ ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/snap/bin 
 COPY oci/shims/ /opt/oci-build/shims/
 COPY --from=base /etc/hosts /etc/oci2ami/hosts
 RUN /opt/oci-build/shims/enter.sh
+# The default user cloud-init creates at the first boot of Canonical's AMI.
+# Packer logs in as ubuntu, for this build and for the builds of descendant
+# images, and rolaunch gives the instance's SSH key to that user.
+RUN (getent group lxd >/dev/null || groupadd --system lxd) && \\
+    useradd --create-home --shell /bin/bash --comment Ubuntu --uid 1000 --groups adm,cdrom,sudo,dip,lxd ubuntu && \\
+    passwd --lock ubuntu >/dev/null && \\
+    printf '# User rules for ubuntu\\nubuntu ALL=(ALL) NOPASSWD:ALL\\n' > /etc/sudoers.d/90-cloud-init-users && \\
+    chmod 0440 /etc/sudoers.d/90-cloud-init-users
 
 COPY ubuntu/custom/files/install-runs-on-bootstrap.sh /tmp/install-runs-on-bootstrap.sh
 EOF
