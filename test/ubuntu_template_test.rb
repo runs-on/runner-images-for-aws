@@ -405,9 +405,10 @@ class UbuntuTemplateTest < Minitest::Test
       template = File.read(path)
       assert_operator template.index("configure-syn-reroll.sh"), :<, template.index("configure-full-rolaunch.sh"), path
     end
-    # Full images build in place and get it from Ubuntu 26 on; minimal images
-    # pass the root they build into.
-    assert_match(/if \[\[ "\$\{root\}" == "\/" && "\$\{IMAGE_OS\}" != "ubuntu26" \]\]; then.*?exit 0/m, script)
+    # Every full image gets it, Ubuntu 22 and 24 with cloud-init too: the
+    # script never looks at the release. Minimal images pass the root they
+    # build into.
+    refute_includes script, "IMAGE_OS"
     assert_includes script, "Before=network-pre.target rolaunch.service"
     # rolaunch is ordered after the unit but doesn't require it, and must not
     # wait on a hung nft.
