@@ -17,6 +17,11 @@ readonly skip_ps2_arguments=(i8042.nokbd i8042.noaux i8042.nopnp)
 # before the first unit starts. Preset the terminal type and size instead, and
 # keep the kernel from writing its whole log to the emulated serial port.
 readonly console_arguments=(quiet systemd.tty.term.console=linux systemd.tty.rows.console=24 systemd.tty.columns.console=80)
+# With predictable names, udev renames eth0 before systemd-networkd may
+# configure it, and under the load of the units that start with it the DHCP
+# lease comes 0.1 to 0.4 s later. The one ENA card of a runner needs no stable
+# name: it stays eth0, as on the minimal images.
+readonly network_arguments=(net.ifnames=0)
 
 fallback_hashes_before=''
 fallback_hashes_after=''
@@ -286,7 +291,7 @@ main() {
         ;;
     esac
   done
-  for argument in "${skip_ps2_arguments[@]}" "${console_arguments[@]}"; do
+  for argument in "${skip_ps2_arguments[@]}" "${console_arguments[@]}" "${network_arguments[@]}"; do
     [[ " ${kernel_cmdline} " == *" ${argument} "* ]] || kernel_cmdline+=" ${argument}"
   done
   validate_direct_cmdline "${kernel_cmdline}"
