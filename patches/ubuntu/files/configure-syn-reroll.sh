@@ -2,15 +2,9 @@
 
 set -euo pipefail
 
-IMAGE_OS="${IMAGE_OS:-}"
 # Minimal images install into the target root their build mounts, full
-# images into the builder itself. Full images get it from Ubuntu 26 on.
+# images into the builder itself.
 root="${TARGET_ROOT_MOUNT:-/}"
-
-if [[ "${root}" == "/" && "${IMAGE_OS}" != "ubuntu26" ]]; then
-  echo "[configure-syn-reroll] skipped for ${IMAGE_OS}"
-  exit 0
-fi
 
 # In us-east-1, an instance launched during a few minutes that recur about
 # every hour loses the SYNs of some of its new outbound TCP connections for
@@ -25,8 +19,8 @@ fi
 # instead of waiting on the same one. tcp_syn_linear_timeouts keeps the
 # retransmissions 1 s apart during that time.
 #
-# The table loads before networking, so rolaunch's own connections are
-# covered. After two minutes the chain is flushed, never deleted: connections
+# The table loads before networking, so the first connections of the boot
+# are covered: rolaunch's, or cloud-init's on Ubuntu 22 and 24 full images. After two minutes the chain is flushed, never deleted: connections
 # opened before keep their NAT binding, and deleting the last nat chain would
 # unregister the hook that applies it.
 
