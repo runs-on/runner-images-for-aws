@@ -1,0 +1,12 @@
+[Unit]
+Description=ROLaunch
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/rolaunch
+RemainAfterExit=yes
+StandardOutput=journal+console
+StandardError=journal+console
+
+[Install]
+WantedBy=multi-user.target

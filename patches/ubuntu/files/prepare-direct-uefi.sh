@@ -18,8 +18,13 @@ readonly skip_ps2_arguments=(i8042.nokbd i8042.noaux i8042.nopnp)
 # keep the kernel from writing its whole log to the emulated serial port.
 readonly console_arguments=(quiet systemd.tty.term.console=linux systemd.tty.rows.console=24 systemd.tty.columns.console=80)
 
+# systemd-stub's EFI variables, set when the firmware booted a unified kernel
+# image (UKI).
+readonly loader_variable_guid="4a67b082-0a4c-41cf-b6c7-440b29bb8c4f"
+
 fallback_hashes_before=''
 fallback_hashes_after=''
+uki_work=''
 
 cleanup() {
   local path
@@ -27,6 +32,10 @@ cleanup() {
   for path in "${fallback_hashes_before}" "${fallback_hashes_after}"; do
     [[ -z "${path}" ]] || rm -f "${path}"
   done
+  if [[ -n "${uki_work}" ]]; then
+    ! mountpoint -q "${uki_work}/esp" || umount "${uki_work}/esp"
+    rm -rf "${uki_work}"
+  fi
 }
 
 cleanup_on_exit() {
@@ -208,9 +217,80 @@ write_state() {
   mv -f "${temporary}" "${state_dir}/${name}"
 }
 
+booted_from_unified_kernel_image() {
+  local efivars_dir="${1:-/sys/firmware/efi/efivars}"
+
+  [[ -e "${efivars_dir}/StubInfo-${loader_variable_guid}" ]]
+}
+
+# efivarfs puts four attribute bytes before the UTF-16 value.
+read_loader_variable() {
+  local name="$1"
+  local efivars_dir="${2:-/sys/firmware/efi/efivars}"
+
+  tail -c +5 "${efivars_dir}/${name}-${loader_variable_guid}" | tr -d '\0'
+}
+
+# An image converted from an OCI image (tools/oci2ami) has no GRUB: the
+# firmware loads a UKI, the kernel and its command line in one file, from the
+# EFI partition. That file does not follow a kernel upgrade, so the build of a
+# descendant writes the UKI of its newest installed linux-aws kernel in place
+# of the one that booted, with the same command line.
+refresh_unified_kernel_image() {
+  local kernel_release kernel_path kernel_image
+  local efi_arch stub image_identifier esp_partuuid esp_device uki_path
+
+  kernel_release="$(select_latest_aws_kernel /boot)"
+  case "$(dpkg --print-architecture)" in
+    amd64) efi_arch=x64 ;;
+    arm64) efi_arch=aa64 ;;
+    *) fail "unsupported Debian architecture for a unified kernel image" ;;
+  esac
+  stub="/usr/lib/systemd/boot/efi/linux${efi_arch}.efi.stub"
+  command -v ukify >/dev/null || fail "ukify is missing: cannot build the unified kernel image of linux ${kernel_release}"
+  [[ -f "${stub}" ]] || fail "systemd-boot-efi is missing: no ${stub}"
+
+  image_identifier="$(read_loader_variable StubImageIdentifier)"
+  esp_partuuid="$(read_loader_variable StubDevicePartUUID | tr '[:upper:]' '[:lower:]')"
+  [[ "${image_identifier}" == \\EFI\\* ]] || fail "unexpected unified kernel image path: ${image_identifier}"
+  esp_device="/dev/disk/by-partuuid/${esp_partuuid}"
+  [[ -b "${esp_device}" ]] || fail "EFI system partition not found: ${esp_device}"
+
+  uki_work="$(mktemp -d /tmp/runs-on-uki.XXXXXX)"
+  mkdir "${uki_work}/esp"
+  mount "${esp_device}" "${uki_work}/esp"
+  uki_path="${uki_work}/esp${image_identifier//\\//}"
+  [[ -f "${uki_path}" ]] || fail "the booted unified kernel image is not on ${esp_device}: ${image_identifier}"
+
+  kernel_path="/boot/vmlinuz-${kernel_release}"
+  kernel_image="${kernel_path}"
+  # arm64 kernels are gzip files; ukify wants the EFI image inside.
+  if [[ "$(od -An -tx1 -N2 "${kernel_path}" | tr -d '[:space:]')" == "1f8b" ]]; then
+    kernel_image="${uki_work}/vmlinux"
+    zcat "${kernel_path}" > "${kernel_image}"
+  fi
+
+  ukify build \
+    --linux "${kernel_image}" \
+    --uname "${kernel_release}" \
+    --cmdline "$(< /proc/cmdline)" \
+    --stub "${stub}" \
+    --output "${uki_path}.new" >/dev/null
+  mv -f "${uki_path}.new" "${uki_path}"
+  sync
+  cleanup
+  uki_work=''
+  echo "[direct-uefi] unified kernel image written for linux ${kernel_release}"
+}
+
 main() {
   if [[ "${IMAGE_OS:-}" != "ubuntu26" ]]; then
     echo "[direct-uefi] keeping GRUB boot for ${IMAGE_OS:-unknown}"
+    return 0
+  fi
+
+  if booted_from_unified_kernel_image; then
+    refresh_unified_kernel_image
     return 0
   fi
 

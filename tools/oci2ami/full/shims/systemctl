@@ -1,0 +1,15 @@
+#!/bin/sh
+# Container build shim: no systemd runs during `docker build`. Unit files are
+# changed for real (enable, disable, mask work offline); runtime verbs that
+# need a running systemd are skipped, and every unit reads as inactive.
+verb=""
+for a in "$@"; do case "$a" in -*) ;; *) verb=$a; break ;; esac; done
+case "$verb" in
+  start|stop|restart|reload|try-restart|reload-or-restart|try-reload-or-restart|daemon-reload|daemon-reexec|reset-failed|kill|isolate)
+    echo "systemctl $* (skipped: container build)" >&2; exit 0 ;;
+  is-active|status) exit 3 ;;
+  is-failed) exit 1 ;;
+esac
+args=""
+for a in "$@"; do [ "$a" = "--now" ] || args="$args \"$a\""; done
+eval exec /usr/bin/systemctl $args
