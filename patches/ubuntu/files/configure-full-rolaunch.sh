@@ -44,14 +44,26 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y linux-aws
 
 install -D -m 0755 "${ROLAUNCH_SOURCE}" /usr/bin/rolaunch
 
+# rolaunch starts once the local filesystems are mounted and the resolver is
+# up, not after basic.target: growing the root to its volume takes 0.3 to
+# 0.5 s, the user data waits for it, and started here it runs while the
+# network comes up. (It cannot start earlier: runs-on-syn-reroll.service is
+# ordered before it.)
+# The user data is therefore no longer ordered after basic.target. That of a
+# RunsOn stack (v2.12 and later) only writes and starts the agent's unit,
+# which has default dependencies and waits for basic.target itself.
+#
 # A runner whose launcher failed never starts its agent. Power it off so that
 # InstanceInitiatedShutdownBehavior=terminate retires it within seconds instead
 # of leaving it to idle until housekeeping.
 cat > /etc/systemd/system/rolaunch.service <<'EOF'
 [Unit]
 Description=ROLaunch
+DefaultDependencies=no
 Wants=systemd-networkd.service systemd-resolved.service
-After=systemd-networkd.service systemd-resolved.service
+After=local-fs.target systemd-tmpfiles-setup.service systemd-resolved.service
+Conflicts=shutdown.target
+Before=shutdown.target
 FailureAction=poweroff
 
 [Service]
@@ -193,6 +205,26 @@ rm -f \
   /usr/lib/systemd/system/sysinit.target.wants/systemd-binfmt.service \
   /usr/lib/systemd/system/sysinit.target.wants/ldconfig.service
 
+# PID 1 starts no mount unit while its mount monitor is rate limited (five
+# changes a second, which the API mounts of early boot exceed). A mount
+# ordered before local-fs.target then holds sysinit.target, and every unit
+# after it, for about 0.8 s. No job needs /boot or the EFI partition that
+# early: nofail takes them out of local-fs.target and they mount beside the
+# boot. grub-initrd-fallback.service clears initrdfail in /boot/grub/grubenv
+# and must wait for /boot itself, or the next GRUB boot loads the initramfs.
+sed -i -E '/[[:space:]]\/boot(\/efi)?[[:space:]]/{/nofail/!s/^(\S+\s+\S+\s+\S+\s+)(\S+)/\1\2,nofail/}' /etc/fstab
+if awk '$1 !~ /^#/ && $2 ~ /^\/boot(\/efi)?$/ && $4 !~ /(^|,)nofail(,|$)/' /etc/fstab | grep -q .; then
+  echo "a /boot entry of /etc/fstab is still ordered before local-fs.target" >&2
+  exit 1
+fi
+install -d -m 0755 /etc/systemd/system/grub-initrd-fallback.service.d
+cat > /etc/systemd/system/grub-initrd-fallback.service.d/10-boot-mount.conf <<'EOF'
+[Unit]
+RequiresMountsFor=/boot
+EOF
+# The same wait, for an image file (/var/lib/machines.raw) no runner has.
+systemctl mask var-lib-machines.mount
+
 for unit in \
   amazon-ssm-agent.service \
   chrony.service \
@@ -208,12 +240,13 @@ done
 sed -i 's/^Storage=Volatile$/Storage=volatile/' /etc/systemd/journald.conf
 grep -qxF 'Storage=volatile' /etc/systemd/journald.conf || echo 'Storage=volatile' >> /etc/systemd/journald.conf
 
-# The same console arguments prepare-direct-uefi.sh adds to the direct x64
-# boot, for arm64 and for the GRUB fallback: systemd 259 otherwise waits
-# 333 ms for each of three serial-console replies that never come.
+# The same console and network arguments prepare-direct-uefi.sh adds to the
+# direct x64 boot, for arm64 and for the GRUB fallback: systemd 259 otherwise
+# waits 333 ms for each of three serial-console replies that never come, and
+# net.ifnames=0 keeps the network card eth0 (no rename before DHCP).
 install -d -m 0755 /etc/default/grub.d
 cat > /etc/default/grub.d/95-runs-on-console.cfg <<'EOF'
-GRUB_CMDLINE_LINUX_DEFAULT="$GRUB_CMDLINE_LINUX_DEFAULT quiet systemd.tty.term.console=linux systemd.tty.rows.console=24 systemd.tty.columns.console=80"
+GRUB_CMDLINE_LINUX_DEFAULT="$GRUB_CMDLINE_LINUX_DEFAULT quiet net.ifnames=0 systemd.tty.term.console=linux systemd.tty.rows.console=24 systemd.tty.columns.console=80"
 EOF
 
 # Load the NIC driver with systemd-modules-load; udev coldplug only probes it

@@ -329,7 +329,11 @@ if [[ -z "$ROOT_PARTUUID" ]]; then
   exit 1
 fi
 
-run_logged "formatting $root_partition as ext4" mkfs.ext4 -F -i 65536 -m 0 -E lazy_itable_init=0,lazy_journal_init=0 -L cloudimg-rootfs "$root_partition"
+# The kernel reads the orphan file block by block at every mount of the root:
+# mke2fs gives a 4 GB filesystem about 250 blocks (0.16-0.18 s of each boot).
+# 32 blocks read in 0.02 s and hold 32,000 orphans; past that, ext4 falls back
+# to its orphan list.
+run_logged "formatting $root_partition as ext4" mkfs.ext4 -F -i 65536 -m 0 -E lazy_itable_init=0,lazy_journal_init=0,orphan_file_size=128k -L cloudimg-rootfs "$root_partition"
 if [[ -n "$efi_partition" ]]; then
   run_logged "formatting $efi_partition as EFI system partition" mkfs.vfat -F 32 "$efi_partition"
 fi
