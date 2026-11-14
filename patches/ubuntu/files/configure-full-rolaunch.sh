@@ -44,35 +44,26 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y linux-aws
 
 install -D -m 0755 "${ROLAUNCH_SOURCE}" /usr/bin/rolaunch
 
-# Growing the root to its volume takes 0.3 to 0.5 s, and in full mode the user
-# data waits for it. It needs only the root mounted read-write: started here,
-# it is over before the network is up and rolaunch.service starts. A failure
-# is not fatal: rolaunch.service resizes whatever this unit left.
-cat > /etc/systemd/system/rolaunch-resize.service <<'EOF'
-[Unit]
-Description=Grow the root filesystem to its volume
-DefaultDependencies=no
-After=systemd-remount-fs.service
-Before=rolaunch.service shutdown.target
-Conflicts=shutdown.target
-
-[Service]
-Type=oneshot
-RemainAfterExit=yes
-ExecStart=/usr/bin/rolaunch --resize-root
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
+# rolaunch starts once the local filesystems are mounted and the resolver is
+# up, not after basic.target: growing the root to its volume takes 0.3 to
+# 0.5 s, the user data waits for it, and started here it runs while the
+# network comes up. (It cannot start earlier: runs-on-syn-reroll.service is
+# ordered before it.)
+# The user data is therefore no longer ordered after basic.target. That of a
+# RunsOn stack (v2.12 and later) only writes and starts the agent's unit,
+# which has default dependencies and waits for basic.target itself.
+#
 # A runner whose launcher failed never starts its agent. Power it off so that
 # InstanceInitiatedShutdownBehavior=terminate retires it within seconds instead
 # of leaving it to idle until housekeeping.
 cat > /etc/systemd/system/rolaunch.service <<'EOF'
 [Unit]
 Description=ROLaunch
+DefaultDependencies=no
 Wants=systemd-networkd.service systemd-resolved.service
-After=systemd-networkd.service systemd-resolved.service
+After=local-fs.target systemd-tmpfiles-setup.service systemd-resolved.service
+Conflicts=shutdown.target
+Before=shutdown.target
 FailureAction=poweroff
 
 [Service]
@@ -284,7 +275,7 @@ rm -f \
   /var/lib/rolaunch/user-data.sh
 
 systemctl daemon-reload
-systemctl enable rolaunch-resize.service rolaunch.service
+systemctl enable rolaunch.service
 systemd-analyze verify rolaunch.service
 
 apt-get clean

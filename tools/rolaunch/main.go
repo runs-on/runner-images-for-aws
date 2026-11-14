@@ -176,20 +176,8 @@ func main() {
 		timeout      = flag.Duration("timeout", defaultReadinessTimeout, "total startup timeout for waiting on network+IMDS")
 		workDir      = flag.String("workdir", defaultWorkDir, "working directory for userdata artifacts")
 		modeValue    = flag.String("mode", string(defaultLaunchMode), "launch mode: minimal or full")
-		resizeRoot   = flag.Bool("resize-root", false, "grow the root partition and filesystem to the volume, then exit")
 	)
 	flag.Parse()
-	// rolaunch-resize.service: the resize needs neither the network nor udev,
-	// so it runs while they come up instead of holding the user data back.
-	// rolaunch.service still checks, and resizes if this run did not.
-	if *resizeRoot {
-		ctx, cancel := context.WithTimeout(context.Background(), defaultRootResizeTimeout)
-		defer cancel()
-		if _, err := maybeResizeRootFilesystem(ctx); err != nil {
-			log.Fatalf("root filesystem resize failed: %v", err)
-		}
-		return
-	}
 	mode, err := parseLaunchMode(*modeValue)
 	if err != nil {
 		log.Fatalf("invalid launch mode: %v", err)
