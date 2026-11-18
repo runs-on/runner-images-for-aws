@@ -53,13 +53,17 @@ class InspectorScannerConfigTest < Minitest::Test
     assert_equal %w[ami-dev-old ami-removed], plan.fetch(:untag).map { |ami| ami.fetch("image_id") }
   end
 
-  def test_repo_config_initial_opt_in
+  def test_repo_config_opt_in
     config = InspectorScannerConfig.load_file(File.expand_path("../config.yml", __dir__))
 
     assert_equal(
       [
+        { "image_id" => "ubuntu22-full-x64", "instance_type" => "m8a.large" },
+        { "image_id" => "ubuntu22-full-arm64", "instance_type" => "m8g.large" },
         { "image_id" => "ubuntu24-full-x64", "instance_type" => "m8a.large" },
-        { "image_id" => "ubuntu24-full-arm64", "instance_type" => "m8g.large" }
+        { "image_id" => "ubuntu24-full-arm64", "instance_type" => "m8g.large" },
+        { "image_id" => "ubuntu26-full-x64", "instance_type" => "m8a.large" },
+        { "image_id" => "ubuntu26-full-arm64", "instance_type" => "m8g.large" }
       ],
       InspectorScannerConfig.opted_in_images(config)
     )

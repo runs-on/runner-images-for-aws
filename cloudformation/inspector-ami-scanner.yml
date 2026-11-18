@@ -232,6 +232,29 @@ Resources:
               StringEquals:
                 aws:SourceAccount: !Ref AWS::AccountId
 
+  ReportReaderPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${AWS::StackName}-report-reader
+      Description: Read-only access to the Inspector findings reports, for the analytics report explorer.
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: ListReports
+            Effect: Allow
+            Action:
+              - s3:GetBucketLocation
+              - s3:ListBucket
+            Resource: !GetAtt ReportBucket.Arn
+          - Sid: ReadReports
+            Effect: Allow
+            Action: s3:GetObject
+            Resource: !Sub ${ReportBucket.Arn}/inspector/*
+          - Sid: DecryptReports
+            Effect: Allow
+            Action: kms:Decrypt
+            Resource: !GetAtt ReportKey.Arn
+
   ScannerTopic:
     Type: AWS::SNS::Topic
     Properties:
@@ -859,6 +882,9 @@ Outputs:
   ReportBucketName:
     Description: S3 bucket where Inspector findings reports are exported.
     Value: !Ref ReportBucket
+  ReportReaderPolicyArn:
+    Description: Managed policy that lets a principal read the findings reports (attach it to the analytics host's IAM user).
+    Value: !Ref ReportReaderPolicy
   ScannerTopicArn:
     Description: SNS topic that publishes scanner summaries.
     Value: !Ref ScannerTopic

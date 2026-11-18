@@ -139,4 +139,11 @@ Amazon Inspector EC2 scanning must be enabled in `us-east-1` for the account. Re
 
 AMI scanning is opt-in from `config.yml`. Add `inspect: true` to an image entry to scan the latest dev and prod AMIs matching `runs-on-dev-<image_id>-*` and `runs-on-v2.2-<image_id>-*`. Missing `inspect` defaults to `false`. The `inspector_scan` AMI tag is scanner-owned state; do not manage it from Packer templates or `bin/copy-ami`.
 
+The reports are explored at https://go.runs-on.com/internal/ami-scans (runs-on/analytics, `cmd/ami-scan-importer`). The importer reads this bucket with the stack's `ReportReaderPolicyArn` managed policy, attached to the IAM user of the analytics host:
+
+```sh
+aws iam attach-user-policy --user-name <analytics-host-user> \
+  --policy-arn "$(aws cloudformation describe-stacks --region us-east-1 --stack-name runs-on-inspector-ami-scanner --query 'Stacks[0].Outputs[?OutputKey==`ReportReaderPolicyArn`].OutputValue' --output text)"
+```
+
 The stack template lives in [cloudformation/inspector-ami-scanner.yml](cloudformation/inspector-ami-scanner.yml).
