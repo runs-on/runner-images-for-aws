@@ -220,7 +220,8 @@ build {
       "${path.root}/../scripts/build/install-ms-repos.sh",
       "${path.root}/../scripts/build/configure-apt.sh",
       "${path.root}/../scripts/build/configure-dpkg-eatmydata.sh",
-      "${path.root}/../scripts/build/configure-apt-gzip-indexes.sh"
+      "${path.root}/../scripts/build/configure-apt-gzip-indexes.sh",
+      "${path.root}/../scripts/build/configure-apt-lock-timeout.sh"
     ]
   }
 

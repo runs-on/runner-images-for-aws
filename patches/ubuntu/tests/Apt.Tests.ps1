@@ -50,6 +50,10 @@ Describe "Apt acquire configuration" {
         (Get-CommandResult "apt-config dump Acquire::CompressionTypes::Order").Output | Should -Match 'Acquire::CompressionTypes::Order:: "gz";'
     }
 
+    It "apt-get waits for the dpkg lock" {
+        (Get-CommandResult "apt-config dump DPkg::Lock::Timeout").Output | Should -BeExactly 'DPkg::Lock::Timeout "120";'
+    }
+
     It "Apt sources use the official Ubuntu archive directly" {
         $sourcesFile = if (Test-IsUbuntu22) { "/etc/apt/sources.list" } else { "/etc/apt/sources.list.d/ubuntu.sources" }
         $aptSources = Get-Content $sourcesFile -Raw
