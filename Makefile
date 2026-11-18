@@ -14,6 +14,9 @@ INSPECTOR_AMI_SCAN_TAG_NAME ?= inspector_scan
 INSPECTOR_AMI_SCAN_TAG_VALUE ?= true
 INSPECTOR_PROD_PREFIX ?= runs-on-v2.2
 INSPECTOR_DEV_PREFIX ?= runs-on-dev
+# As GitHub writes the repository in the OIDC sub claim: runs-on/security has
+# immutable subjects, which carry the owner and repository ids.
+INSPECTOR_REPORT_READER_REPOSITORY ?= runs-on@150241074/security@1462636358
 INSPECTOR_SCANNER_CONFIG_JSON := $(shell ruby bin/inspector-scanner-config)
 
 help:
@@ -81,6 +84,7 @@ inspector-stack-deploy:
 	    AmiScanTagValue='$(INSPECTOR_AMI_SCAN_TAG_VALUE)' \
 	    ProdPrefix='$(INSPECTOR_PROD_PREFIX)' \
 	    DevPrefix='$(INSPECTOR_DEV_PREFIX)' \
+	    ReportReaderRepository='$(INSPECTOR_REPORT_READER_REPOSITORY)' \
 	    ScannerConfigJson='$(INSPECTOR_SCANNER_CONFIG_JSON)'
 
 inspector-report:

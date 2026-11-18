@@ -139,6 +139,6 @@ Amazon Inspector EC2 scanning must be enabled in `us-east-1` for the account. Re
 
 AMI scanning is opt-in from `config.yml`. Add `inspect: true` to an image entry to scan the latest dev and prod AMIs matching `runs-on-dev-<image_id>-*` and `runs-on-v2.2-<image_id>-*`. Missing `inspect` defaults to `false`. The `inspector_scan` AMI tag is scanner-owned state; do not manage it from Packer templates or `bin/copy-ami`.
 
-The reports are explored at https://security.runs-on.com, a static site built by [runs-on/security](https://github.com/runs-on/security) twice a day. Its workflow reads this bucket through the stack's `ReportReaderRoleArn` role (GitHub OIDC, main branch of the `ReportReaderRepository` parameter) and needs two repository variables there: `AWS_ROLE_ARN` (that output) and `REPORTS_BUCKET` (the `ReportBucketName` output).
+The reports are explored at https://security.runs-on.com, a static site built by [runs-on/security](https://github.com/runs-on/security) twice a day. Its workflow reads this bucket through the stack's `ReportReaderRoleArn` role (GitHub OIDC, main branch of the `ReportReaderRepository` parameter, written as in the token's `sub` claim: `runs-on@<owner id>/security@<repository id>`, since that repository has immutable subjects; `INSPECTOR_REPORT_READER_REPOSITORY` overrides it) and needs two repository variables there: `AWS_ROLE_ARN` (that output) and `REPORTS_BUCKET` (the `ReportBucketName` output).
 
 The stack template lives in [cloudformation/inspector-ami-scanner.yml](cloudformation/inspector-ami-scanner.yml).
