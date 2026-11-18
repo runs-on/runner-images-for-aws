@@ -414,7 +414,7 @@ Resources:
               action = event.get("Action", "Discover")
               try:
                   if action == "Discover":
-                      return discover()
+                      return discover(only_new(event.get("Input") or {}))
                   if action == "Launch":
                       return launch(event["Item"], event["RunId"])
                   if action == "Poll":
@@ -441,7 +441,12 @@ Resources:
           def tags_to_dict(tags):
               return {tag["Key"]: tag["Value"] for tag in tags or []}
 
-          def discover():
+          def only_new(execution_input):
+              # A run started by a new AMI (the EventBridge event is the execution input) or with {"OnlyNew": true}
+              # scans the AMIs never scanned; the nightly run scans every latest AMI again, for the CVEs published since.
+              return bool(execution_input.get("OnlyNew")) or execution_input.get("detail-type") == "EC2 AMI State Change"
+
+          def discover(new_only=False):
               tag_name = os.environ["AMI_SCAN_TAG_NAME"]
               tag_value = os.environ["AMI_SCAN_TAG_VALUE"]
               selected = []
@@ -460,6 +465,14 @@ Resources:
                       if tags.get(tag_name) != tag_value:
                           ec2.create_tags(Resources=[latest["ImageId"]], Tags=[{"Key": tag_name, "Value": tag_value}])
                       selected_ids.add(latest["ImageId"])
+                      if new_only:
+                          # Several AMIs becoming available minutes apart each start a run: the first run to take
+                          # an AMI claims it. The claim names the AMI, because a release copies the dev AMI's tags
+                          # to the prod AMI, which must still count as never scanned.
+                          if tags.get("inspector_scan_claimed_for") == latest["ImageId"]:
+                              continue
+                      if tags.get("inspector_scan_claimed_for") != latest["ImageId"]:
+                          ec2.create_tags(Resources=[latest["ImageId"]], Tags=[{"Key": "inspector_scan_claimed_for", "Value": latest["ImageId"]}])
                       selected.append({
                           "ami_id": latest["ImageId"],
                           "ami_name": latest["Name"],
@@ -702,7 +715,7 @@ Resources:
                 "Resource": "arn:${AWS::Partition}:states:::lambda:invoke",
                 "Parameters": {
                   "FunctionName": "${ScannerFunctionArn}",
-                  "Payload": { "Action": "Discover" }
+                  "Payload": { "Action": "Discover", "Input.$": "$" }
                 },
                 "OutputPath": "$.Payload",
                 "Next": "ScanImages"
@@ -889,6 +902,24 @@ Resources:
               - Effect: Allow
                 Action: states:StartExecution
                 Resource: !Ref ScannerStateMachine
+
+  ScannerNewAmi:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Scans a RunsOn AMI as soon as it is available, so a new release does not wait for the nightly run.
+      EventPattern:
+        source:
+          - aws.ec2
+        detail-type:
+          - EC2 AMI State Change
+        detail:
+          State:
+            - available
+      State: ENABLED
+      Targets:
+        - Arn: !Ref ScannerStateMachine
+          Id: RunsOnInspectorAmiScannerNewAmi
+          RoleArn: !GetAtt ScannerScheduleRole.Arn
 
   ScannerSchedule:
     Type: AWS::Events::Rule
