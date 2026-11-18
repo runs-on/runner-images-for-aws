@@ -57,6 +57,8 @@ patch_ubuntu() {
   cp patches/ubuntu/build/configure-dpkg-eatmydata.sh "$build_dir/"
   # Download gzip package indexes, which decompress faster than xz.
   cp patches/ubuntu/build/configure-apt-gzip-indexes.sh "$build_dir/"
+  # Wait for the dpkg lock instead of failing when something else holds it.
+  cp patches/ubuntu/build/configure-apt-lock-timeout.sh "$build_dir/"
 
   # AWS uses direct Ubuntu sources, without Azure's mirror-list file.
   gnu_sed -i "/^echo 'APT mirrors'$/d; /^cat \/etc\/apt\/apt-mirrors.txt$/d" "$build_dir/configure-apt.sh"

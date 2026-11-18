@@ -159,7 +159,7 @@ class UbuntuTemplateTest < Minitest::Test
       template = File.read(File.join(TEMPLATE_DIR, "#{name}.pkr.hcl"))
       configure_apt = template.index("configure-apt.sh")
 
-      %w[configure-dpkg-eatmydata.sh configure-apt-gzip-indexes.sh].each do |script|
+      %w[configure-dpkg-eatmydata.sh configure-apt-gzip-indexes.sh configure-apt-lock-timeout.sh].each do |script|
         position = template.index(script)
         refute_nil position, "#{name}: #{script}"
         assert_operator position, :>, configure_apt, "#{name}: #{script}"
