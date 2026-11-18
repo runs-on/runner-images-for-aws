@@ -33,6 +33,10 @@ Parameters:
     Type: String
     Default: runs-on-dev
     Description: Development AMI name prefix.
+  ReportReaderRepository:
+    Type: String
+    Default: runs-on/security
+    Description: owner/name of the repository whose main branch may read the reports (the security.runs-on.com site).
   ScannerConfigJson:
     Type: String
     Default: "[]"
@@ -232,28 +236,44 @@ Resources:
               StringEquals:
                 aws:SourceAccount: !Ref AWS::AccountId
 
-  ReportReaderPolicy:
-    Type: AWS::IAM::ManagedPolicy
+  # Assumed through GitHub OIDC by the workflow that builds
+  # security.runs-on.com from the reports. The account's GitHub OIDC provider
+  # comes from cloudformation/github-actions-role.yml.
+  ReportReaderRole:
+    Type: AWS::IAM::Role
     Properties:
-      ManagedPolicyName: !Sub ${AWS::StackName}-report-reader
-      Description: Read-only access to the Inspector findings reports, for the analytics report explorer.
-      PolicyDocument:
+      RoleName: !Sub ${AWS::StackName}-report-reader
+      Description: Read-only access to the Inspector findings reports, for the security.runs-on.com build.
+      AssumeRolePolicyDocument:
         Version: "2012-10-17"
         Statement:
-          - Sid: ListReports
-            Effect: Allow
-            Action:
-              - s3:GetBucketLocation
-              - s3:ListBucket
-            Resource: !GetAtt ReportBucket.Arn
-          - Sid: ReadReports
-            Effect: Allow
-            Action: s3:GetObject
-            Resource: !Sub ${ReportBucket.Arn}/inspector/*
-          - Sid: DecryptReports
-            Effect: Allow
-            Action: kms:Decrypt
-            Resource: !GetAtt ReportKey.Arn
+          - Effect: Allow
+            Principal:
+              Federated: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+                token.actions.githubusercontent.com:sub: !Sub repo:${ReportReaderRepository}:ref:refs/heads/main
+      Policies:
+        - PolicyName: read-reports
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ListReports
+                Effect: Allow
+                Action:
+                  - s3:GetBucketLocation
+                  - s3:ListBucket
+                Resource: !GetAtt ReportBucket.Arn
+              - Sid: ReadReports
+                Effect: Allow
+                Action: s3:GetObject
+                Resource: !Sub ${ReportBucket.Arn}/inspector/*
+              - Sid: DecryptReports
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: !GetAtt ReportKey.Arn
 
   ScannerTopic:
     Type: AWS::SNS::Topic
@@ -882,9 +902,9 @@ Outputs:
   ReportBucketName:
     Description: S3 bucket where Inspector findings reports are exported.
     Value: !Ref ReportBucket
-  ReportReaderPolicyArn:
-    Description: Managed policy that lets a principal read the findings reports (attach it to the analytics host's IAM user).
-    Value: !Ref ReportReaderPolicy
+  ReportReaderRoleArn:
+    Description: Role the security.runs-on.com build assumes to read the findings reports (its AWS_ROLE_ARN variable).
+    Value: !GetAtt ReportReaderRole.Arn
   ScannerTopicArn:
     Description: SNS topic that publishes scanner summaries.
     Value: !Ref ScannerTopic
