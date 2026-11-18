@@ -35,8 +35,11 @@ Parameters:
     Description: Development AMI name prefix.
   ReportReaderRepository:
     Type: String
-    Default: runs-on/security
-    Description: owner/name of the repository whose main branch may read the reports (the security.runs-on.com site).
+    Default: runs-on@150241074/security@1462636358
+    Description: >-
+      Repository whose main branch may read the reports (the security.runs-on.com site), as GitHub writes it in the
+      OIDC sub claim. A repository with immutable subjects carries the owner and repository ids
+      (owner@id/name@id, from gh api repos/OWNER/NAME/actions/oidc/customization/sub); an older one is owner/name.
   ScannerConfigJson:
     Type: String
     Default: "[]"
