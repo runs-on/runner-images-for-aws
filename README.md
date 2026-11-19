@@ -136,7 +136,7 @@ make inspector-stack-deploy
 
 The scanner runs every night on the latest dev and prod AMI of each opted-in image, and again whenever an AMI becomes available in the account: that run scans only the AMIs no run has taken yet (tag `inspector_scan_claimed_for`), so a new release or dev build is scanned within minutes and not twice.
 
-The stack creates the scanner VPC, outbound-only temporary scan instances, IAM roles, encrypted S3 report bucket, SNS topic, EventBridge schedule, Lambda orchestration, and Step Functions workflow. Confirm the SNS email subscription before expecting notifications.
+The stack creates the scanner VPC, outbound-only temporary scan instances, IAM roles, encrypted S3 report bucket, SNS topic, EventBridge schedule, Lambda orchestration, and Step Functions workflow. Confirm the SNS email subscription before expecting notifications. A scan instance that finds no capacity is tried again in each of the three scanner subnets for 7.5 minutes; an execution ends as failed when one of its AMIs has no report, and the failure email names the image.
 
 Amazon Inspector EC2 scanning must be enabled in `us-east-1` for the account. Reports are exported under `s3://<stack-report-bucket>/inspector/<image-id>/<channel>/<ami-id>/`.
 

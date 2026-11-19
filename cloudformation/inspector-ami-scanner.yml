@@ -97,6 +97,20 @@ Resources:
         - Key: Name
           Value: !Sub ${AWS::StackName}-public-b
 
+  # A third zone: the scan instance types are not offered in every zone
+  # (m8g and m8a are missing from the first zone of us-east-1), and with one
+  # zone left a capacity shortage there dropped the scan.
+  ScannerSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      CidrBlock: 10.82.2.0/24
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref ScannerVpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-public-c
+
   ScannerRouteTable:
     Type: AWS::EC2::RouteTable
     Properties:
@@ -124,6 +138,12 @@ Resources:
     Properties:
       RouteTableId: !Ref ScannerRouteTable
       SubnetId: !Ref ScannerSubnetB
+
+  ScannerSubnetCRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref ScannerRouteTable
+      SubnetId: !Ref ScannerSubnetC
 
   ScannerSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -396,12 +416,13 @@ Resources:
           SCANNER_CONFIG_JSON: !Ref ScannerConfigJson
           SECURITY_GROUP_ID: !Ref ScannerSecurityGroup
           SNS_TOPIC_ARN: !Ref ScannerTopic
-          SUBNET_IDS: !Sub ${ScannerSubnetA},${ScannerSubnetB}
+          SUBNET_IDS: !Sub ${ScannerSubnetA},${ScannerSubnetB},${ScannerSubnetC}
       Code:
         ZipFile: |
           import datetime
           import json
           import os
+          import time
           import traceback
           import boto3
           from botocore.exceptions import ClientError
@@ -525,45 +546,54 @@ Resources:
               last_error = None
 
               # Instance-type availability is AZ-specific; try every scanner subnet before failing this AMI scan.
-              for subnet_id in ordered_subnets:
-                  try:
-                      response = ec2.run_instances(
-                          ImageId=item["ami_id"],
-                          InstanceType=item["instance_type"],
-                          MinCount=1,
-                          MaxCount=1,
-                          IamInstanceProfile={"Name": os.environ["INSTANCE_PROFILE_NAME"]},
-                          NetworkInterfaces=[{
-                              "AssociatePublicIpAddress": True,
-                              "DeviceIndex": 0,
-                              "Groups": [os.environ["SECURITY_GROUP_ID"]],
-                              "SubnetId": subnet_id
-                          }],
-                          TagSpecifications=[{
-                              "ResourceType": "instance",
-                              "Tags": [
-                                  {"Key": "Name", "Value": f"inspector-scan-{item['image_id']}-{item['channel']}"},
-                                  {"Key": "InspectorScannerRunId", "Value": run_id},
-                                  {"Key": "InspectorScannerAmiId", "Value": item["ami_id"]},
-                                  {"Key": "InspectorScannerAmiName", "Value": item["ami_name"][:256]},
-                                  {"Key": "InspectorScannerChannel", "Value": item["channel"]},
-                                  {"Key": "InspectorScannerImageId", "Value": item["image_id"]},
-                                  {"Key": "InspectorScannerSubnetId", "Value": subnet_id},
-                                  {"Key": os.environ["AMI_SCAN_TAG_NAME"], "Value": os.environ["AMI_SCAN_TAG_VALUE"]}
-                              ]
-                          }]
-                      )
-                      item["instance_id"] = response["Instances"][0]["InstanceId"]
-                      item["subnet_id"] = subnet_id
-                      item["launched_at"] = launched_at
-                      item["scan_attempts"] = 0
-                      return item
-                  except ClientError as exc:
-                      code = exc.response.get("Error", {}).get("Code")
-                      if code not in ("Unsupported", "InsufficientInstanceCapacity", "InsufficientCapacity"):
-                          raise
-                      last_error = exc
-                      item.setdefault("launch_failures", []).append({"subnet_id": subnet_id, "error": str(exc)})
+              # A shortage is often over in seconds (the previous scan's instance was terminated a second ago),
+              # so the subnets are tried again after each wait: 7.5 minutes in all, inside the function's timeout.
+              unsupported = set()
+              for wait in (0, 30, 60, 120, 240):
+                  time.sleep(wait)
+                  for subnet_id in ordered_subnets:
+                      if subnet_id in unsupported:
+                          continue
+                      try:
+                          response = ec2.run_instances(
+                              ImageId=item["ami_id"],
+                              InstanceType=item["instance_type"],
+                              MinCount=1,
+                              MaxCount=1,
+                              IamInstanceProfile={"Name": os.environ["INSTANCE_PROFILE_NAME"]},
+                              NetworkInterfaces=[{
+                                  "AssociatePublicIpAddress": True,
+                                  "DeviceIndex": 0,
+                                  "Groups": [os.environ["SECURITY_GROUP_ID"]],
+                                  "SubnetId": subnet_id
+                              }],
+                              TagSpecifications=[{
+                                  "ResourceType": "instance",
+                                  "Tags": [
+                                      {"Key": "Name", "Value": f"inspector-scan-{item['image_id']}-{item['channel']}"},
+                                      {"Key": "InspectorScannerRunId", "Value": run_id},
+                                      {"Key": "InspectorScannerAmiId", "Value": item["ami_id"]},
+                                      {"Key": "InspectorScannerAmiName", "Value": item["ami_name"][:256]},
+                                      {"Key": "InspectorScannerChannel", "Value": item["channel"]},
+                                      {"Key": "InspectorScannerImageId", "Value": item["image_id"]},
+                                      {"Key": "InspectorScannerSubnetId", "Value": subnet_id},
+                                      {"Key": os.environ["AMI_SCAN_TAG_NAME"], "Value": os.environ["AMI_SCAN_TAG_VALUE"]}
+                                  ]
+                              }]
+                          )
+                          item["instance_id"] = response["Instances"][0]["InstanceId"]
+                          item["subnet_id"] = subnet_id
+                          item["launched_at"] = launched_at
+                          item["scan_attempts"] = 0
+                          return item
+                      except ClientError as exc:
+                          code = exc.response.get("Error", {}).get("Code")
+                          if code not in ("Unsupported", "InsufficientInstanceCapacity", "InsufficientCapacity"):
+                              raise
+                          if code == "Unsupported":
+                              unsupported.add(subnet_id)
+                          last_error = exc
+                          item.setdefault("launch_failures", []).append({"subnet_id": subnet_id, "error": str(exc)})
 
               raise last_error
 
@@ -873,11 +903,37 @@ Resources:
                           "Item.$": "$"
                         }
                       },
+                      "OutputPath": "$.Payload",
                       "End": true
                     }
                   }
                 },
-                "End": true
+                "ResultPath": "$.Results",
+                "Next": "CountReports"
+              },
+              "CountReports": {
+                "Type": "Pass",
+                "Parameters": {
+                  "Scans.$": "States.ArrayLength($.Results)",
+                  "Reports.$": "States.ArrayLength($.Results[?(@.report_complete == true)])",
+                  "Results.$": "$.Results"
+                },
+                "Next": "EveryScanHasAReport?"
+              },
+              "EveryScanHasAReport?": {
+                "Type": "Choice",
+                "Choices": [
+                  { "Variable": "$.Scans", "NumericEqualsPath": "$.Reports", "Next": "Done" }
+                ],
+                "Default": "ScansWithoutReport"
+              },
+              "Done": {
+                "Type": "Succeed"
+              },
+              "ScansWithoutReport": {
+                "Type": "Fail",
+                "Error": "ScansWithoutReport",
+                "Cause": "At least one AMI was not scanned or has no report: see Results in the output of CountReports and the failure emails."
               }
             }
           }
