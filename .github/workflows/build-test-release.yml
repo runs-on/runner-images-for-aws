@@ -113,10 +113,19 @@ jobs:
       platform: ${{ inputs.platform }}
       gpu: true
 
+  # The Blackwell test is informational: g7e capacity is often short, so its
+  # result must not block a release. Every other test must pass (test-gpu is
+  # skipped for non-GPU images; test-extras2 succeeding implies test1, test2
+  # and test-extras1 did).
   release:
-    if: ${{ !failure() && !cancelled() }}
+    if: >-
+      ${{ !cancelled()
+      && needs.build.result == 'success'
+      && needs.test-extras2.result == 'success'
+      && (needs.test-gpu.result == 'success' || needs.test-gpu.result == 'skipped') }}
     needs:
       - build
+      - test-extras2
       - test-gpu
       - test-gpu-blackwell
     uses: ./.github/workflows/release.yml
