@@ -89,8 +89,21 @@ jobs:
         with:
           name: early-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
           path: early-artifact/world.txt
+      # An artifact can take a few seconds to be listed after its upload, so
+      # the download is retried once after a pause.
       - name: Download artifact before runs-on/action
+        id: early-download
         if: contains(inputs.extras, 's3-cache')
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: early-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
+          path: early-artifact-downloaded
+      - name: Wait before retrying the artifact download
+        if: contains(inputs.extras, 's3-cache') && steps.early-download.outcome == 'failure'
+        run: sleep 30
+      - name: Retry artifact download before runs-on/action
+        if: contains(inputs.extras, 's3-cache') && steps.early-download.outcome == 'failure'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: early-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
@@ -132,7 +145,21 @@ jobs:
           name: my-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
           path: path/to/artifact/world.txt
       - run: rm path/to/artifact/world.txt
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+      # An artifact can take a few seconds to be listed after its upload, so
+      # the download is retried once after a pause.
+      - name: Download artifact
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: my-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
+          path: path/to/artifact/world.txt
+      - name: Wait before retrying the artifact download
+        if: steps.download.outcome == 'failure'
+        run: sleep 30
+      - name: Retry artifact download
+        if: steps.download.outcome == 'failure'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: my-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
           path: path/to/artifact/world.txt
@@ -272,8 +299,21 @@ jobs:
         with:
           name: early-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
           path: early-artifact/world.txt
+      # An artifact can take a few seconds to be listed after its upload, so
+      # the download is retried once after a pause.
       - name: Download artifact before runs-on/action
+        id: early-download
         if: contains(inputs.extras, 's3-cache')
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: early-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
+          path: early-artifact-downloaded
+      - name: Wait before retrying the artifact download
+        if: contains(inputs.extras, 's3-cache') && steps.early-download.outcome == 'failure'
+        run: sleep 30
+      - name: Retry artifact download before runs-on/action
+        if: contains(inputs.extras, 's3-cache') && steps.early-download.outcome == 'failure'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: early-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
@@ -342,7 +382,21 @@ jobs:
           name: my-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
           path: path/to/artifact/world.txt
       - run: rm path/to/artifact/world.txt
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+      # An artifact can take a few seconds to be listed after its upload, so
+      # the download is retried once after a pause.
+      - name: Download artifact
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: my-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
+          path: path/to/artifact/world.txt
+      - name: Wait before retrying the artifact download
+        if: steps.download.outcome == 'failure'
+        run: sleep 30
+      - name: Retry artifact download
+        if: steps.download.outcome == 'failure'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: my-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
           path: path/to/artifact/world.txt

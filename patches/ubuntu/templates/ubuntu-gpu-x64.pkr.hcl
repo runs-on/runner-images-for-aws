@@ -169,10 +169,15 @@ build {
     inline            = ["echo 'Reboot VM'", "sudo reboot"]
   }
 
+  # `sudo reboot` returns before the VM goes down, so without a pause the
+  # verification can reach the old system while it shuts down, where the
+  # nvidia module is not loaded. The full templates pause the same way.
   provisioner "shell" {
-    environment_vars = ["HELPER_SCRIPTS=${var.helper_script_folder}", "DEBIAN_FRONTEND=noninteractive"]
-    execute_command  = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
-    scripts          = ["${path.root}/../scripts/build/install-gpu.sh"]
+    environment_vars    = ["HELPER_SCRIPTS=${var.helper_script_folder}", "DEBIAN_FRONTEND=noninteractive"]
+    execute_command     = "sudo sh -c '{{ .Vars }} {{ .Path }}'"
+    pause_before        = "1m0s"
+    scripts             = ["${path.root}/../scripts/build/install-gpu.sh"]
+    start_retry_timeout = "10m"
   }
 
   provisioner "shell" {
