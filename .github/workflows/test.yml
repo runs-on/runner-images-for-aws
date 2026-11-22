@@ -89,8 +89,24 @@ jobs:
         with:
           name: early-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
           path: early-artifact/world.txt
+      # GitHub can list a just-uploaded artifact a second or two late (2 of 20
+      # immediate downloads in a measurement on 2026-11-22, with and without
+      # s3-cache; every download 2 s later succeeded), so a download that
+      # fails is tried once more after a pause.
       - name: Download artifact before runs-on/action
+        id: early-download
         if: contains(inputs.extras, 's3-cache')
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: early-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
+          path: early-artifact-downloaded
+      - name: Wait before the second download
+        if: contains(inputs.extras, 's3-cache') && steps.early-download.outcome == 'failure'
+        shell: pwsh
+        run: Start-Sleep -Seconds 10
+      - name: Download artifact before runs-on/action (second try)
+        if: contains(inputs.extras, 's3-cache') && steps.early-download.outcome == 'failure'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: early-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
@@ -132,7 +148,21 @@ jobs:
           name: my-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
           path: path/to/artifact/world.txt
       - run: rm path/to/artifact/world.txt
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+      # Tried once more after a pause: see the early download above.
+      - name: Download artifact
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: my-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
+          path: path/to/artifact/world.txt
+      - name: Wait before the second download
+        if: steps.download.outcome == 'failure'
+        shell: pwsh
+        run: Start-Sleep -Seconds 10
+      - name: Download artifact (second try)
+        if: steps.download.outcome == 'failure'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: my-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
           path: path/to/artifact/world.txt
@@ -272,8 +302,23 @@ jobs:
         with:
           name: early-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
           path: early-artifact/world.txt
+      # GitHub can list a just-uploaded artifact a second or two late (2 of 20
+      # immediate downloads in a measurement on 2026-11-22, with and without
+      # s3-cache; every download 2 s later succeeded), so a download that
+      # fails is tried once more after a pause.
       - name: Download artifact before runs-on/action
+        id: early-download
         if: contains(inputs.extras, 's3-cache')
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: early-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
+          path: early-artifact-downloaded
+      - name: Wait before the second download
+        if: contains(inputs.extras, 's3-cache') && steps.early-download.outcome == 'failure'
+        run: sleep 10
+      - name: Download artifact before runs-on/action (second try)
+        if: contains(inputs.extras, 's3-cache') && steps.early-download.outcome == 'failure'
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: early-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
@@ -342,7 +387,20 @@ jobs:
           name: my-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
           path: path/to/artifact/world.txt
       - run: rm path/to/artifact/world.txt
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+      # Tried once more after a pause: see the early download above.
+      - name: Download artifact
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: my-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
+          path: path/to/artifact/world.txt
+      - name: Wait before the second download
+        if: steps.download.outcome == 'failure'
+        run: sleep 10
+      - name: Download artifact (second try)
+        if: steps.download.outcome == 'failure'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: my-artifact-${{ inputs.ami_id }}-${{ inputs.index }}
           path: path/to/artifact/world.txt
