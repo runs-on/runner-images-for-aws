@@ -1,0 +1,57 @@
+name: Repro artifact listing lag
+
+# Temporary: measures how late a just-uploaded artifact can be downloaded by
+# name. Removed before this branch is proposed.
+on:
+  push:
+    branches:
+      - claude/fix-ci-artifact-download-lag
+
+permissions:
+  contents: read
+
+jobs:
+  lag:
+    name: lag ${{ matrix.variant }} ${{ matrix.n }}
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [direct, s3-cache]
+        n: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    runs-on: runs-on=${{ github.run_id }}-${{ matrix.variant }}-${{ matrix.n }}/env=bootstrap/runner=2cpu-linux-x64/image=ubuntu24-full-x64${{ matrix.variant == 's3-cache' && '/extras=s3-cache' || '' }}
+    steps:
+      - run: mkdir -p path/to/artifact && echo hello > path/to/artifact/world.txt
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: lag-${{ matrix.variant }}-${{ matrix.n }}
+          path: path/to/artifact/world.txt
+      - run: rm path/to/artifact/world.txt
+      - id: a0
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: lag-${{ matrix.variant }}-${{ matrix.n }}
+          path: out/a0
+      - run: sleep 2
+      - id: a1
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: lag-${{ matrix.variant }}-${{ matrix.n }}
+          path: out/a1
+      - run: sleep 5
+      - id: a2
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: lag-${{ matrix.variant }}-${{ matrix.n }}
+          path: out/a2
+      - run: sleep 15
+      - id: a3
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: lag-${{ matrix.variant }}-${{ matrix.n }}
+          path: out/a3
+      - name: Report
+        run: echo "LAG variant=${{ matrix.variant }} n=${{ matrix.n }} a0=${{ steps.a0.outcome }} a1=${{ steps.a1.outcome }} a2=${{ steps.a2.outcome }} a3=${{ steps.a3.outcome }}"
