@@ -40,27 +40,7 @@ if [ -f /root/cuda-installed.txt ]; then
     # Verify CUDA and driver installation
     echo "=== CUDA Installation Verification ==="
     su - runner -c "nvcc --version"
-    # The SSH session after the reboot can start before udev has loaded the
-    # nvidia module, so load it and wait for the driver before failing. On
-    # failure, print why the module is missing.
-    driver_ready=false
-    for attempt in $(seq 1 12); do
-        if nvidia-smi; then
-            driver_ready=true
-            break
-        fi
-        modprobe nvidia || true
-        sleep 5
-    done
-    if [ "$driver_ready" != true ]; then
-        echo "=== NVIDIA driver diagnostics ==="
-        uname -r
-        lsmod | grep -i nvidia || true
-        find /lib/modules/$(uname -r) -name 'nvidia*.ko*' || true
-        dpkg -l | grep -E 'linux-(image|modules)-.*aws|nvidia-(driver|kernel)' || true
-        journalctl -k -b --no-pager | grep -iE 'nvidia|nvrm' | tail -50 || true
-        exit 9
-    fi
+    nvidia-smi
     su - runner -c "nvcc --version" | grep "release $CUDA_MAJOR_VERSION"
     rm /root/cuda-installed.txt
     exit 0
