@@ -103,6 +103,24 @@ variable "volume_type" {
   default = "gp3"
 }
 
+# Visual Studio major version: "2022" (toolset-2025.json) or "2026"
+# (toolset-2025-vs2026.json, upstream's windows-2025-vs2026 image).
+variable "vs_version" {
+  type    = string
+  default = "2022"
+
+  validation {
+    condition     = contains(["2022", "2026"], var.vs_version)
+    error_message = "The vs_version must be 2022 or 2026."
+  }
+}
+
+locals {
+  toolset_file = var.vs_version == "2026" ? "toolset-2025-vs2026.json" : "toolset-2025.json"
+  # Upstream's VS helpers and image data switch to VS 2026 on this variable.
+  vs_env       = var.vs_version == "2026" ? ["INSTALL_VS_2026=true"] : []
+}
+
 variable "instance_type" {
   type    = string
   default = "m8i.4xlarge"
@@ -280,7 +298,7 @@ build {
       "Move-Item '${var.image_folder}\\scripts\\tests\\Helpers.psm1' '${var.helper_script_folder}\\TestsHelpers\\TestsHelpers.psm1'",
       "Move-Item '${var.image_folder}\\scripts\\tests' '${var.image_folder}\\tests'",
       "Remove-Item -Recurse '${var.image_folder}\\scripts'",
-      "Move-Item '${var.image_folder}\\toolsets\\toolset-2025.json' '${var.image_folder}\\toolset.json'",
+      "Move-Item '${var.image_folder}\\toolsets\\${local.toolset_file}' '${var.image_folder}\\toolset.json'",
       "Remove-Item -Recurse '${var.image_folder}\\toolsets'"
     ]
   }
@@ -305,7 +323,7 @@ provisioner "powershell" {
   }
 
   provisioner "powershell" {
-    environment_vars = ["IMAGE_VERSION=${var.image_version}", "IMAGE_OS=${var.image_os}", "AGENT_TOOLSDIRECTORY=${var.agent_tools_directory}", "IMAGEDATA_FILE=${var.imagedata_file}", "IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
+    environment_vars = concat(["IMAGE_VERSION=${var.image_version}", "IMAGE_OS=${var.image_os}", "AGENT_TOOLSDIRECTORY=${var.agent_tools_directory}", "IMAGEDATA_FILE=${var.imagedata_file}", "IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"], local.vs_env)
     execution_policy = "unrestricted"
     scripts          = [
       "${path.root}/../scripts/build/Configure-WindowsDefender.ps1",
@@ -352,7 +370,7 @@ provisioner "powershell" {
   provisioner "powershell" {
     elevated_password = "${var.install_password}"
     elevated_user     = "${var.install_user}"
-    environment_vars  = ["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"]
+    environment_vars  = concat(["IMAGE_FOLDER=${var.image_folder}", "TEMP_DIR=${var.temp_dir}"], local.vs_env)
     scripts           = [
       "${path.root}/../scripts/build/Install-VisualStudio.ps1"
     ]
