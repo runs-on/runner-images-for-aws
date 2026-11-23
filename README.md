@@ -31,8 +31,7 @@ Minimal images only ship the GitHub Actions runner and Docker, for the fastest b
 These images are being aligned with upstream "full" Windows tooling (including Visual Studio/C++ and Hyper-V-related components where supported). Some legacy or easily available through actions software may still be removed to ensure faster boot times and lower disk usage. Availability of virtualization-dependent components can vary based on EC2 instance capabilities and build tooling support.
 
 * `windows22-full-x64`
-* `windows25-full-x64` (Visual Studio 2022)
-* `windows25-vs2026-full-x64` (Visual Studio 2026, like GitHub's `windows-latest` and `windows-2025`)
+* `windows25-full-x64`: follows the recipe of GitHub's `windows-2025` and `windows-latest` labels (Visual Studio 2026 today). `upstream_windows` in `config.yml` records it, and the daily upstream lock job fails when GitHub moves the label or adds a Windows recipe.
 * `windows25-gpu-x64`
 
 ### GPU

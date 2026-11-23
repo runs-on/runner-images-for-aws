@@ -17,10 +17,10 @@ release_dir="$RELEASE_DIR"
 build_dir="$release_dir/images/windows/scripts/build"
 tests_dir="$release_dir/images/windows/scripts/tests"
 toolsets_dir="$release_dir/images/windows/toolsets"
-# windows25-full-x64 builds from toolset-2025.json (Visual Studio 2022) and
-# windows25-vs2026-full-x64 from toolset-2025-vs2026.json (Visual Studio 2026,
-# what windows-latest and windows-2025 run upstream). Both get the same trims.
-TOOLSET_PATHS=("$toolsets_dir/toolset-2025.json" "$toolsets_dir/toolset-2025-vs2026.json")
+# windows25-full-x64 builds the recipe GitHub's windows-2025 label uses
+# (upstream_windows in config.yml, checked by bin/check-upstream-windows):
+# windows-2025-vs2026, with Visual Studio 2026.
+TOOLSET_PATH="$toolsets_dir/toolset-2025-vs2026.json"
 
 # restore patched build scripts
 cp patches/windows/build/Install-Runner.ps1 "$release_dir/images/windows/scripts/build/"
@@ -94,67 +94,59 @@ rm -rf $release_dir/images/windows/custom
 mkdir -p $release_dir/images/windows/custom
 cp -r patches/windows/custom $release_dir/images/windows/
 
-patch_toolset() {
-  local TOOLSET_PATH="$1"
+yq -oj -i '.docker.images = []' $TOOLSET_PATH
 
-  yq -oj -i '.docker.images = []' $TOOLSET_PATH
-
-  # ruby
-  yq -oj -i 'eval(.toolcache[] | select(.name == "Ruby") | .versions |= [.[-1]])' $TOOLSET_PATH
-  yq -oj -i 'eval(.toolcache[] | select(.name == "Ruby") | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
+# ruby
+yq -oj -i 'eval(.toolcache[] | select(.name == "Ruby") | .versions |= [.[-1]])' $TOOLSET_PATH
+yq -oj -i 'eval(.toolcache[] | select(.name == "Ruby") | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
 
 
-  # python (incorrectly duplicated in original toolset file)
-  yq -oj -i 'eval(.toolcache[] | select(.name == "Python" and has("default")) | .versions |= [.[-1]])' $TOOLSET_PATH
-  yq -oj -i 'eval(.toolcache[] | select(.name == "Python" and has("default")) | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
+# python (incorrectly duplicated in original toolset file)
+yq -oj -i 'eval(.toolcache[] | select(.name == "Python" and has("default")) | .versions |= [.[-1]])' $TOOLSET_PATH
+yq -oj -i 'eval(.toolcache[] | select(.name == "Python" and has("default")) | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
 
-  # only keep one last pypy version
-  yq -oj -i 'eval(.toolcache[] | select(.name == "PyPy") | .versions |= [.[-1]])' $TOOLSET_PATH
+# only keep one last pypy version
+yq -oj -i 'eval(.toolcache[] | select(.name == "PyPy") | .versions |= [.[-1]])' $TOOLSET_PATH
 
-  # only keep one last go version
-  yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .versions |= [.[-1]])' $TOOLSET_PATH
-  yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
+# only keep one last go version
+yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .versions |= [.[-1]])' $TOOLSET_PATH
+yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
 
-  # only keep latest dotnet version
-  yq -oj -i 'eval(.dotnet | .versions |= [.[-1]])' $TOOLSET_PATH
+# only keep latest dotnet version
+yq -oj -i 'eval(.dotnet | .versions |= [.[-1]])' $TOOLSET_PATH
 
-  # keep AzureSignTool available for Windows signing workflows (issue #19)
-  yq -oj -i 'eval(.dotnet.tools += [{"name":"AzureSignTool","test":"AzureSignTool --version","getversion":"AzureSignTool --version"}] | .dotnet.tools |= unique_by(.name))' $TOOLSET_PATH
+# keep AzureSignTool available for Windows signing workflows (issue #19)
+yq -oj -i 'eval(.dotnet.tools += [{"name":"AzureSignTool","test":"AzureSignTool --version","getversion":"AzureSignTool --version"}] | .dotnet.tools |= unique_by(.name))' $TOOLSET_PATH
 
-  # remove Microsoft.Graph module (frequently hangs installs and not required for issue #19 asks)
-  yq -oj -i 'eval(del(.powershellModules[] | select(.name == "Microsoft.Graph")))' $TOOLSET_PATH
+# remove Microsoft.Graph module (frequently hangs installs and not required for issue #19 asks)
+yq -oj -i 'eval(del(.powershellModules[] | select(.name == "Microsoft.Graph")))' $TOOLSET_PATH
 
-  # remove PSScriptAnalyzer
-  # yq -oj -i 'eval(del(.powershellModules[] | select(.name == "PSScriptAnalyzer")))' $TOOLSET_PATH
+# remove PSScriptAnalyzer
+# yq -oj -i 'eval(del(.powershellModules[] | select(.name == "PSScriptAnalyzer")))' $TOOLSET_PATH
 
-  # only keep the default java version (use action to install additional, adds 5s)
-  yq -oj -i 'eval(.java | .versions |= [(parent | .default)])' $TOOLSET_PATH
+# only keep the default java version (use action to install additional, adds 5s)
+yq -oj -i 'eval(.java | .versions |= [(parent | .default)])' $TOOLSET_PATH
 
-  # only keep the default android ndk version
-  yq -oj -i 'eval(.android.ndk | .versions |= [(parent | .default)])' $TOOLSET_PATH
+# only keep the default android ndk version
+yq -oj -i 'eval(.android.ndk | .versions |= [(parent | .default)])' $TOOLSET_PATH
 
-  # lean Visual Studio profile for Windows 2025: remove Android/mobile/game/UWP-heavy workloads
-  yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Component.UnityEngine.x64"))' $TOOLSET_PATH
-  yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Component.UWP.VC.ARM64"))' $TOOLSET_PATH
-  yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Component.UWP.VC.ARM64EC"))' $TOOLSET_PATH
-  yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.ComponentGroup.UWP.VC.v142"))' $TOOLSET_PATH
-  yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Workload.ManagedGame"))' $TOOLSET_PATH
-  yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Workload.NativeGame"))' $TOOLSET_PATH
-  yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Workload.NativeMobile"))' $TOOLSET_PATH
-  yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Workload.Universal"))' $TOOLSET_PATH
+# lean Visual Studio 2026 profile for Windows 2025: remove Android/mobile/game/UWP-heavy workloads
+yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Component.UnityEngine.x64"))' $TOOLSET_PATH
+yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Component.UWP.VC.ARM64"))' $TOOLSET_PATH
+yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Component.UWP.VC.ARM64EC"))' $TOOLSET_PATH
+yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.ComponentGroup.UWP.VC.v142"))' $TOOLSET_PATH
+yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Workload.ManagedGame"))' $TOOLSET_PATH
+yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Workload.NativeGame"))' $TOOLSET_PATH
+yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Workload.NativeMobile"))' $TOOLSET_PATH
+yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Workload.Universal"))' $TOOLSET_PATH
 
-  # only keep yarn
-  yq -oj -i 'del(.npm.global_packages[] | (select(.name != "yarn" and .name != "typescript")))' $TOOLSET_PATH
+# only keep yarn
+yq -oj -i 'del(.npm.global_packages[] | (select(.name != "yarn" and .name != "typescript")))' $TOOLSET_PATH
 
-  # if using AWS, might not need azure modules, we'll see
-  yq -oj -i 'del(.azureModules[])' $TOOLSET_PATH
+# if using AWS, might not need azure modules, we'll see
+yq -oj -i 'del(.azureModules[])' $TOOLSET_PATH
 
-  # remove julia and others from choco (large disk space)
-  yq -oj -i 'del(.choco.common_packages[] | select(.name == "julia"))' $TOOLSET_PATH
-  yq -oj -i 'del(.choco.common_packages[] | select(.name == "pulumi"))' $TOOLSET_PATH
-  yq -oj -i 'del(.choco.common_packages[] | select(.name == "strawberryperl"))' $TOOLSET_PATH
-}
-
-for toolset_path in "${TOOLSET_PATHS[@]}"; do
-  patch_toolset "$toolset_path"
-done
+# remove julia and others from choco (large disk space)
+yq -oj -i 'del(.choco.common_packages[] | select(.name == "julia"))' $TOOLSET_PATH
+yq -oj -i 'del(.choco.common_packages[] | select(.name == "pulumi"))' $TOOLSET_PATH
+yq -oj -i 'del(.choco.common_packages[] | select(.name == "strawberryperl"))' $TOOLSET_PATH

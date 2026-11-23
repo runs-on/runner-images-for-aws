@@ -40,3 +40,7 @@ jobs:
         with:
           commit_message: Update upstream lock
           file_pattern: upstream.lock.yml
+      # After the commit, so a move upstream doesn't hold back the lock: the
+      # red run asks for windows25-full-x64 to be moved on purpose.
+      - name: Check GitHub's windows-2025 recipe and Windows templates
+        run: bundle exec bin/check-upstream-windows

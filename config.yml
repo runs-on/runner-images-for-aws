@@ -14,6 +14,18 @@ regions:
   - ap-northeast-1
   - ap-southeast-1
   - ap-southeast-2
+# The upstream recipe behind GitHub's windows-2025 (and windows-latest) label,
+# which windows25-full-x64 builds, and the Windows templates upstream ships.
+# bin/check-upstream-windows fails the daily upstream lock job when either
+# changes upstream, so each Visual Studio switch is made here on purpose.
+upstream_windows:
+  windows-2025: windows-2025-vs2026
+  templates:
+    - build.windows-11-arm64.pkr.hcl
+    - build.windows-11-vs2026-arm64.pkr.hcl
+    - build.windows-2022.pkr.hcl
+    - build.windows-2025-vs2026.pkr.hcl
+    - build.windows-2025.pkr.hcl
 images:
   # Shared templates (template: key, resolved by bin/build against
   # patches/<dist>/templates/<template>.pkr.hcl; defaults to <id>.pkr.hcl).
@@ -413,18 +425,6 @@ images:
     source_ami_name: Windows_Server-2025-English-Full-Base-*
     source_ami_owner: 801119661308
     description: RunsOn Windows2025 x64
-
-  # Same image with Visual Studio 2026, like GitHub's windows-latest and
-  # windows-2025 (upstream windows-2025-vs2026).
-  - id: windows25-vs2026-full-x64
-    template: windows25-full-x64
-    packer_vars:
-      vs_version: "2026"
-    instance_type: m8i.xlarge
-    volume_size: 100
-    source_ami_name: Windows_Server-2025-English-Full-Base-*
-    source_ami_owner: 801119661308
-    description: RunsOn Windows2025 + Visual Studio 2026 x64
 
   - id: windows25-gpu-x64
     instance_type: g4dn.xlarge

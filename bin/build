@@ -376,10 +376,6 @@ end
 if packer_template_content.include?('variable "install_scripts"')
   shared_template_vars += ["-var", "install_scripts=#{JSON.generate(image.fetch('install_scripts', []))}"]
 end
-# Images sharing a template set its other variables with `packer_vars:`.
-image.fetch('packer_vars', {}).each do |name, value|
-  shared_template_vars += ["-var", "#{name}=#{value}"]
-end
 if packer_template_content.include?('variable "publish_publicly"')
   publish_publicly = ENV.fetch("AMI_PUBLIC", "true").downcase
   fail("AMI_PUBLIC must be true or false") unless %w[true false].include?(publish_publicly)
