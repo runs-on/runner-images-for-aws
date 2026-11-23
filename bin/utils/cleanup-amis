@@ -42,6 +42,9 @@ AMI_PREFIX = ENV['AMI_PREFIX'].to_s.empty? ?
   ENV['AMI_PREFIX']
 dev_prefix = AMI_PREFIX.start_with?(CONFIG.fetch('ami_dev_prefix'))
 keep_count = dev_prefix ? 1 : 2
+# A production AMI someone launched recently is kept, newest or not, so a stack
+# that pins one keeps working. EC2 updates the last launch time within a day.
+IN_USE_DAYS = 30
 
 class Image < Struct.new(:ami, :region)
 end
@@ -64,6 +67,12 @@ def format_last_launched(last_launched)
   else
     formatted_time
   end
+end
+
+def launched_within?(last_launched, days)
+  return false if last_launched.nil?
+  launch_time = last_launched.is_a?(String) ? Time.parse(last_launched) : last_launched
+  Time.now - launch_time < days * 24 * 60 * 60
 end
 
 REGIONS.each_with_index do |region, index|
@@ -99,7 +108,7 @@ REGIONS.each_with_index do |region, index|
     table = Terminal::Table.new do |t|
       t.headings = ['AMI ID', 'Created at', 'Last Launched', 'Name', 'Keep?']
       amis.each_with_index do |ami, index|
-        keep = skip_most_recent && index < keep_count
+        keep = skip_most_recent && (index < keep_count || (!dev_prefix && launched_within?(ami.last_launched_time, IN_USE_DAYS)))
         formatted_last_launched = format_last_launched(ami.last_launched_time)
         t << [ami.image_id, ami.creation_date, formatted_last_launched, ami.name, keep ? "✅" : "❌"]
         unless keep
