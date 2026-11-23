@@ -101,9 +101,7 @@ yq -oj -i 'eval(.toolcache[] | select(.name == "Ruby") | .versions |= [.[-1]])' 
 yq -oj -i 'eval(.toolcache[] | select(.name == "Ruby") | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
 
 
-# python (incorrectly duplicated in original toolset file)
-yq -oj -i 'eval(.toolcache[] | select(.name == "Python" and has("default")) | .versions |= [.[-1]])' $TOOLSET_PATH
-yq -oj -i 'eval(.toolcache[] | select(.name == "Python" and has("default")) | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
+# python: keep upstream's versions and default (3.12 today), like windows-latest
 
 # only keep one last pypy version
 yq -oj -i 'eval(.toolcache[] | select(.name == "PyPy") | .versions |= [.[-1]])' $TOOLSET_PATH
@@ -112,8 +110,7 @@ yq -oj -i 'eval(.toolcache[] | select(.name == "PyPy") | .versions |= [.[-1]])' 
 yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .versions |= [.[-1]])' $TOOLSET_PATH
 yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
 
-# only keep latest dotnet version
-yq -oj -i 'eval(.dotnet | .versions |= [.[-1]])' $TOOLSET_PATH
+# dotnet: keep upstream's SDKs (8.0 to 11.0 today), like windows-latest
 
 # keep AzureSignTool available for Windows signing workflows (issue #19)
 yq -oj -i 'eval(.dotnet.tools += [{"name":"AzureSignTool","test":"AzureSignTool --version","getversion":"AzureSignTool --version"}] | .dotnet.tools |= unique_by(.name))' $TOOLSET_PATH

@@ -385,6 +385,8 @@ provisioner "powershell" {
       "${path.root}/../scripts/build/Install-AzureCli.ps1",
       # "${path.root}/../scripts/build/Install-AzureDevOpsCli.ps1",
       "${path.root}/../scripts/build/Install-ChocolateyPackages.ps1",
+      "${path.root}/../scripts/build/Install-JavaTools.ps1",
+      "${path.root}/../scripts/build/Install-Kotlin.ps1",
       "${path.root}/../scripts/build/Install-OpenSSL.ps1"
     ]
   }
