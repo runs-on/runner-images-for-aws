@@ -19,8 +19,7 @@ jobs:
                 | grep -oE 'https?:[^"<> ]*(local|network)_installers[^"<> ]*\.exe' | sed "s/^/$v $p: /" | sort -u
             done
           done
-          url=$(curl -sL -A 'Mozilla/5.0' "https://developer.nvidia.com/cuda-13-5-0-download-archive?target_os=Windows&target_arch=x86_64&target_version=Server2025&target_type=exe_local" | grep -oE 'https?:[^"<> ]*local_installers/cuda_13\.5\.0[^"<> ]*windows[^"<> ]*\.exe' | head -1)
-          [ -n "$url" ] || url=$(curl -sL -A 'Mozilla/5.0' "https://developer.nvidia.com/cuda-downloads?target_os=Windows&target_arch=x86_64&target_version=Server2025&target_type=exe_local" | grep -oE 'https?:[^"<> ]*local_installers/cuda_13\.5\.0[^"<> ]*windows[^"<> ]*\.exe' | head -1)
+          url=https://developer.download.nvidia.com/compute/cuda/13.5.0/local_installers/cuda_13.5.0_windows_x86_64.exe
           echo "URL=$url"
           [ -n "$url" ] || exit 0
           curl -sSfL -o /tmp/i.exe "$url"
