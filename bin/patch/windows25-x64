@@ -72,8 +72,8 @@ gnu_sed -i 's|throw "Failed to copy HKCU|# removed: throw "Failed to copy HKCU|'
 # retry GitHub release listings: api.github.com answers 504 now and then, and
 # one failed page fails the whole build (Install-WSL2, Install-Zstd, ...)
 helpers_dir="$release_dir/images/windows/scripts/helpers"
-grep -q 'releasesPage = Invoke-RestMethod -Uri "https://api.github.com/repos/${Repository}/releases' "$helpers_dir/InstallHelpers.ps1" || { echo "GitHub releases call not found in InstallHelpers.ps1" >&2; exit 1; }
-perl -pi -e 's/^(\s*)\$releasesPage = Invoke-RestMethod -Uri (".*?")\s*$/$1\$releasesPage = \$null; for (\$attempt = 1; \$attempt -le 5; \$attempt++) { try { \$releasesPage = Invoke-RestMethod -Uri $2; break } catch { if (\$attempt -eq 5) { throw }; Write-Warning "GitHub releases request failed (attempt \$attempt): \$_"; Start-Sleep -Seconds (15 * \$attempt) } }\n/' "$helpers_dir/InstallHelpers.ps1"
+grep -q 'Invoke-RestMethod -Uri "https://api.github.com/repos/${Repository}/releases' "$helpers_dir/InstallHelpers.ps1" || { echo "GitHub releases call not found in InstallHelpers.ps1" >&2; exit 1; }
+perl -pi -e 's/^(\s*)\$releasesPage = Invoke-RestMethod -Uri (".*?")\s*$/$1\$releasesPage = Invoke-ScriptBlockWithRetry -RetryCount 5 -RetryIntervalSeconds 30 -Command { Invoke-RestMethod -Uri $2 }\n/' "$helpers_dir/InstallHelpers.ps1"
 
 # allow clobber for powershell modules already installed
 gnu_sed -i 's|Install-Module -Name|Install-Module -AllowClobber -Name|' $build_dir/Install-PowerShellModules.ps1
