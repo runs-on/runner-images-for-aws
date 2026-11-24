@@ -13,15 +13,15 @@ jobs:
     timeout-minutes: 30
     steps:
       - run: |
-          base=https://developer.download.nvidia.com/compute/cuda/13.5.0
-          curl -s "$base/local_installers/" | grep -oE 'cuda_13\.5\.0[^"<> ]*windows[^"<> ]*\.exe' | sort -u || true
-          curl -s https://docs.nvidia.com/cuda/cuda-toolkit-release-notes/index.html | grep -oE '13\.5[^<]{0,40}(GA|Update)[^<]{0,200}' | head -10 || true
-          found=""
-          for name in cuda_13.5.0_windows.exe $(for d in 620 621 622 623; do for m in $(seq -w 0 99); do echo "cuda_13.5.0_${d}.${m}_windows.exe"; done; done); do
-            code=$(curl -s -o /dev/null -I -w '%{http_code}' "$base/local_installers/$name")
-            if [ "$code" = 200 ]; then echo "FOUND $name"; found=$name; break; fi
+          for v in 13.5.0 13.4.3 13.3.1; do
+            for p in "cuda-${v//./-}-download-archive" "cuda-downloads"; do
+              curl -sL -A 'Mozilla/5.0' "https://developer.nvidia.com/$p?target_os=Windows&target_arch=x86_64&target_version=Server2025&target_type=exe_local" \
+                | grep -oE 'https?:[^"<> ]*(local|network)_installers[^"<> ]*\.exe' | sed "s/^/$v $p: /" | sort -u
+            done
           done
-          [ -n "$found" ] || { echo "no local installer found"; curl -s -o /dev/null -I -w 'network %{http_code}\n' "$base/network_installers/cuda_13.5.0_windows_network.exe"; exit 0; }
-          curl -sSfL -o /tmp/i.exe "$base/local_installers/$found"
-          echo "URL $base/local_installers/$found"
+          url=$(curl -sL -A 'Mozilla/5.0' "https://developer.nvidia.com/cuda-13-5-0-download-archive?target_os=Windows&target_arch=x86_64&target_version=Server2025&target_type=exe_local" | grep -oE 'https?:[^"<> ]*local_installers/cuda_13\.5\.0[^"<> ]*windows[^"<> ]*\.exe' | head -1)
+          [ -n "$url" ] || url=$(curl -sL -A 'Mozilla/5.0' "https://developer.nvidia.com/cuda-downloads?target_os=Windows&target_arch=x86_64&target_version=Server2025&target_type=exe_local" | grep -oE 'https?:[^"<> ]*local_installers/cuda_13\.5\.0[^"<> ]*windows[^"<> ]*\.exe' | head -1)
+          echo "URL=$url"
+          [ -n "$url" ] || exit 0
+          curl -sSfL -o /tmp/i.exe "$url"
           sha256sum /tmp/i.exe; stat -c 'size %s' /tmp/i.exe
