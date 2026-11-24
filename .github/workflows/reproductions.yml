@@ -1,5 +1,6 @@
 name: Reproductions
 
+# TEMPORARY (PR #135): compare Windows boot between two windows25-full-x64 AMIs.
 on:
   workflow_dispatch:
 
@@ -7,239 +8,86 @@ permissions:
   contents: read
 
 jobs:
-  php-ubuntu24-arm64:
-    name: Fast PHP installs on ubuntu24-full-arm64
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-arm64/image=ubuntu24-dev-arm64
-    steps:
-      - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - name: Show PHP defaults
-        run: |
-          command -v php || true
-          php -v || true
-      - name: Setup PHP 8.3
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
-        with:
-          php-version: "8.3"
-      - name: Check PHP 8.3
-        run: php -v
-      - name: Setup PHP 8.4
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
-        with:
-          php-version: "8.4"
-      - name: Check PHP 8.4
-        run: php -v
-
-  git-lfs-ubuntu24-arm64:
-    name: git-lfs on ubuntu24-full-arm64
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-arm64/image=ubuntu24-dev-arm64
-    steps:
-      - name: Check git-lfs is available
-        run: |
-          command -v git-lfs
-          git-lfs version
-
-  imageos-ubuntu24-x64:
-    name: ImageOS/ImageVersion on ubuntu24-full-x64
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-x64/image=ubuntu24-full-x64
-    steps:
-      - name: Check ImageOS and ImageVersion env vars
-        run: |
-          echo "ImageOS=$ImageOS"
-          echo "ImageVersion=$ImageVersion"
-          test -n "$ImageOS" || (echo "ERROR: ImageOS is not set" && exit 1)
-          test -n "$ImageVersion" || (echo "ERROR: ImageVersion is not set" && exit 1)
-
-  issue-61-apt-cdn-ubuntu24-full-x64:
-    name: issue 61 CDN apt mirror on ubuntu24-full-x64
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-x64/image=ubuntu24-dev-x64
-    steps:
-      - name: Check apt mirror and acquire settings
-        run: |
-          set -euo pipefail
-
-          sources=()
-          [ ! -f /etc/apt/sources.list ] || sources+=(/etc/apt/sources.list)
-          [ ! -f /etc/apt/sources.list.d/ubuntu.sources ] || sources+=(/etc/apt/sources.list.d/ubuntu.sources)
-          if [ "${#sources[@]}" -eq 0 ]; then
-            echo "No apt sources found" >&2
-            exit 1
-          fi
-
-          sed -n '1,120p' "${sources[@]}"
-          if ! grep -E 'https://archive\.ubuntu\.com/ubuntu/?' "${sources[@]}"; then
-            echo "Expected apt sources to use archive.ubuntu.com" >&2
-            exit 1
-          fi
-          if grep -E 'https?://[^/]+\.ec2\.(archive|ports)\.ubuntu\.com/' "${sources[@]}"; then
-            echo "Found a regional EC2 apt mirror" >&2
-            exit 1
-          fi
-
-          apt-config dump | grep -Fx 'Acquire::Retries "5";'
-          apt-config dump | grep -Fx 'Acquire::http::Timeout "20";'
-          apt-config dump | grep -Fx 'Acquire::https::Timeout "20";'
-          sudo apt-get update -y
-
-  issue-31-runner-home-path-ubuntu24-full-x64:
-    name: issue 31 runner HOME paths on ubuntu24-full-x64
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-x64/image=ubuntu24-dev-x64
-    steps:
-      - name: Check runner HOME paths and tools
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          literal_home="\$HOME"
-          if grep -qF "${literal_home}" /etc/environment; then
-            echo "/etc/environment contains a literal ${literal_home}" >&2
-            exit 1
-          fi
-
-          case "${PATH}" in
-            *"${literal_home}"*) echo "PATH contains a literal ${literal_home}" >&2; exit 1 ;;
-          esac
-
-          for expected in \
-            /home/runner/.local/bin \
-            /home/runner/.cargo/bin \
-            /home/runner/.config/composer/vendor/bin \
-            /home/runner/.dotnet/tools; do
-            case ":${PATH}:" in
-              *":${expected}:"*) ;;
-              *) echo "PATH is missing ${expected}" >&2; exit 1 ;;
-            esac
-          done
-
-          command -v cargo
-          command -v rustup
-          command -v dotnet
-
-  issue-41-ubuntu24-gpu-arm64:
-    name: issue 41 Ubuntu 24 GPU ARM64 on g5g
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=4cpu-linux-arm64/image=ubuntu24-gpu-arm64/family=g5g
-    steps:
-      - name: Check native CUDA 13 and the open driver
-        run: |
-          set -euo pipefail
-          test "$(dpkg --print-architecture)" = arm64
-          nvcc --version | grep -F "release 13.0"
-          modinfo -F license nvidia | grep -F "Dual MIT/GPL"
-          nvidia-smi
-          nvidia-smi -L
-      - name: Check CUDA 13 container access
-        run: docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi -L
-
-  issue-46-ubuntu24-cuda13-x64:
-    name: issue 46 CUDA 13 on Ubuntu 24 GPU x64
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=4cpu-linux-x64/image=ubuntu24-gpu-x64/family=g4dn
-    steps:
-      - name: Check native CUDA 13
-        run: |
-          set -euo pipefail
-          nvcc --version | grep -F "release 13.0"
-          nvidia-smi
-          nvidia-smi -L
-      - name: Check CUDA 13 container access
-        run: docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi -L
-
-  issue-55-ubuntu24-blackwell-x64:
-    name: issue 55 Ubuntu 24 open driver on Blackwell
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=8cpu-linux-x64/image=ubuntu24-gpu-x64/family=g7e
-    steps:
-      - name: Check Blackwell with the open driver
-        run: |
-          set -euo pipefail
-          modinfo -F license nvidia | grep -F "Dual MIT/GPL"
-          nvidia-smi --query-gpu=name --format=csv,noheader | grep -i blackwell
-          nvidia-smi -L
-      - name: Check CUDA 13 container access
-        run: docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi -L
-
-  issue-19-windows25-hyperv-vs-cpp:
-    name: issue-19 windows25 Hyper-V + VS + C++
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/image=windows25-dev-x64/family=m8i
-    steps:
-      - name: Check Visual Studio install
-        shell: pwsh
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found at $vswhere" }
-          $installPath = (& $vswhere -latest -products * -property installationPath | Select-Object -First 1).Trim()
-          if (-not $installPath) { throw "Visual Studio installation path not found" }
-          $devenv = Join-Path $installPath "Common7\IDE\devenv.exe"
-          if (-not (Test-Path $devenv)) { throw "devenv.exe not found at $devenv" }
-          Write-Host "Visual Studio installation path: $installPath"
-
-      - name: Check C++ toolchain (cl.exe)
-        shell: pwsh
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $installPath = (& $vswhere -latest -products * -property installationPath | Select-Object -First 1).Trim()
-          if (-not $installPath) { throw "Visual Studio installation path not found" }
-          $vsDevCmd = Join-Path $installPath "Common7\Tools\VsDevCmd.bat"
-          if (-not (Test-Path $vsDevCmd)) { throw "VsDevCmd.bat not found at $vsDevCmd" }
-          cmd.exe /c "\"$vsDevCmd\" -arch=x64 >nul && where cl"
-          if ($LASTEXITCODE -ne 0) { throw "cl.exe not found from VS developer command prompt" }
-
-      - name: Check issue-19 package set
-        shell: pwsh
-        run: |
-          $required = @("bash", "cargo", "rustc", "pwsh", "AzureSignTool")
-          foreach ($tool in $required) {
-            $found = Get-Command $tool -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($null -eq $found) { throw "$tool was not found on PATH" }
-            Write-Host "$tool => $($found.Source)"
-          }
-          pwsh --version
-          cargo --version
-          rustc --version
-          AzureSignTool --version
-
-      - name: Check Hyper-V feature states
-        shell: pwsh
-        run: |
-          $serverFeatures = @("Hyper-V", "Hyper-V-PowerShell")
-          foreach ($feature in $serverFeatures) {
-            $state = (Get-WindowsFeature -Name $feature).InstallState
-            Write-Host "$feature=$state"
-            if ($state -ne "Installed") { throw "$feature is not Installed" }
-          }
-          $optionalState = (Get-WindowsOptionalFeature -Online -FeatureName "HypervisorPlatform").State
-          Write-Host "HypervisorPlatform=$optionalState"
-          if ($optionalState -ne "Enabled") { throw "HypervisorPlatform is not Enabled" }
-
-      - name: Hyper-V diagnostics (systeminfo)
-        shell: pwsh
-        run: |
-          systeminfo
-
-  journal-access-ubuntu24-full-x64:
-    name: runner reads the volatile journal on ubuntu24-full-x64
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-x64/image=ubuntu24-full-x64
-    steps:
-      - name: Read the journal as the runner user
-        run: |
-          set -euo pipefail
-          id
-          ls -la /run/log/journal/*/ || true
-          id -nG | tr ' ' '\n' | grep -qx systemd-journal
-          logger -t runs-on-journal-check "hello from $(id -un)"
-          sleep 1
-          journalctl -t runs-on-journal-check --no-pager | grep -q "hello from runner"
-
-  issue-116-apparmor-stacking:
-    name: issue 116 docker-default stacked on ${{ matrix.image }}
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-${{ matrix.arch }}/image=${{ matrix.image }}
+  windows-boot-diagnostics:
+    name: Boot diagnostics ${{ matrix.tag }} ${{ matrix.n }}
     strategy:
       fail-fast: false
       matrix:
+        tag: [old, new]
+        n: [1, 2, 3]
         include:
-          - { image: ubuntu26-full-x64, arch: x64 }
-          - { image: ubuntu26-full-arm64, arch: arm64 }
-          - { image: ubuntu24-full-x64, arch: x64 }
+          - tag: old
+            ami: ami-0307672867ea59c7e
+          - tag: new
+            ami: ami-06865956c276720a3
+    runs-on: runs-on=${{ github.run_id }}-${{ matrix.tag }}${{ matrix.n }}/env=bootstrap/volume=60g/family=m7i/cpu=2/ami=${{ matrix.ami }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - name: Reproduce the signal denial and try each fix
-        run: test/reproductions/issue-116-apparmor-stacking.sh
+      - name: Collect
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Continue'
+          $out = Join-Path $env:RUNNER_TEMP 'diag'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $launch = [datetime]::Parse($env:RUNS_ON_INSTANCE_LAUNCHED_AT).ToUniversalTime()
+          $os = Get-CimInstance Win32_OperatingSystem
+          $boot = $os.LastBootUpTime.ToUniversalTime()
+          function rel($t) { [math]::Round(($t.ToUniversalTime() - $launch).TotalSeconds, 1) }
+          "launch=$launch lastboot=$boot (+$(rel $os.LastBootUpTime)s) now=+$(rel (Get-Date))s type=$env:RUNS_ON_INSTANCE_TYPE" | Tee-Object "$out/summary.txt"
+
+          # Cumulative disk reads since boot
+          Get-CimInstance Win32_PerfRawData_PerfDisk_PhysicalDisk | Where-Object Name -eq '_Total' |
+            Select-Object DiskReadsPerSec, DiskReadBytesPerSec, DiskWritesPerSec, DiskWriteBytesPerSec |
+            Format-List | Out-String | Tee-Object -Append "$out/summary.txt"
+
+          # Timeline of System and Application events since boot
+          $ev = @()
+          foreach ($log in 'System','Application','Microsoft-Windows-Diagnostics-Performance/Operational') {
+            $ev += Get-WinEvent -FilterHashtable @{ LogName = $log; StartTime = $boot.ToLocalTime().AddSeconds(-30) } -ErrorAction SilentlyContinue
+          }
+          $ev | Sort-Object TimeCreated | ForEach-Object {
+            $m = ($_.Message -split "`r?`n")[0]
+            if ($m.Length -gt 160) { $m = $m.Substring(0,160) }
+            "{0,7} {1,-50} {2,5} {3}" -f (rel $_.TimeCreated), $_.ProviderName, $_.Id, $m
+          } | Set-Content "$out/events.txt"
+          Get-Content "$out/events.txt" | Select-Object -First 300
+
+          # EC2Launch timings
+          Get-ChildItem 'C:\ProgramData\Amazon\EC2Launch\log' -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item $_.FullName "$out/ec2launch-$($_.Name)"
+          }
+
+          # Services, startup tasks and run keys
+          Get-CimInstance Win32_Service | Where-Object { $_.StartMode -eq 'Auto' } | Sort-Object Name |
+            ForEach-Object { "{0}`t{1}`t{2}`t{3}" -f $_.Name, $_.State, $_.DelayedAutoStart, $_.PathName } | Set-Content "$out/services-auto.txt"
+          Get-ScheduledTask | Where-Object { $_.State -ne 'Disabled' -and ($_.Triggers | Where-Object { $_.CimClass.CimClassName -match 'Boot|Logon|Idle|SessionState' }) } |
+            ForEach-Object { "{0}{1}`t{2}" -f $_.TaskPath, $_.TaskName, (($_.Triggers | ForEach-Object { $_.CimClass.CimClassName }) -join ',') } | Sort-Object | Set-Content "$out/tasks-startup.txt"
+          foreach ($k in 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run','HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run') {
+            "== $k"; (Get-ItemProperty $k -ErrorAction SilentlyContinue | Out-String)
+          } | Set-Content "$out/runkeys.txt"
+
+          # Processes by CPU, with start time relative to launch
+          Get-Process | Sort-Object CPU -Descending | Select-Object -First 40 | ForEach-Object {
+            "{0,-40} cpu={1,8:N1} start=+{2}" -f $_.ProcessName, $_.CPU, $(if ($_.StartTime) { rel $_.StartTime } else { '?' })
+          } | Tee-Object "$out/processes.txt"
+
+          # Boot layout packing left by Optimize-BootLayout.ps1
+          $list = 'C:\ProgramData\RunsOn\bootlayout.txt'
+          if (Test-Path $list) {
+            $files = Get-Content $list
+            $bytes = ($files | Where-Object { Test-Path -LiteralPath $_ } | ForEach-Object { (Get-Item -LiteralPath $_ -Force).Length } | Measure-Object -Sum).Sum
+            "bootlayout: $($files.Count) files, $([math]::Round($bytes/1MB)) MB" | Tee-Object -Append "$out/summary.txt"
+            Copy-Item $list "$out/bootlayout.txt"
+          } else { "bootlayout: missing" | Tee-Object -Append "$out/summary.txt" }
+          Get-ChildItem C:\ProgramData\RunsOn -Force -ErrorAction SilentlyContinue | Out-String | Tee-Object -Append "$out/summary.txt"
+
+          # Pending reboot or servicing work
+          foreach ($k in 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending','HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') {
+            "$k exists=$(Test-Path $k)" | Tee-Object -Append "$out/summary.txt"
+          }
+          (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue).PendingFileRenameOperations | Measure-Object | ForEach-Object { "PendingFileRenameOperations=$($_.Count)" } | Tee-Object -Append "$out/summary.txt"
+          "SysMain: $((Get-Service SysMain -ErrorAction SilentlyContinue).Status)" | Tee-Object -Append "$out/summary.txt"
+          (Get-CimInstance Win32_SystemDriver | Where-Object State -eq 'Running').Count | ForEach-Object { "running drivers=$_" } | Tee-Object -Append "$out/summary.txt"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: diag-${{ matrix.tag }}${{ matrix.n }}
+          path: ${{ runner.temp }}/diag
