@@ -61,9 +61,9 @@ jobs:
             ForEach-Object { "{0}`t{1}`t{2}`t{3}" -f $_.Name, $_.State, $_.DelayedAutoStart, $_.PathName } | Set-Content "$out/services-auto.txt"
           Get-ScheduledTask | Where-Object { $_.State -ne 'Disabled' -and ($_.Triggers | Where-Object { $_.CimClass.CimClassName -match 'Boot|Logon|Idle|SessionState' }) } |
             ForEach-Object { "{0}{1}`t{2}" -f $_.TaskPath, $_.TaskName, (($_.Triggers | ForEach-Object { $_.CimClass.CimClassName }) -join ',') } | Sort-Object | Set-Content "$out/tasks-startup.txt"
-          foreach ($k in 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run','HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run') {
+          & { foreach ($k in 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run','HKLM:\Software\Microsoft\Windows\CurrentVersion\RunOnce','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Run') {
             "== $k"; (Get-ItemProperty $k -ErrorAction SilentlyContinue | Out-String)
-          } | Set-Content "$out/runkeys.txt"
+          } } | Set-Content "$out/runkeys.txt"
 
           # Processes by CPU, with start time relative to launch
           Get-Process | Sort-Object CPU -Descending | Select-Object -First 40 | ForEach-Object {
