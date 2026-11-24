@@ -339,7 +339,7 @@ class UbuntuTemplateTest < Minitest::Test
     assert_includes test_workflow, "set_value<<<1, 1>>>(value)"
     assert_includes test_workflow, "cudaDeviceSynchronize()"
     assert_includes test_workflow, 'nvcc -arch=native'
-    assert_includes test_workflow, "release 13\\.3"
+    assert_includes test_workflow, "release 13\\.5"
     assert_includes test_workflow, "VsDevCmd.bat"
     assert_includes test_workflow, "windows25-gpu-x64"
     assert_includes test_workflow, 'docker run --rm --gpus all "$cuda_container" nvidia-smi -L'

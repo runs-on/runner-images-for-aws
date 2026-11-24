@@ -505,14 +505,14 @@ jobs:
           $nvcc = if ($nvccCommand) {
             $nvccCommand.Source
           } else {
-            'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3\bin\nvcc.exe'
+            'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.5\bin\nvcc.exe'
           }
           if (-not (Test-Path $nvcc)) {
             throw "nvcc.exe not found at $nvcc"
           }
           $nvccVersion = (& $nvcc --version | Out-String)
-          if ($LASTEXITCODE -ne 0 -or $nvccVersion -notmatch 'release 13\.3') {
-            throw "Expected CUDA 13.3, got: $nvccVersion"
+          if ($LASTEXITCODE -ne 0 -or $nvccVersion -notmatch 'release 13\.5') {
+            throw "Expected CUDA 13.5, got: $nvccVersion"
           }
 
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
