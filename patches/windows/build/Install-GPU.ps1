@@ -8,13 +8,16 @@ $markerFile = Join-Path $markerDirectory 'gpu-installed.txt'
 $downloadDirectory = Join-Path $markerDirectory 'GPU'
 $driverLogDirectory = Join-Path $downloadDirectory 'Logs'
 $driverInstaller = Join-Path $downloadDirectory 'nvidia-grid-driver.exe'
-$cudaVersion = '12.9.1'
-$cudaVersionLabel = '12.9'
-$cudaInstallerVersion = '576.57'
-$cudaInstallerUrl = 'https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_576.57_windows.exe'
-$cudaInstallerSha256 = 'f0ca7cc7b4cea2fac2c4951819d2a9caea31e04000e9110e2048719525f8ea0e'
-$cudaInstaller = Join-Path $downloadDirectory "cuda_$($cudaVersion)_$($cudaInstallerVersion)_windows.exe"
+# The base image ships Visual Studio 2026 (MSVC 19.5x), which nvcc accepts
+# as a host compiler from CUDA 13.2. CUDA 13.x runs on R580+ drivers.
+$cudaVersion = '13.3.1'
+$cudaVersionLabel = '13.3'
+$cudaInstallerUrl = 'https://developer.download.nvidia.com/compute/cuda/13.3.1/local_installers/cuda_13.3.1_windows.exe'
+$cudaInstallerSha256 = 'd68839fcce644576f0a1c6b066e0c5bc146a62db2fcac9fc6b4e6418e7ec533f'
+$cudaInstaller = Join-Path $downloadDirectory "cuda_$($cudaVersion)_windows.exe"
+# CUDA 13 split the compiler's crt headers out of nvcc into their own subpackage.
 $cudaInstallerSubpackages = @(
+    "crt_$cudaVersionLabel",
     "cudart_$cudaVersionLabel",
     "nvcc_$cudaVersionLabel",
     "visual_studio_integration_$cudaVersionLabel"
