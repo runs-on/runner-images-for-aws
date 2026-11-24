@@ -1,5 +1,6 @@
 name: Reproductions
 
+# TEMPORARY (PR #135): find why nvcc 13.3 crashes (cudafe++ ACCESS_VIOLATION) with VS 2026.
 on:
   workflow_dispatch:
 
@@ -7,239 +8,73 @@ permissions:
   contents: read
 
 jobs:
-  php-ubuntu24-arm64:
-    name: Fast PHP installs on ubuntu24-full-arm64
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-arm64/image=ubuntu24-dev-arm64
+  cuda-vs2026:
+    name: CUDA vs VS 2026 on windows25-gpu-x64
+    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/volume=60g/family=g4dn/cpu=4/ami=ami-006f33d2cc35fbba9
+    timeout-minutes: 60
     steps:
-      - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - name: Show PHP defaults
-        run: |
-          command -v php || true
-          php -v || true
-      - name: Setup PHP 8.3
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
-        with:
-          php-version: "8.3"
-      - name: Check PHP 8.3
-        run: php -v
-      - name: Setup PHP 8.4
-        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
-        with:
-          php-version: "8.4"
-      - name: Check PHP 8.4
-        run: php -v
-
-  git-lfs-ubuntu24-arm64:
-    name: git-lfs on ubuntu24-full-arm64
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-arm64/image=ubuntu24-dev-arm64
-    steps:
-      - name: Check git-lfs is available
-        run: |
-          command -v git-lfs
-          git-lfs version
-
-  imageos-ubuntu24-x64:
-    name: ImageOS/ImageVersion on ubuntu24-full-x64
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-x64/image=ubuntu24-full-x64
-    steps:
-      - name: Check ImageOS and ImageVersion env vars
-        run: |
-          echo "ImageOS=$ImageOS"
-          echo "ImageVersion=$ImageVersion"
-          test -n "$ImageOS" || (echo "ERROR: ImageOS is not set" && exit 1)
-          test -n "$ImageVersion" || (echo "ERROR: ImageVersion is not set" && exit 1)
-
-  issue-61-apt-cdn-ubuntu24-full-x64:
-    name: issue 61 CDN apt mirror on ubuntu24-full-x64
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-x64/image=ubuntu24-dev-x64
-    steps:
-      - name: Check apt mirror and acquire settings
-        run: |
-          set -euo pipefail
-
-          sources=()
-          [ ! -f /etc/apt/sources.list ] || sources+=(/etc/apt/sources.list)
-          [ ! -f /etc/apt/sources.list.d/ubuntu.sources ] || sources+=(/etc/apt/sources.list.d/ubuntu.sources)
-          if [ "${#sources[@]}" -eq 0 ]; then
-            echo "No apt sources found" >&2
-            exit 1
-          fi
-
-          sed -n '1,120p' "${sources[@]}"
-          if ! grep -E 'https://archive\.ubuntu\.com/ubuntu/?' "${sources[@]}"; then
-            echo "Expected apt sources to use archive.ubuntu.com" >&2
-            exit 1
-          fi
-          if grep -E 'https?://[^/]+\.ec2\.(archive|ports)\.ubuntu\.com/' "${sources[@]}"; then
-            echo "Found a regional EC2 apt mirror" >&2
-            exit 1
-          fi
-
-          apt-config dump | grep -Fx 'Acquire::Retries "5";'
-          apt-config dump | grep -Fx 'Acquire::http::Timeout "20";'
-          apt-config dump | grep -Fx 'Acquire::https::Timeout "20";'
-          sudo apt-get update -y
-
-  issue-31-runner-home-path-ubuntu24-full-x64:
-    name: issue 31 runner HOME paths on ubuntu24-full-x64
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-x64/image=ubuntu24-dev-x64
-    steps:
-      - name: Check runner HOME paths and tools
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          literal_home="\$HOME"
-          if grep -qF "${literal_home}" /etc/environment; then
-            echo "/etc/environment contains a literal ${literal_home}" >&2
-            exit 1
-          fi
-
-          case "${PATH}" in
-            *"${literal_home}"*) echo "PATH contains a literal ${literal_home}" >&2; exit 1 ;;
-          esac
-
-          for expected in \
-            /home/runner/.local/bin \
-            /home/runner/.cargo/bin \
-            /home/runner/.config/composer/vendor/bin \
-            /home/runner/.dotnet/tools; do
-            case ":${PATH}:" in
-              *":${expected}:"*) ;;
-              *) echo "PATH is missing ${expected}" >&2; exit 1 ;;
-            esac
-          done
-
-          command -v cargo
-          command -v rustup
-          command -v dotnet
-
-  issue-41-ubuntu24-gpu-arm64:
-    name: issue 41 Ubuntu 24 GPU ARM64 on g5g
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=4cpu-linux-arm64/image=ubuntu24-gpu-arm64/family=g5g
-    steps:
-      - name: Check native CUDA 13 and the open driver
-        run: |
-          set -euo pipefail
-          test "$(dpkg --print-architecture)" = arm64
-          nvcc --version | grep -F "release 13.0"
-          modinfo -F license nvidia | grep -F "Dual MIT/GPL"
-          nvidia-smi
-          nvidia-smi -L
-      - name: Check CUDA 13 container access
-        run: docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi -L
-
-  issue-46-ubuntu24-cuda13-x64:
-    name: issue 46 CUDA 13 on Ubuntu 24 GPU x64
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=4cpu-linux-x64/image=ubuntu24-gpu-x64/family=g4dn
-    steps:
-      - name: Check native CUDA 13
-        run: |
-          set -euo pipefail
-          nvcc --version | grep -F "release 13.0"
-          nvidia-smi
-          nvidia-smi -L
-      - name: Check CUDA 13 container access
-        run: docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi -L
-
-  issue-55-ubuntu24-blackwell-x64:
-    name: issue 55 Ubuntu 24 open driver on Blackwell
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=8cpu-linux-x64/image=ubuntu24-gpu-x64/family=g7e
-    steps:
-      - name: Check Blackwell with the open driver
-        run: |
-          set -euo pipefail
-          modinfo -F license nvidia | grep -F "Dual MIT/GPL"
-          nvidia-smi --query-gpu=name --format=csv,noheader | grep -i blackwell
-          nvidia-smi -L
-      - name: Check CUDA 13 container access
-        run: docker run --rm --gpus all nvidia/cuda:13.0.2-base-ubuntu24.04 nvidia-smi -L
-
-  issue-19-windows25-hyperv-vs-cpp:
-    name: issue-19 windows25 Hyper-V + VS + C++
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/image=windows25-dev-x64/family=m8i
-    steps:
-      - name: Check Visual Studio install
+      - name: Diagnose
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Continue'
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          if (-not (Test-Path $vswhere)) { throw "vswhere.exe not found at $vswhere" }
-          $installPath = (& $vswhere -latest -products * -property installationPath | Select-Object -First 1).Trim()
-          if (-not $installPath) { throw "Visual Studio installation path not found" }
-          $devenv = Join-Path $installPath "Common7\IDE\devenv.exe"
-          if (-not (Test-Path $devenv)) { throw "devenv.exe not found at $devenv" }
-          Write-Host "Visual Studio installation path: $installPath"
+          & $vswhere -latest -products * -format text | Select-String 'installationVersion|displayName|catalog_productDisplayVersion'
+          $vs = (& $vswhere -latest -products * -property installationPath | Select-Object -First 1).Trim()
+          $vsDevCmd = Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          Write-Host "== MSVC toolsets"; Get-ChildItem (Join-Path $vs 'VC\Tools\MSVC') | ForEach-Object Name
+          cmd.exe /d /s /c "call `"$vsDevCmd`" -arch=x64 >nul && cl.exe 2>&1 | findstr Version"
+          $nvcc133 = 'C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.3\bin\nvcc.exe'
+          & $nvcc133 --version | Select-String release
 
-      - name: Check C++ toolchain (cl.exe)
-        shell: pwsh
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $installPath = (& $vswhere -latest -products * -property installationPath | Select-Object -First 1).Trim()
-          if (-not $installPath) { throw "Visual Studio installation path not found" }
-          $vsDevCmd = Join-Path $installPath "Common7\Tools\VsDevCmd.bat"
-          if (-not (Test-Path $vsDevCmd)) { throw "VsDevCmd.bat not found at $vsDevCmd" }
-          cmd.exe /c "\"$vsDevCmd\" -arch=x64 >nul && where cl"
-          if ($LASTEXITCODE -ne 0) { throw "cl.exe not found from VS developer command prompt" }
+          $d = $env:RUNNER_TEMP
+          '__global__ void k(int* v) { *v = 42; }' | Set-Content "$d\a.cu" -Encoding ascii
+          "#include <cuda_runtime.h>`n__global__ void k(int* v) { *v = 42; }`nint main() { int* v; cudaMalloc(&v, 4); k<<<1,1>>>(v); return cudaDeviceSynchronize(); }" | Set-Content "$d\b.cu" -Encoding ascii
+          "#include <cstdio>`nint main() { std::printf(`"hi\n`"); return 0; }" | Set-Content "$d\c.cu" -Encoding ascii
+          "#include <cuda_runtime.h>`n#include <cstdio>`n__global__ void k(int* v) { *v = 42; }`nint main() { int* v; cudaMallocManaged(&v, 4); k<<<1,1>>>(v); cudaDeviceSynchronize(); std::printf(`"%d\n`", *v); return *v == 42 ? 0 : 1; }" | Set-Content "$d\d.cu" -Encoding ascii
 
-      - name: Check issue-19 package set
-        shell: pwsh
-        run: |
-          $required = @("bash", "cargo", "rustc", "pwsh", "AzureSignTool")
-          foreach ($tool in $required) {
-            $found = Get-Command $tool -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($null -eq $found) { throw "$tool was not found on PATH" }
-            Write-Host "$tool => $($found.Source)"
+          function Try-Compile($label, $nvcc, $src, $extra) {
+            $out = "$d\$label.exe"
+            $r = cmd.exe /d /s /c "call `"$vsDevCmd`" -arch=x64 >nul && `"$nvcc`" -arch=sm_75 $extra `"$src`" -o `"$out`" 2>&1"
+            $code = $LASTEXITCODE
+            Write-Host "== RESULT $label exit=$code"
+            $r | Select-Object -Last 6 | ForEach-Object { Write-Host "   $_" }
+            if ($code -eq 0 -and (Test-Path $out)) { $o = & $out 2>&1; Write-Host "   run exit=$LASTEXITCODE out=$o" }
           }
-          pwsh --version
-          cargo --version
-          rustc --version
-          AzureSignTool --version
+          Try-Compile '133-nohdr' $nvcc133 "$d\a.cu" '-c'
+          Try-Compile '133-cudart' $nvcc133 "$d\b.cu" ''
+          Try-Compile '133-cstdio' $nvcc133 "$d\c.cu" ''
+          Try-Compile '133-smoke' $nvcc133 "$d\d.cu" ''
+          Try-Compile '133-smoke-cpp17' $nvcc133 "$d\d.cu" '-std=c++17'
+          Try-Compile '133-smoke-keep' $nvcc133 "$d\d.cu" '-Xcudafe --display_error_number'
 
-      - name: Check Hyper-V feature states
-        shell: pwsh
-        run: |
-          $serverFeatures = @("Hyper-V", "Hyper-V-PowerShell")
-          foreach ($feature in $serverFeatures) {
-            $state = (Get-WindowsFeature -Name $feature).InstallState
-            Write-Host "$feature=$state"
-            if ($state -ne "Installed") { throw "$feature is not Installed" }
+          Write-Host "== latest CUDA redist"
+          $base = 'https://developer.download.nvidia.com/compute/cuda/redist/'
+          $index = (Invoke-WebRequest $base -UseBasicParsing).Content
+          $vers = [regex]::Matches($index, 'redistrib_(13\.\d+\.\d+)\.json') | ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique { [version]$_ }
+          Write-Host "13.x redists: $($vers -join ', ')"
+          $latest = $vers | Select-Object -Last 1
+          $json = Invoke-RestMethod "$base/redistrib_$latest.json"
+          $root = "C:\cuda-$latest"
+          New-Item -ItemType Directory -Force $root | Out-Null
+          foreach ($p in 'cuda_nvcc','cuda_crt','cuda_cudart','cuda_nvvm','libnvvm') {
+            $pkg = $json.$p
+            if (-not $pkg) { Write-Host "no package $p"; continue }
+            $rel = $pkg.'windows-x86_64'.relative_path
+            Write-Host "$p $($pkg.version) $rel"
+            $zip = "$d\$p.zip"
+            Invoke-WebRequest "$base/$rel" -OutFile $zip -UseBasicParsing
+            $x = "$d\x-$p"; Expand-Archive $zip $x -Force
+            $top = Get-ChildItem $x | Select-Object -First 1
+            Copy-Item "$($top.FullName)\*" $root -Recurse -Force
           }
-          $optionalState = (Get-WindowsOptionalFeature -Online -FeatureName "HypervisorPlatform").State
-          Write-Host "HypervisorPlatform=$optionalState"
-          if ($optionalState -ne "Enabled") { throw "HypervisorPlatform is not Enabled" }
+          Try-Compile "$latest-smoke" "$root\bin\nvcc.exe" "$d\d.cu" ''
+          Try-Compile "$latest-cstdio" "$root\bin\nvcc.exe" "$d\c.cu" ''
 
-      - name: Hyper-V diagnostics (systeminfo)
-        shell: pwsh
-        run: |
-          systeminfo
-
-  journal-access-ubuntu24-full-x64:
-    name: runner reads the volatile journal on ubuntu24-full-x64
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-x64/image=ubuntu24-full-x64
-    steps:
-      - name: Read the journal as the runner user
-        run: |
-          set -euo pipefail
-          id
-          ls -la /run/log/journal/*/ || true
-          id -nG | tr ' ' '\n' | grep -qx systemd-journal
-          logger -t runs-on-journal-check "hello from $(id -un)"
-          sleep 1
-          journalctl -t runs-on-journal-check --no-pager | grep -q "hello from runner"
-
-  issue-116-apparmor-stacking:
-    name: issue 116 docker-default stacked on ${{ matrix.image }}
-    runs-on: runs-on=${{ github.run_id }}/env=bootstrap/runner=2cpu-linux-${{ matrix.arch }}/image=${{ matrix.image }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - { image: ubuntu26-full-x64, arch: x64 }
-          - { image: ubuntu26-full-arm64, arch: arm64 }
-          - { image: ubuntu24-full-x64, arch: x64 }
-    steps:
-      - name: Checkout
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - name: Reproduce the signal denial and try each fix
-        run: test/reproductions/issue-116-apparmor-stacking.sh
+          Write-Host "== installer for $latest"
+          $installer = "https://developer.download.nvidia.com/compute/cuda/$latest/local_installers/cuda_${latest}_windows.exe"
+          try {
+            $f = "$d\cuda_installer.exe"
+            Invoke-WebRequest $installer -OutFile $f -UseBasicParsing
+            Write-Host "$installer sha256=$((Get-FileHash $f -Algorithm SHA256).Hash.ToLower()) size=$((Get-Item $f).Length)"
+          } catch { Write-Host "installer download failed: $_" }
+          exit 0
