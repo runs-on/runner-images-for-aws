@@ -17,7 +17,10 @@ release_dir="$RELEASE_DIR"
 build_dir="$release_dir/images/windows/scripts/build"
 tests_dir="$release_dir/images/windows/scripts/tests"
 toolsets_dir="$release_dir/images/windows/toolsets"
-TOOLSET_PATH="$toolsets_dir/toolset-2025.json"
+# windows25-full-x64 builds the recipe GitHub's windows-2025 label uses
+# (upstream_windows in config.yml, checked by bin/check-upstream-windows):
+# windows-2025-vs2026, with Visual Studio 2026.
+TOOLSET_PATH="$toolsets_dir/toolset-2025-vs2026.json"
 
 # restore patched build scripts
 cp patches/windows/build/Install-Runner.ps1 "$release_dir/images/windows/scripts/build/"
@@ -66,6 +69,12 @@ fi
 gnu_sed -i 's|throw "Failed to warmup|# removed: throw "Failed to warmup|' $build_dir/Configure-User.ps1
 gnu_sed -i 's|throw "Failed to copy HKCU|# removed: throw "Failed to copy HKCU|' $build_dir/Configure-User.ps1
 
+# retry GitHub release listings: api.github.com answers 504 now and then, and
+# one failed page fails the whole build (Install-WSL2, Install-Zstd, ...)
+helpers_dir="$release_dir/images/windows/scripts/helpers"
+grep -q 'Invoke-RestMethod -Uri "https://api.github.com/repos/${Repository}/releases' "$helpers_dir/InstallHelpers.ps1" || { echo "GitHub releases call not found in InstallHelpers.ps1" >&2; exit 1; }
+perl -pi -e 's/^(\s*)\$releasesPage = Invoke-RestMethod -Uri (".*?")\s*$/$1\$releasesPage = Invoke-ScriptBlockWithRetry -RetryCount 5 -RetryIntervalSeconds 30 -Command { Invoke-RestMethod -Uri $2 }\n/' "$helpers_dir/InstallHelpers.ps1"
+
 # allow clobber for powershell modules already installed
 gnu_sed -i 's|Install-Module -Name|Install-Module -AllowClobber -Name|' $build_dir/Install-PowerShellModules.ps1
 
@@ -98,9 +107,7 @@ yq -oj -i 'eval(.toolcache[] | select(.name == "Ruby") | .versions |= [.[-1]])' 
 yq -oj -i 'eval(.toolcache[] | select(.name == "Ruby") | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
 
 
-# python (incorrectly duplicated in original toolset file)
-yq -oj -i 'eval(.toolcache[] | select(.name == "Python" and has("default")) | .versions |= [.[-1]])' $TOOLSET_PATH
-yq -oj -i 'eval(.toolcache[] | select(.name == "Python" and has("default")) | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
+# python: keep upstream's versions and default (3.12 today), like windows-latest
 
 # only keep one last pypy version
 yq -oj -i 'eval(.toolcache[] | select(.name == "PyPy") | .versions |= [.[-1]])' $TOOLSET_PATH
@@ -109,8 +116,7 @@ yq -oj -i 'eval(.toolcache[] | select(.name == "PyPy") | .versions |= [.[-1]])' 
 yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .versions |= [.[-1]])' $TOOLSET_PATH
 yq -oj -i 'eval(.toolcache[] | select(.name == "go") | .default |= (parent | .versions[-1]))' $TOOLSET_PATH
 
-# only keep latest dotnet version
-yq -oj -i 'eval(.dotnet | .versions |= [.[-1]])' $TOOLSET_PATH
+# dotnet: keep upstream's SDKs (8.0 to 11.0 today), like windows-latest
 
 # keep AzureSignTool available for Windows signing workflows (issue #19)
 yq -oj -i 'eval(.dotnet.tools += [{"name":"AzureSignTool","test":"AzureSignTool --version","getversion":"AzureSignTool --version"}] | .dotnet.tools |= unique_by(.name))' $TOOLSET_PATH
@@ -127,7 +133,7 @@ yq -oj -i 'eval(.java | .versions |= [(parent | .default)])' $TOOLSET_PATH
 # only keep the default android ndk version
 yq -oj -i 'eval(.android.ndk | .versions |= [(parent | .default)])' $TOOLSET_PATH
 
-# lean Visual Studio profile for Windows 2025: remove Android/mobile/game/UWP-heavy workloads
+# lean Visual Studio 2026 profile for Windows 2025: remove Android/mobile/game/UWP-heavy workloads
 yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Component.UnityEngine.x64"))' $TOOLSET_PATH
 yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Component.UWP.VC.ARM64"))' $TOOLSET_PATH
 yq -oj -i 'del(.visualStudio.workloads[] | select(. == "Microsoft.VisualStudio.Component.UWP.VC.ARM64EC"))' $TOOLSET_PATH

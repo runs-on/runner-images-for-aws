@@ -8,15 +8,20 @@ $markerFile = Join-Path $markerDirectory 'gpu-installed.txt'
 $downloadDirectory = Join-Path $markerDirectory 'GPU'
 $driverLogDirectory = Join-Path $downloadDirectory 'Logs'
 $driverInstaller = Join-Path $downloadDirectory 'nvidia-grid-driver.exe'
-$cudaVersion = '12.9.1'
-$cudaVersionLabel = '12.9'
-$cudaInstallerVersion = '576.57'
-$cudaInstallerUrl = 'https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_576.57_windows.exe'
-$cudaInstallerSha256 = 'f0ca7cc7b4cea2fac2c4951819d2a9caea31e04000e9110e2048719525f8ea0e'
-$cudaInstaller = Join-Path $downloadDirectory "cuda_$($cudaVersion)_$($cudaInstallerVersion)_windows.exe"
+# The base image ships Visual Studio 2026 (MSVC 19.5x). nvcc accepts it from
+# CUDA 13.2, but cudafe++ up to 13.3 crashes (ACCESS_VIOLATION) with MSVC 19.52
+# (VS 2026 18.12); 13.5 works. CUDA 13.x runs on R580+ drivers.
+$cudaVersion = '13.5.0'
+$cudaVersionLabel = '13.5'
+$cudaInstallerUrl = 'https://developer.download.nvidia.com/compute/cuda/13.5.0/local_installers/cuda_13.5.0_windows_x86_64.exe'
+$cudaInstallerSha256 = '7788a8581fe50ff29e9df507c44a2a9d1ae3b6b0fe2de3c7e4d8fa3c2d12f292'
+$cudaInstaller = Join-Path $downloadDirectory "cuda_$($cudaVersion)_windows.exe"
+# CUDA 13 split the compiler's crt headers and NVVM out of nvcc into their own subpackages.
 $cudaInstallerSubpackages = @(
+    "crt_$cudaVersionLabel",
     "cudart_$cudaVersionLabel",
     "nvcc_$cudaVersionLabel",
+    "nvvm_$cudaVersionLabel",
     "visual_studio_integration_$cudaVersionLabel"
 )
 $driverBucketUrl = 'https://ec2-windows-nvidia-drivers.s3.amazonaws.com'

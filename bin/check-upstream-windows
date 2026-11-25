@@ -1,0 +1,75 @@
+#!/usr/bin/env ruby
+
+# Fails when upstream actions/runner-images moves GitHub's windows-2025 label
+# to another recipe, or adds or removes a Windows template, so that
+# windows25-full-x64 keeps following windows-2025 on purpose. The expected
+# state is upstream_windows in config.yml. Run by the daily upstream lock job.
+
+require "fileutils"
+require "tmpdir"
+require "yaml"
+
+module UpstreamWindows
+  module_function
+
+  LABEL = "windows-2025"
+
+  # The recipe the README's image table gives for label, from the row that
+  # lists it, such as `windows-latest`, `windows-2025`, ... | [windows-2025-vs2026] |.
+  def recipe_for(readme, label)
+    readme.each_line do |line|
+      next unless line.start_with?("|") && line.include?("`#{label}`")
+
+      recipe = line[/\[([^\]]+)\]\s*\|\s*\z/, 1]
+      return recipe if recipe
+    end
+    nil
+  end
+
+  def drift(expected, readme:, templates:)
+    problems = []
+    recipe = recipe_for(readme, LABEL)
+    if recipe != expected.fetch(LABEL)
+      problems << "GitHub's #{LABEL} label now uses #{recipe || 'no recipe found in the README'}, " \
+                  "not #{expected.fetch(LABEL)}: move windows25-full-x64 (template, " \
+                  "bin/patch/windows25-x64) to it and update upstream_windows in config.yml."
+    end
+
+    known = expected.fetch("templates").sort
+    added = templates.sort - known
+    removed = known - templates.sort
+    unless added.empty? && removed.empty?
+      changes = [("added #{added.join(', ')}" unless added.empty?),
+                 ("removed #{removed.join(', ')}" unless removed.empty?)].compact.join("; ")
+      problems << "Upstream Windows templates changed (#{changes}): a new recipe often " \
+                  "precedes a label move. Review it, then update upstream_windows.templates in config.yml."
+    end
+    problems
+  end
+end
+
+if __FILE__ == $PROGRAM_NAME
+  config = YAML.load_file(File.expand_path("../config.yml", __dir__))
+  lock = YAML.safe_load_file(File.expand_path("../upstream.lock.yml", __dir__))
+  revision = lock.fetch("revision")
+  fail("Invalid locked upstream revision: #{revision}") unless revision.match?(/\A[0-9a-f]{40}\z/)
+
+  Dir.mktmpdir do |repo_dir|
+    system("git", "init", "-q", repo_dir) || fail("Failed to initialize upstream checkout")
+    system("git", "-C", repo_dir, "remote", "add", "origin", lock.fetch("repository")) || fail("Failed to configure upstream checkout")
+    system("git", "-C", repo_dir, "fetch", "-q", "--depth", "1", "origin", revision) || fail("Failed to fetch #{revision}")
+    system("git", "-C", repo_dir, "checkout", "-q", "--detach", "FETCH_HEAD") || fail("Failed to check out #{revision}")
+
+    problems = UpstreamWindows.drift(
+      config.fetch("upstream_windows"),
+      readme: File.read(File.join(repo_dir, "README.md")),
+      templates: Dir.children(File.join(repo_dir, "images/windows/templates")).grep(/\Abuild\..*\.pkr\.hcl\z/)
+    )
+    if problems.empty?
+      puts "Upstream #{revision}: #{UpstreamWindows::LABEL} uses #{config.dig('upstream_windows', UpstreamWindows::LABEL)}, Windows templates unchanged"
+    else
+      problems.each { |problem| warn "::error::#{problem}" }
+      exit 1
+    end
+  end
+end
