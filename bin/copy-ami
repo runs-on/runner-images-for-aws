@@ -8,6 +8,7 @@ require 'io/console'
 require 'fileutils'
 require 'time'
 require_relative '../lib/build_provenance'
+require_relative '../lib/ami_retention'
 
 module CopyAmi
   module_function
@@ -203,6 +204,7 @@ module CopyAmi
     return [] unless image.respond_to?(:tags)
 
     image.tags.to_a.filter_map do |tag|
+      next if tag.key == AmiRetention::PUBLISHED_AT_TAG
       next if strip_provenance && [BuildProvenance::TAG_DIGEST, BuildProvenance::TAG_URI].include?(tag.key)
 
       { key: tag.key, value: tag.value }
@@ -284,6 +286,7 @@ module CopyAmi
     image_id = existing_image&.image_id
 
     if existing_image&.public && existing_image&.state == "available"
+      record_publication(ec2, existing_image)
       out.puts "AMI #{image_id} already exists and is public in #{region}, skipping"
       return build_result(region: region, status: "already public", success: true, image_id: image_id, image_state: existing_image.state, public: existing_image.public, snapshot_id: snapshot_id_for_image(existing_image))
     end
@@ -304,6 +307,7 @@ module CopyAmi
 
     refreshed_image = find_image_by_id(ec2, image_id)
     success = refreshed_image&.state == "available" && refreshed_image&.public
+    record_publication(ec2, refreshed_image) if success
     status = success ? "published" : "publish incomplete"
 
     build_result(
@@ -325,6 +329,13 @@ module CopyAmi
   rescue StandardError => e
     diagnostic = region_diagnostics(ec2, image_id: image_id, image_name: target_name)
     build_result(region: region, status: "error", success: false, error: e.message, **diagnostic)
+  end
+
+  def record_publication(ec2, image)
+    return if AmiRetention.published_at(image)
+
+    ec2.create_tags(resources: [image.image_id],
+                    tags: [{ key: AmiRetention::PUBLISHED_AT_TAG, value: Time.now.utc.iso8601 }])
   end
 
   def copy_image(ec2, source_ami_id, target_name, region, copy_tags, out)
